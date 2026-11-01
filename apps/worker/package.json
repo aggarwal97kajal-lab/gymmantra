@@ -1,0 +1,27 @@
+{
+  "name": "@gymmantra/worker",
+  "version": "0.2.0",
+  "private": true,
+  "scripts": {
+    "build": "node scripts/collect-assets.mjs",
+    "deploy": "wrangler deploy",
+    "dev": "tsx src/local.ts",
+    "test": "jest --runInBand",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "4.6.10",
+    "jose": "5.9.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20241112.0",
+    "@hono/node-server": "1.13.7",
+    "@types/jest": "29.5.14",
+    "@types/node": "22.9.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.2.5",
+    "tsx": "4.19.2",
+    "typescript": "5.6.3",
+    "wrangler": "3.90.0"
+  }
+}
