@@ -1,0 +1,23 @@
+name: devtools-snapshot
+# Packs firebase-tools and the Firestore emulator for the offline dev sandbox (branch devtools).
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/devtools-snapshot.yml"]
+permissions:
+  contents: write
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: |
+          mkdir -p /tmp/ft && cd /tmp/ft
+          npm init -y >/dev/null && npm i firebase-tools@13.29.1 >/dev/null
+          npx firebase setup:emulators:firestore
+          cp ~/.cache/firebase/emulators/cloud-firestore-emulator-*.jar /tmp/ft/
+          tar -czf /tmp/devtools.tgz -C /tmp ft
+          mkdir -p /tmp/snap && split -b 90m /tmp/devtools.tgz /tmp/snap/devtools.tgz.part-
+          cd /tmp/snap && git init -q -b devtools && git config user.name gha && git config user.email gha@github.com
+          git add -A && git commit -qm "firebase-tools snapshot" && git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" devtools
