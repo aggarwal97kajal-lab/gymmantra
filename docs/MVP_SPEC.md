@@ -45,7 +45,7 @@ The app has no online payment and no buy button. Members see their gym's data an
 
 | Screen | What it does |
 | --- | --- |
-| Login | Mobile number and 6-digit SMS OTP. English and Hindi |
+| Login | Sign up with name, email, mobile and password, then log in with email or mobile and password. Or sign up with Google; Google log-in works only for accounts that signed up with Google. 3 wrong passwords lock the account for 15 minutes. Phone OTP comes later |
 | Join gym | Enter the gym code or scan the gym's QR poster, pick a branch, send a join request. Skip to use the app without a gym |
 | Home | Today's workout, streak, weight trend, membership days left |
 | My membership | Plan, days left, start and end dates, amount paid, payment mode, "Updated by your gym" with staff name and date. Call gym and WhatsApp buttons. Expired and no-plan states |
@@ -84,6 +84,7 @@ Push notifications in the MVP: membership added or renewed, membership ending in
 | Ending soon | End date is 0–7 days away |
 | Expired | End date has passed |
 | No plan | Member approved but no membership added yet |
+| Frozen | Today falls inside a freeze. Check-in is blocked |
 
 **Attendance**
 
@@ -129,7 +130,7 @@ The stack follows the original brief, trimmed to what the MVP uses.
 | Admin panel | Next.js, TypeScript, Tailwind CSS |
 | Backend | NestJS modular monolith, REST under /api/v1, background jobs on Redis |
 | Database | PostgreSQL with Prisma, migrations, row-level security per gym |
-| Login | Firebase Authentication with phone OTP |
+| Login | Email/mobile + password (bcrypt), Google sign-in (ID token verified on the server). Phone OTP later |
 | Push | Firebase Cloud Messaging |
 | WhatsApp | Official WhatsApp Business API for receipts and renewal reminders |
 | Files | S3-compatible storage with signed URLs for profile photos and ticket screenshots |
@@ -157,7 +158,7 @@ These features from the original brief move to later phases, so the pilot can la
 
 The build runs in four phases, admin side first, because the member app only shows data the gym has entered.
 
-1. **Phase 1 — Backend (NestJS + PostgreSQL):** auth (phone OTP), tenants, branches, staff, members, join requests, plans, manual memberships, attendance, tickets, audit log.
+1. **Phase 1 — Backend (NestJS + PostgreSQL):** auth (password + Google), tenants, branches, staff, members, join requests, plans, manual memberships, attendance, tickets, audit log.
 2. **Phase 2 — Admin panel (Next.js):** the six admin screens plus staff, gym profile, gym code/QR poster, and the super admin SaaS plans screen.
 3. **Phase 3 — Pilot:** Lifetime Fitness and Athlete Gym (Dwarka Sector 7) use the admin panel daily.
 4. **Gate:** 30 days of daily use by a pilot gym.
@@ -199,6 +200,6 @@ The GymMantra super admin manages the plans gyms pay for, whenever and however t
 - [x] Discounts: both the owner and front desk staff can give discounts.
 - [x] Gym pricing: first 3 months free, then the plans in Pricing above.
 - [ ] App name chosen: GymMantra. Still to check: the .in and .com domains, Play Store and App Store listings, and a trademark search.
-- [ ] Are "Not paid yet" members allowed in at the door?
-- [ ] Freeze membership: needed in the MVP or Phase 2?
-- [ ] Who owns the WhatsApp Business number: GymMantra or each gym?
+- [x] "Not paid yet": the admin decides for each membership whether the member may enter (with a gym-wide default in Settings).
+- [x] Freeze membership is in the MVP: up to the plan's freeze days, blocks check-in while frozen, moves the end date; ending early returns unused days.
+- [x] Each gym uses its own WhatsApp Business number. Reminders and receipts open WhatsApp from the gym's number with the message ready.
