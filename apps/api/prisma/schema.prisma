@@ -1,0 +1,378 @@
+// GymMantra MVP data model.
+// Every gym-owned table carries tenantId. The API scopes every query by the
+// tenant taken from the signed-in user's session, never from the client.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  SUSPENDED
+}
+
+enum StaffRole {
+  OWNER
+  FRONT_DESK
+}
+
+enum JoinStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  CARD
+  BANK_TRANSFER
+  NOT_PAID
+}
+
+enum SubscriptionKind {
+  NEW
+  RENEWAL
+  CORRECTION
+}
+
+enum AttendanceResult {
+  ALLOWED
+  WARNED
+  BLOCKED
+}
+
+enum CheckinMethod {
+  QR
+  MANUAL
+}
+
+enum TicketStatus {
+  OPEN
+  RESOLVED
+}
+
+enum TicketRoute {
+  GYM
+  GYMMANTRA
+}
+
+model User {
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  email            String?   @unique
+  phone            String?   @unique
+  passwordHash     String?
+  googleSub        String?   @unique
+  photoUrl         String?
+  language         String    @default("en")
+  isSuperAdmin     Boolean   @default(false)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  staff         Staff[]
+  members       Member[]
+  joinRequests  JoinRequest[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model SaasPlan {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  monthlyPrice  Int
+  annualPrice   Int
+  memberLimit   Int? // null = unlimited
+  branchLimit   Int      @default(1)
+  staffLimit    Int      @default(5)
+  whatsappLimit Int      @default(0)
+  features      String[]
+  visible       Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenants Tenant[]
+
+  @@map("saas_plans")
+}
+
+model PlatformSetting {
+  id          Int @id @default(1)
+  trialMonths Int @default(3)
+
+  @@map("platform_settings")
+}
+
+model Tenant {
+  id                    String       @id @default(uuid()) @db.Uuid
+  name                  String
+  gymCode               String       @unique
+  logoUrl               String?
+  phone                 String?
+  address               String?
+  status                TenantStatus @default(TRIAL)
+  verified              Boolean      @default(false)
+  trialEndsAt           DateTime?
+  saasPlanId            String?      @db.Uuid
+  saasPlan              SaasPlan?    @relation(fields: [saasPlanId], references: [id])
+  customMonthlyPrice    Int?
+  // Each gym uses its own WhatsApp Business number. Members see it in the
+  // app; reminders and receipts open WhatsApp on the staff phone.
+  whatsappNumber        String?
+  // Default for "Not paid yet" memberships: let them in or not. Staff can
+  // override per membership.
+  allowEntryWhenDue     Boolean      @default(false)
+  memberCodePrefix      String       @default("GM")
+  nextMemberNumber      Int          @default(1001)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  branches     Branch[]
+  staff        Staff[]
+  members      Member[]
+  plans        MembershipPlan[]
+  joinRequests JoinRequest[]
+
+  @@map("tenants")
+}
+
+model Branch {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  name      String
+  address   String?
+  hours     String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("gym_branches")
+}
+
+model Staff {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @db.Uuid
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id])
+  role      StaffRole
+  branchIds String[]  @db.Uuid
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  @@unique([tenantId, userId])
+  @@map("gym_staff")
+}
+
+model Member {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  userId     String?  @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id])
+  memberCode String
+  name       String
+  phone      String
+  email      String?
+  gender     String?
+  branchId   String?  @db.Uuid
+  joinedOn   DateTime @db.Date
+  notes      String?
+  archived   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  subscriptions Subscription[]
+  attendance    AttendanceEvent[]
+
+  @@unique([tenantId, memberCode])
+  @@unique([tenantId, phone])
+  @@index([tenantId, name])
+  @@map("gym_members")
+}
+
+model JoinRequest {
+  id          String     @id @default(uuid()) @db.Uuid
+  tenantId    String     @db.Uuid
+  tenant      Tenant     @relation(fields: [tenantId], references: [id])
+  userId      String     @db.Uuid
+  user        User       @relation(fields: [userId], references: [id])
+  branchId    String?    @db.Uuid
+  status      JoinStatus @default(PENDING)
+  decidedById String?    @db.Uuid
+  decidedAt   DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([tenantId, status])
+  @@map("join_requests")
+}
+
+model MembershipPlan {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  name       String
+  months     Int
+  price      Int
+  joiningFee Int      @default(0)
+  freezeDays Int      @default(0)
+  features   String[]
+  showInApp  Boolean  @default(true)
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("membership_plans")
+}
+
+// Insert-only. A correction is a new row that points at the row it replaces.
+model Subscription {
+  id                 String           @id @default(uuid()) @db.Uuid
+  tenantId           String           @db.Uuid
+  memberId           String           @db.Uuid
+  member             Member           @relation(fields: [memberId], references: [id])
+  planId             String?          @db.Uuid
+  planName           String
+  months             Int
+  startDate          DateTime         @db.Date
+  endDate            DateTime         @db.Date
+  price              Int
+  joiningFee         Int              @default(0)
+  discount           Int              @default(0)
+  total              Int
+  freezeDaysAllowed  Int              @default(0)
+  allowEntryWhileDue Boolean          @default(false)
+  kind               SubscriptionKind
+  replacesId         String?          @db.Uuid
+  note               String?
+  createdById        String           @db.Uuid
+  createdAt          DateTime         @default(now())
+
+  payments Payment[]
+  freezes  Freeze[]
+
+  @@index([tenantId, memberId])
+  @@map("member_subscriptions")
+}
+
+model Payment {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @db.Uuid
+  subscriptionId String       @db.Uuid
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  amount         Int
+  mode           PaymentMode
+  receivedById   String       @db.Uuid
+  receivedAt     DateTime     @default(now())
+  note           String?
+
+  @@index([tenantId])
+  @@map("membership_payments")
+}
+
+model Freeze {
+  id             String       @id @default(uuid()) @db.Uuid
+  tenantId       String       @db.Uuid
+  subscriptionId String       @db.Uuid
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
+  memberId       String       @db.Uuid
+  startDate      DateTime     @db.Date
+  days           Int
+  // Set when staff end a freeze early. Only this field is ever updated.
+  endedOn        DateTime?    @db.Date
+  reason         String?
+  createdById    String       @db.Uuid
+  createdAt      DateTime     @default(now())
+
+  @@index([tenantId, memberId])
+  @@map("membership_freezes")
+}
+
+model AttendanceEvent {
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @db.Uuid
+  memberId    String           @db.Uuid
+  member      Member           @relation(fields: [memberId], references: [id])
+  branchId    String?          @db.Uuid
+  scannedAt   DateTime         @default(now())
+  result      AttendanceResult
+  reason      String?
+  method      CheckinMethod
+  scannedById String           @db.Uuid
+
+  @@index([tenantId, scannedAt])
+  @@index([memberId, scannedAt])
+  @@map("attendance_events")
+}
+
+model Ticket {
+  id        String       @id @default(uuid()) @db.Uuid
+  tenantId  String?      @db.Uuid
+  memberId  String?      @db.Uuid
+  userId    String       @db.Uuid
+  topic     String
+  subject   String
+  status    TicketStatus @default(OPEN)
+  routedTo  TicketRoute
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  messages TicketMessage[]
+
+  @@index([tenantId, status])
+  @@map("support_tickets")
+}
+
+model TicketMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  ticketId      String   @db.Uuid
+  ticket        Ticket   @relation(fields: [ticketId], references: [id])
+  authorId      String   @db.Uuid
+  fromStaff     Boolean  @default(false)
+  body          String
+  attachmentUrl String?
+  createdAt     DateTime @default(now())
+
+  @@map("ticket_messages")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  user      User      @relation(fields: [userId], references: [id])
+  tenantId  String?   @db.Uuid
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String?  @db.Uuid
+  actorId   String   @db.Uuid
+  action    String
+  entity    String
+  entityId  String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
