@@ -83,8 +83,22 @@ model User {
   members       Member[]
   joinRequests  JoinRequest[]
   notifications Notification[]
+  photo         UserPhoto?
 
   @@map("users")
+}
+
+// Profile photos are small (resized on the phone) and kept in the database,
+// so the pilot needs no separate file storage. Served only to the member and
+// staff of their gyms.
+model UserPhoto {
+  userId    String   @id @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mime      String
+  data      Bytes
+  updatedAt DateTime @updatedAt
+
+  @@map("user_photos")
 }
 
 model SaasPlan {

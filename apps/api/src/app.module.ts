@@ -11,6 +11,7 @@ import { config } from './common/config';
 import { PrismaModule } from './common/prisma.service';
 import { GymsController } from './gyms/gyms.controller';
 import { MeController } from './me/me.controller';
+import { PhotosController } from './me/photos.controller';
 import { MembersController } from './members/members.controller';
 import { MembershipsController } from './memberships/memberships.controller';
 import { MembershipsService } from './memberships/memberships.service';
@@ -47,6 +48,7 @@ class HealthController {
     GymTicketsController,
     SuperTicketsController,
     MeController,
+    PhotosController,
     SuperController,
   ],
   providers: [

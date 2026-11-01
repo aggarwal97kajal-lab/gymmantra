@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import { existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { config } from './common/config';
+import { mediaDir } from './me/photos.controller';
 
 /** Shared by main.ts and the tests so both run the same app. */
 export function configureApp(app: INestApplication) {
@@ -38,6 +39,10 @@ export function configureApp(app: INestApplication) {
   app.enableCors({ origin: config.adminOrigins, credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   (app.getHttpAdapter().getInstance() as express.Express).set('trust proxy', 1);
+  const media = mediaDir();
+  if (existsSync(media)) {
+    (app.getHttpAdapter().getInstance() as express.Express).use('/media/exercises', express.static(media, { maxAge: '7d', index: false }));
+  }
   serveAdmin(app);
   return app;
 }

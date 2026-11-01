@@ -263,3 +263,28 @@ describe('super admin', () => {
     expect(await prisma.auditLog.count({ where: { action: 'saas_plan.update' } })).toBe(1);
   });
 });
+
+describe('photos and exercises', () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 0xff, 0xd9]).toString('base64');
+
+  it('uploads a profile photo that only the member and their gym staff can see', async () => {
+    const owner = await ownerWithGym('Photo Gym');
+    const mem = await signup('Photo Member');
+    const stranger = await signup('Stranger');
+    const up = await http.post('/api/v1/me/photo').set(auth(mem.token)).send({ mime: 'image/jpeg', base64: JPEG }).expect(201);
+    expect(up.body.photoUrl).toContain(`/api/v1/photos/${mem.user.id}`);
+    await http.get(`/api/v1/photos/${mem.user.id}`).set(auth(mem.token)).expect(200);
+    await http.get(`/api/v1/photos/${mem.user.id}`).set(auth(stranger.token)).expect(403);
+    await http.get(`/api/v1/photos/${mem.user.id}`).set(auth(owner.token)).expect(403);
+    await http.post('/api/v1/me/join').set(auth(mem.token)).send({ gymCode: owner.gym.gymCode }).expect(201);
+    await http.get(`/api/v1/photos/${mem.user.id}`).set(auth(owner.token)).expect(200);
+    await http.post('/api/v1/me/photo').set(auth(mem.token)).send({ mime: 'image/png', base64: JPEG }).expect(400);
+  });
+
+  it('lists the 40 exercise guides', async () => {
+    const r = await http.get('/api/v1/exercises').expect(200);
+    expect(r.body).toHaveLength(40);
+    expect(r.body[0].videoUrl).toMatch(/^\/media\/exercises\/videos\/01_/);
+    await http.get(r.body[0].stillUrl).expect(200);
+  });
+});

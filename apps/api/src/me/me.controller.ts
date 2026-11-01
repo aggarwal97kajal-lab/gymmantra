@@ -31,7 +31,6 @@ class JoinDto {
 class ProfileDto {
   @IsOptional() @IsString() @MinLength(2) @MaxLength(80) name?: string;
   @IsOptional() @IsIn(['en', 'hi']) language?: string;
-  @IsOptional() @IsString() @MaxLength(500) photoUrl?: string;
 }
 class NewTicketDto {
   @IsIn(Object.keys(TICKET_TOPICS)) topic: string;
