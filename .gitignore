@@ -11,3 +11,5 @@ next-env.d.ts
 apps/worker/public/
 .wrangler/
 apps/admin/out/
+firestore-debug.log
+firebase-debug.log

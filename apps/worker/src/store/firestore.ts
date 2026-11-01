@@ -56,8 +56,14 @@ export class FirestoreStore implements Store {
       headers: { Authorization: `Bearer ${await this.token()}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+    const text = await res.text(); // always read the body so the connection is released
     if (res.status === 404 && method === 'GET') return null;
-    const data: any = await res.json().catch(() => ({}));
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      /* not JSON */
+    }
     if (!res.ok) {
       const status = data?.error?.status ?? '';
       if (status === 'ALREADY_EXISTS' || (status === 'FAILED_PRECONDITION' && /exist/i.test(data?.error?.message ?? ''))) throw new AlreadyExists('');
@@ -69,7 +75,9 @@ export class FirestoreStore implements Store {
   }
 
   private async getIn<T>(path: string, transaction?: string): Promise<T | null> {
-    const d = await this.call('GET', `${this.base}/${path}${transaction ? `?transaction=${encodeURIComponent(transaction)}` : ''}`);
+    // Inside a transaction, reads go through batchGet (as the official SDKs do).
+    if (transaction) return (await this.getManyIn<T>([path], transaction))[0];
+    const d = await this.call('GET', `${this.base}/${path}`);
     return d ? (decFields(d.fields ?? {}) as T) : null;
   }
 
