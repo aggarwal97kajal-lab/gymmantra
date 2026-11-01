@@ -1,0 +1,38 @@
+name: deps-snapshot
+# Builds node_modules on a runner (which has internet) and pushes it to the
+# `devdeps` branch as split tarballs, so the dev sandbox can use it offline.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["**/package.json", "pnpm-lock.yaml", ".github/workflows/deps-snapshot.yml"]
+permissions:
+  contents: write
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: pnpm install --no-frozen-lockfile
+      - name: Commit lockfile if changed
+        run: |
+          if ! git diff --quiet pnpm-lock.yaml 2>/dev/null || [ -n "$(git status --porcelain pnpm-lock.yaml)" ]; then
+            git config user.name "github-actions"; git config user.email "actions@github.com"
+            git add pnpm-lock.yaml && git commit -m "chore: update pnpm-lock.yaml [skip ci]" && git push || true
+          fi
+      - name: Pack node_modules
+        run: |
+          mkdir -p /tmp/snap
+          tar -czf /tmp/nm.tgz node_modules apps/*/node_modules 2>/dev/null || tar -czf /tmp/nm.tgz node_modules
+          split -b 90m /tmp/nm.tgz /tmp/snap/nm.tgz.part-
+          ls -la /tmp/snap
+      - name: Push to devdeps branch
+        run: |
+          cd /tmp/snap
+          git init -q -b devdeps
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git add -A && git commit -qm "node_modules snapshot ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" devdeps
