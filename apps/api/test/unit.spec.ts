@@ -45,7 +45,7 @@ describe('status', () => {
   });
   it('not paid yet: blocked unless the admin allowed entry', () => {
     const due = sub({ paid: 0 });
-    expect(entryDecision(computeState([due], '2026-10-10'))).toEqual({ result: 'BLOCKED', reason: 'Payment due ₹1500' });
+    expect(entryDecision(computeState([due], '2026-10-10'))).toEqual({ result: 'BLOCKED', reason: 'Payment due ₹1,500' });
     const allowed = sub({ paid: 0, allowEntryWhileDue: true });
     expect(entryDecision(computeState([allowed], '2026-10-10')).result).toBe('WARNED');
   });

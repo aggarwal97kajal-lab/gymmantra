@@ -1,0 +1,30 @@
+# Render Blueprint: one web service runs the API and serves the admin panel.
+# The database is a free Neon Postgres (paste its connection string when asked).
+services:
+  - type: web
+    name: gymmantra
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: >-
+      corepack enable && pnpm install --no-frozen-lockfile --prod=false &&
+      pnpm --filter @gymmantra/admin build &&
+      pnpm --filter @gymmantra/api build
+    startCommand: cd apps/api && npx prisma migrate deploy && node dist/main.js
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPER_ADMIN_EMAIL
+        sync: false
+      - key: GOOGLE_CLIENT_IDS
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: QR_SECRET
+        generateValue: true

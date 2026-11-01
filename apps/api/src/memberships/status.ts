@@ -30,6 +30,8 @@ export interface SubLike {
 
 export const ENDING_SOON_DAYS = 7;
 
+const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+
 /** Days a freeze actually used (shorter if it was ended early). */
 export function freezeUsedDays(f: FreezeLike): number {
   if (f.endedOn) return Math.max(0, Math.min(f.days, diffDays(f.startDate, f.endedOn)));
@@ -124,11 +126,11 @@ export function entryDecision(state: MemberState): EntryDecision {
   const cur = state.current!;
   const curDue = Math.max(0, cur.total - cur.paid);
   if (curDue > 0 && !cur.allowEntryWhileDue) {
-    return { result: 'BLOCKED', reason: `Payment due ₹${curDue}` };
+    return { result: 'BLOCKED', reason: `Payment due ${inr(curDue)}` };
   }
   const notes: string[] = [];
   if (state.status === 'ENDING_SOON') notes.push(`Ends in ${state.daysLeft} day${state.daysLeft === 1 ? '' : 's'}`);
-  if (curDue > 0) notes.push(`Payment due ₹${curDue}`);
+  if (curDue > 0) notes.push(`Payment due ${inr(curDue)}`);
   return notes.length ? { result: 'WARNED', reason: notes.join(' · ') } : { result: 'ALLOWED', reason: null };
 }
 
