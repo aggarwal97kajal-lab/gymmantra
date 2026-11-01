@@ -1,0 +1,419 @@
+<title>RepForge Form Check</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: camera viewfinder on the left, coaching console on the right; stacks on phones. Single dark look by design (camera UI). */
+:root{
+  --bg:#0B0D0C; --panel:#151816; --panel2:#1D211E; --line:#2A2F2B;
+  --fg:#F3F6F1; --mut:#8C948D; --dim:#5E655F;
+  --lime:#C8FF3E; --limeD:rgba(200,255,62,.14); --org:#FF8A3D; --orgD:rgba(255,138,61,.15); --red:#FF5A5A; --redD:rgba(255,90,90,.15);
+  --sans:'Inter','Inter Display',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--bg);color:var(--fg);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+body{padding-block:24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1120px;margin:0 auto;display:grid;grid-template-columns:auto minmax(0,1fr);gap:32px;align-items:start}
+.stage{position:relative;height:min(86vh,820px);aspect-ratio:9/16;max-width:100%;border-radius:34px;overflow:hidden;box-shadow:0 0 0 1px var(--line),0 30px 80px rgba(0,0,0,.55);background:#000}
+.stage canvas{display:block;width:100%;height:100%}
+.side{display:flex;flex-direction:column;gap:18px;min-width:0}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--lime)}
+h1{font-size:clamp(30px,4vw,44px);line-height:1.05;letter-spacing:-.03em;margin:6px 0 0;text-wrap:balance;font-weight:800}
+.lede{color:var(--mut);font-size:15px;line-height:1.55;max-width:60ch;margin:10px 0 0}
+.demo-tag{display:inline-flex;gap:8px;align-items:center;font-size:12px;font-weight:600;color:var(--mut);background:var(--panel);border:1px solid var(--line);padding:6px 10px;border-radius:999px;margin-top:12px}
+.demo-tag b{width:7px;height:7px;border-radius:50%;background:var(--org)}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{background:var(--lime);color:#0B0D0C;border:0;border-radius:12px;padding:10px 16px;font-weight:700;font-size:14px;display:inline-flex;gap:8px;align-items:center}
+.seg{display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:3px}
+.seg button{background:none;border:0;padding:7px 12px;border-radius:9px;font-size:13px;font-weight:600;color:var(--mut)}
+.seg button[aria-pressed="true"]{background:var(--panel2);color:var(--fg)}
+.tog{display:inline-flex;gap:8px;align-items:center;font-size:13px;font-weight:600;color:var(--mut);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 12px}
+.tog[aria-pressed="true"]{color:var(--lime);border-color:#3A4A20;background:var(--limeD)}
+button:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+.stat .k{font-size:12px;color:var(--mut);font-weight:600}
+.stat .v{font-size:26px;font-weight:800;letter-spacing:-.02em;margin-top:4px;font-variant-numeric:tabular-nums}
+.stat .v small{font-size:13px;color:var(--mut);font-weight:500}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px 18px}
+.card h2{font-size:15px;margin:0 0 6px;font-weight:700}
+.log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.log li{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+.log li:first-child{border-top:0}
+.log .n{color:var(--dim);font-weight:700;font-variant-numeric:tabular-nums}
+.log .d{color:var(--mut);font-size:12px;margin-top:2px}
+.pill{font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;white-space:nowrap}
+.ok{background:var(--limeD);color:var(--lime)} .warn{background:var(--orgD);color:var(--org)} .bad{background:var(--redD);color:var(--red)}
+.empty{color:var(--dim);font-size:13px;padding:8px 0}
+.how{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:6px}
+.how div{font-size:13px;color:var(--mut);line-height:1.45}
+.how b{display:block;color:var(--fg);font-size:13px;margin-bottom:3px}
+.note{font-size:12px;color:var(--dim);line-height:1.5}
+@media (max-width:860px){
+  .wrap{grid-template-columns:1fr}
+  .stage{height:auto;width:min(100%,440px);margin:0 auto}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .how{grid-template-columns:1fr}
+}
+</style>
+
+<div class="wrap">
+  <div class="stage"><canvas id="cv" aria-label="AI form check demo: a person squatting with a tracked skeleton, knee angle, rep counter and coaching cues"></canvas></div>
+  <div class="side">
+    <div>
+      <div class="eyebrow">AI motion form check</div>
+      <h1>Bodyweight squat, tracked rep by rep</h1>
+      <p class="lede">The camera tracks 33 body points, measures the knee, hip and back angles on every rep, counts only reps that hit depth and tells the member what to fix while they move.</p>
+      <span class="demo-tag"><b></b>Demo playback · sample athlete, no camera used</span>
+    </div>
+    <div class="controls">
+      <button class="btn" id="play" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" id="playIc"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg><span id="playTx">Pause</span></button>
+      <div class="seg" role="group" aria-label="Playback speed">
+        <button type="button" id="sp05" aria-pressed="false">0.5×</button>
+        <button type="button" id="sp1" aria-pressed="true">1×</button>
+      </div>
+      <button class="tog" type="button" id="tSkel" aria-pressed="true">Skeleton</button>
+      <button class="tog" type="button" id="tAng" aria-pressed="true">Angles</button>
+      <button class="tog" type="button" id="tPath" aria-pressed="true">Hip path</button>
+      <button class="tog" type="button" id="restart">Restart set</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="k">Reps counted</div><div class="v" id="sReps">0 <small>/ 0</small></div></div>
+      <div class="stat"><div class="k">Form score</div><div class="v" id="sScore">—</div></div>
+      <div class="stat"><div class="k">Knee angle</div><div class="v" id="sKnee">—</div></div>
+      <div class="stat"><div class="k">Back lean</div><div class="v" id="sLean">—</div></div>
+    </div>
+    <div class="card">
+      <h2>Rep log</h2>
+      <ul class="log" id="log"><li class="empty">Reps appear here as they finish.</li></ul>
+    </div>
+    <div class="card">
+      <h2>What it checks on a squat</h2>
+      <div class="how">
+        <div><b>Depth</b>Knee angle must reach about 75° or less with the hips at knee level. Shallow reps are not counted.</div>
+        <div><b>Back angle</b>Torso lean over 60° from vertical triggers a "chest up" cue.</div>
+        <div><b>Tempo</b>Time down and up is measured so controlled reps score higher.</div>
+      </div>
+    </div>
+    <p class="note">In the app this runs on the phone with on-device pose estimation, so video never leaves the device. Feedback is coaching guidance with a confidence level shown; it does not diagnose injuries.</p>
+  </div>
+</div>
+
+<script>
+(() => {
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const C = {lime:'#C8FF3E', org:'#FF8A3D', red:'#FF5A5A', fg:'#F3F6F1', mut:'#8C948D', dim:'#5E655F'};
+let W = 0, H = 0, dpr = 1, fixed = false;
+
+function size(){
+  if (fixed) return;
+  const r = cv.getBoundingClientRect();
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = r.width; H = r.height;
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+}
+window.addEventListener('resize', () => { size(); draw(T); });
+
+// ---- rep script: one loop of six attempts
+const REPS = [
+  {d:1.00, L:0,  tag:'good'},
+  {d:1.00, L:0,  tag:'good'},
+  {d:0.55, L:0,  tag:'shallow'},
+  {d:1.02, L:0,  tag:'good'},
+  {d:1.00, L:24, tag:'lean'},
+  {d:1.04, L:0,  tag:'good'},
+];
+const CYC = 2.8;
+const ease = x => 0.5 - 0.5*Math.cos(Math.PI*Math.max(0,Math.min(1,x)));
+function phaseAt(tau){
+  if (tau < 0.3) return {p:0, ph:'top'};
+  if (tau < 1.5) return {p:ease((tau-0.3)/1.2), ph:'down'};
+  if (tau < 1.8) return {p:1, ph:'bottom'};
+  if (tau < 2.7) return {p:1-ease((tau-1.8)/0.9), ph:'up'};
+  return {p:0, ph:'done'};
+}
+const rad = d => d*Math.PI/180, deg = r => r*180/Math.PI;
+function angle(a,b,c){ // angle at b
+  const v1=[a[0]-b[0],a[1]-b[1]], v2=[c[0]-b[0],c[1]-b[1]];
+  const m = Math.hypot(...v1)*Math.hypot(...v2);
+  return deg(Math.acos(Math.max(-1,Math.min(1,(v1[0]*v2[0]+v1[1]*v2[1])/m))));
+}
+function pose(p, rep, u, cx, floor){
+  const Ls=15*u, Lt=15.5*u, Lb=18.5*u, La=8.6*u, Lf=8*u;
+  const A=[cx - 1*u, floor - 2.2*u];
+  const s = rad(34*p);
+  const K=[A[0]+Ls*Math.sin(s), A[1]-Ls*Math.cos(s)];
+  const ph = -rad(6 + 84*p*rep.d);
+  const Hp=[K[0]+Lt*Math.sin(ph), K[1]-Lt*Math.cos(ph)];
+  const ps = rad(6 + 40*p + rep.L*p);
+  const S=[Hp[0]+Lb*Math.sin(ps), Hp[1]-Lb*Math.cos(ps)];
+  const N=[S[0]+2.4*u*Math.sin(ps), S[1]-2.4*u*Math.cos(ps)];
+  const hd=[N[0]+4.2*u*Math.sin(ps*0.6)+0.4*u, N[1]-4.2*u*Math.cos(ps*0.6)];
+  const aa = rad(12 + 76*p);
+  const E=[S[0]+La*Math.sin(aa), S[1]+La*Math.cos(aa)];
+  const Wr=[E[0]+La*Math.sin(aa+rad(4)), E[1]+La*Math.cos(aa+rad(4))];
+  const heel=[A[0]-1.6*u, floor-0.9*u], toe=[A[0]+Lf*0.75, floor-0.9*u];
+  return {A,K,H:Hp,S,N,hd,E,Wr,heel,toe,
+    knee: angle(A,K,Hp), hip: angle(K,Hp,S), lean: deg(ps)};
+}
+function verdict(rep){ return rep.d < 0.9 ? 'shallow' : rep.L > 10 ? 'lean' : 'good'; }
+
+// ---- state
+let T = 0, playing = true, speed = 1, last = null;
+const show = {skel:true, ang:true, path:true};
+
+function stateAt(t){
+  const loopLen = REPS.length*CYC;
+  const tt = ((t % loopLen) + loopLen) % loopLen;
+  const i = Math.floor(tt / CYC), tau = tt - i*CYC;
+  const rep = REPS[i];
+  const {p, ph} = phaseAt(tau);
+  const done = []; // finished attempts in this loop
+  for (let j=0;j<i;j++) done.push(REPS[j]);
+  if (ph==='done') done.push(rep);
+  const counted = done.filter(r => verdict(r)!=='shallow').length;
+  const scoreOf = r => ({good:100, lean:72, shallow:40})[verdict(r)];
+  const score = done.length ? Math.round(done.reduce((a,r)=>a+scoreOf(r),0)/done.length) : null;
+  return {tt, i, tau, rep, p, ph, done, counted, score};
+}
+
+// ---- drawing helpers
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function seg(a,b,w,col){ ctx.strokeStyle=col; ctx.lineWidth=w; ctx.lineCap='round'; ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); }
+function font(px, w=700){ ctx.font = `${w} ${px}px Inter, 'Inter Display', system-ui, sans-serif`; }
+
+function scene(u){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#141816'); g.addColorStop(.62,'#0E110F'); g.addColorStop(1,'#080A09');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const floor = 80*u;
+  // back wall rack + plates
+  ctx.fillStyle='#181C19';
+  ctx.fillRect(W*0.08, 24*u, 1.6*u, floor-24*u); ctx.fillRect(W*0.08+12*u, 24*u, 1.6*u, floor-24*u);
+  ctx.fillRect(W*0.08, 24*u, 13.6*u, 1.4*u);
+  for (let k=0;k<3;k++){ ctx.beginPath(); ctx.arc(W*0.86, floor-5*u-k*0.2*u, (5-k*1.2)*u, 0, Math.PI*2); ctx.fillStyle=k%2?'#1A1E1B':'#1F2420'; ctx.fill(); }
+  ctx.fillStyle='#161A17'; ctx.fillRect(W*0.72, 34*u, W*0.22, 1.1*u); ctx.fillRect(W*0.72, 44*u, W*0.22, 1.1*u);
+  // floor
+  const fg = ctx.createLinearGradient(0,floor,0,H);
+  fg.addColorStop(0,'#1B201C'); fg.addColorStop(1,'#0A0C0B');
+  ctx.fillStyle=fg; ctx.fillRect(0,floor,W,H-floor);
+  ctx.strokeStyle='rgba(255,255,255,.04)'; ctx.lineWidth=1;
+  for (let k=-6;k<=6;k++){ ctx.beginPath(); ctx.moveTo(W/2+k*W*0.06, floor); ctx.lineTo(W/2+k*W*0.22, H); ctx.stroke(); }
+  // spotlight
+  const sp = ctx.createRadialGradient(W*0.5, 52*u, 2*u, W*0.5, 52*u, 46*u);
+  sp.addColorStop(0,'rgba(200,255,62,.07)'); sp.addColorStop(1,'rgba(200,255,62,0)');
+  ctx.fillStyle=sp; ctx.fillRect(0,0,W,H);
+  return floor;
+}
+
+function body(P, u, far){
+  const c = far ? '#202522' : '#323833';
+  const o = far ? [1.4*u, -0.5*u] : [0,0];
+  const m = q => [q[0]+o[0], q[1]+o[1]];
+  seg(m(P.heel), m(P.toe), 2.6*u, far?'#1C201D':'#2B302C');
+  seg(m(P.A), m(P.K), 4.0*u, c);
+  seg(m(P.K), m(P.H), 5.6*u, c);
+  if (!far){
+    seg(P.H, P.S, 8.2*u, c);
+    seg(P.S, P.N, 3.2*u, c);
+    ctx.fillStyle=c; ctx.beginPath(); ctx.arc(P.hd[0],P.hd[1],3.6*u,0,Math.PI*2); ctx.fill();
+  }
+  seg(m(P.S), m(P.E), 2.8*u, far?'#1E2320':'#3A403B');
+  seg(m(P.E), m(P.Wr), 2.4*u, far?'#1E2320':'#3A403B');
+}
+
+function joint(q, u, col){
+  ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=2.4*u;
+  ctx.fillStyle='#0B0D0C'; ctx.beginPath(); ctx.arc(q[0],q[1],1.15*u,0,Math.PI*2); ctx.fill();
+  ctx.lineWidth=0.55*u; ctx.strokeStyle=col; ctx.stroke(); ctx.restore();
+}
+
+function arcAt(b, a, c, r, col){
+  const a1=Math.atan2(a[1]-b[1],a[0]-b[0]), a2=Math.atan2(c[1]-b[1],c[0]-b[0]);
+  let d=a2-a1; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI;
+  ctx.beginPath(); ctx.moveTo(b[0],b[1]); ctx.arc(b[0],b[1],r,a1,a1+d,d<0); ctx.closePath();
+  ctx.fillStyle = col+'26'; ctx.fill();
+  ctx.beginPath(); ctx.arc(b[0],b[1],r,a1,a1+d,d<0); ctx.strokeStyle=col; ctx.lineWidth=r*0.09; ctx.stroke();
+}
+
+function tag(x,y,txt,col,u,sub){
+  font(2.3*u, 800); const w1 = ctx.measureText(txt).width;
+  font(1.45*u, 600); const w2 = sub ? ctx.measureText(sub).width : 0;
+  const w = Math.max(w1,w2)+2.6*u, h = sub ? 5.6*u : 3.8*u;
+  rr(x,y-h/2,w,h,1.2*u); ctx.fillStyle='rgba(8,10,9,.82)'; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=0.25*u; ctx.stroke();
+  ctx.fillStyle=col; font(2.3*u,800); ctx.textBaseline='middle'; ctx.textAlign='left';
+  ctx.fillText(txt, x+1.3*u, sub ? y-0.9*u : y+0.1*u);
+  if (sub){ ctx.fillStyle=C.mut; font(1.45*u,600); ctx.fillText(sub, x+1.3*u, y+1.6*u); }
+}
+
+function cueFor(st){
+  const v = verdict(st.rep);
+  if (st.i===0 && st.ph==='top') return ['Set up · feet shoulder-width apart', C.lime, 'info'];
+  if (st.ph==='down') return st.p>0.6 && v==='lean' ? ['Chest up · you are leaning forward', C.red, 'bad'] : ['Sit back and down', C.fg, 'info'];
+  if (st.ph==='bottom' || st.ph==='up'){
+    if (v==='shallow') return ['Go lower · hips to knee level', C.org, 'warn'];
+    if (v==='lean') return ['Chest up · keep your back straighter', C.red, 'bad'];
+    return st.ph==='bottom' ? ['Good depth · drive up', C.lime, 'ok'] : ['Push through your heels', C.lime, 'ok'];
+  }
+  if (st.ph==='done'){
+    if (v==='shallow') return ['Not counted · too shallow', C.org, 'warn'];
+    if (v==='lean') return ['Counted · watch your back angle', C.org, 'warn'];
+    return ['Rep counted', C.lime, 'ok'];
+  }
+  return ['Next rep · stay tall at the top', C.fg, 'info'];
+}
+
+function draw(t){
+  if (!W) return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const u = H/100, st = stateAt(t);
+  const floor = scene(u);
+  const k = 0.8, uk = u*k;
+  const cx = W*0.5 - 4.5*u;
+  const P = pose(st.p, st.rep, uk, cx, floor);
+  const v = verdict(st.rep), bottomish = st.ph==='bottom' || st.ph==='up' || (st.ph==='down' && st.p>0.6);
+  const legCol = (v==='shallow' && (st.ph==='bottom'||st.ph==='up')) ? C.org : C.lime;
+  const backCol = (v==='lean' && bottomish) ? C.red : C.lime;
+
+  // hip path
+  if (show.path){
+    for (let k=24;k>=1;k--){
+      const tt = t - k*0.05, s2 = stateAt(tt);
+      if (s2.i !== st.i && s2.tt > st.tt) continue;
+      const q = pose(s2.p, s2.rep, uk, cx, floor).H;
+      ctx.fillStyle = `rgba(200,255,62,${(1-k/25)*0.55})`;
+      ctx.beginPath(); ctx.arc(q[0],q[1],0.45*u,0,Math.PI*2); ctx.fill();
+    }
+  }
+  body(P,uk,true); body(P,uk,false);
+
+  // parallel guide at bottom
+  if (st.p > 0.5){
+    ctx.save(); ctx.setLineDash([1.2*u,1*u]); ctx.strokeStyle = `rgba(243,246,241,${(st.p-0.5)*0.5})`; ctx.lineWidth=0.25*u;
+    ctx.beginPath(); ctx.moveTo(P.H[0]-8*u, P.K[1]); ctx.lineTo(P.K[0]+8*u, P.K[1]); ctx.stroke(); ctx.restore();
+    ctx.fillStyle = `rgba(243,246,241,${(st.p-0.5)})`; font(1.4*u,600); ctx.textAlign='left'; ctx.textBaseline='bottom';
+    ctx.fillText('KNEE LINE', P.K[0]+8.6*u, P.K[1]+0.7*u);
+  }
+
+  if (show.skel){
+    ctx.save(); ctx.shadowBlur=1.6*u;
+    ctx.shadowColor=legCol; seg(P.A,P.K,0.55*u,legCol); seg(P.K,P.H,0.55*u,legCol);
+    ctx.shadowColor=backCol; seg(P.H,P.S,0.55*u,backCol); seg(P.S,P.N,0.55*u,backCol);
+    ctx.shadowColor=C.lime; seg(P.S,P.E,0.45*u,C.lime); seg(P.E,P.Wr,0.45*u,C.lime); seg(P.heel,P.toe,0.45*u,C.lime);
+    ctx.restore();
+    ctx.strokeStyle=C.lime; ctx.lineWidth=0.4*u; ctx.beginPath(); ctx.arc(P.hd[0],P.hd[1],3.7*uk,0,Math.PI*2); ctx.globalAlpha=.5; ctx.stroke(); ctx.globalAlpha=1;
+    [[P.A,C.lime],[P.K,legCol],[P.H,v==='lean'&&bottomish?C.red:legCol],[P.S,backCol],[P.E,C.lime],[P.Wr,C.lime],[P.toe,C.lime],[P.heel,C.lime]].forEach(([q,c])=>joint(q,u,c));
+  }
+  if (show.ang){
+    arcAt(P.K, P.A, P.H, 3.6*u, legCol);
+    arcAt(P.H, P.K, P.S, 3*u, backCol);
+    tag(P.K[0]+2.6*u, P.K[1]+5.4*u, Math.round(P.knee)+'°', legCol, u, 'KNEE');
+    tag(Math.max(3*u, P.H[0]-12.5*u), P.H[1]-7.5*u, Math.round(P.lean)+'°', backCol, u, 'BACK LEAN');
+  }
+
+  // viewfinder corners
+  ctx.strokeStyle='rgba(243,246,241,.55)'; ctx.lineWidth=0.35*u; ctx.lineCap='round';
+  const m=3*u, L=3.6*u, top=33*u, bot=79*u;
+  [[m,top,1,1],[W-m,top,-1,1],[m,bot,1,-1],[W-m,bot,-1,-1]].forEach(([x,y,sx,sy])=>{ctx.beginPath();ctx.moveTo(x,y+sy*L);ctx.lineTo(x,y);ctx.lineTo(x+sx*L,y);ctx.stroke();});
+
+  // top bar
+  ctx.textBaseline='middle';
+  rr(4*u,4.2*u,15*u,4*u,2*u); ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fill();
+  ctx.fillStyle = (Math.floor(t*2)%2) ? C.red : '#8A2E2E'; ctx.beginPath(); ctx.arc(6.4*u,6.2*u,0.8*u,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.fg; font(1.7*u,700); ctx.textAlign='left';
+  const secs = Math.floor(st.tt); ctx.fillText(`REC 00:${String(secs).padStart(2,'0')}`, 8*u, 6.3*u);
+  ctx.textAlign='right'; font(1.7*u,800); ctx.fillStyle=C.lime; ctx.fillText('AI FORM CHECK', W-4*u, 6.3*u);
+  ctx.textAlign='left'; font(3.1*u,800); ctx.fillStyle=C.fg; ctx.fillText('Bodyweight Squat', 4*u, 12.2*u);
+  font(1.6*u,600); ctx.fillStyle=C.mut; ctx.fillText('Side view · 33 points tracked · 96% confidence', 4*u, 15.4*u);
+
+  // rep counter card
+  const flash = st.ph==='done' && v!=='shallow';
+  rr(4*u,19*u,21*u,10*u,2.4*u); ctx.fillStyle= flash ? 'rgba(200,255,62,.95)' : 'rgba(8,10,9,.72)'; ctx.fill();
+  if(!flash){ctx.strokeStyle='rgba(255,255,255,.08)'; ctx.lineWidth=0.2*u; ctx.stroke();}
+  ctx.textAlign='left'; ctx.fillStyle= flash ? '#0B0D0C' : C.fg; font(6.4*u,800); ctx.fillText(String(st.counted), 6.2*u, 24.3*u);
+  const nw = ctx.measureText(String(st.counted)).width;
+  ctx.fillStyle= flash ? '#0B0D0C' : C.mut; font(1.5*u,800); ctx.fillText('REPS', 7.8*u+nw, 22.6*u);
+  ctx.fillStyle= flash ? 'rgba(11,13,12,.65)' : C.dim; font(1.5*u,600); ctx.fillText(`of ${st.done.length} tries`, 7.8*u+nw, 25.6*u);
+
+  // form score ring
+  const sx = W-9.5*u, sy = 24*u, R = 3.9*u;
+  ctx.textAlign='center'; ctx.beginPath(); ctx.arc(sx,sy,R+1.3*u,0,Math.PI*2); ctx.fillStyle='rgba(8,10,9,.78)'; ctx.fill();
+  ctx.lineWidth=0.8*u; ctx.strokeStyle='#262B27'; ctx.beginPath(); ctx.arc(sx,sy,R,0,Math.PI*2); ctx.stroke();
+  const sc = st.score ?? 100, scol = sc>=85?C.lime:sc>=70?C.org:C.red;
+  ctx.strokeStyle=scol; ctx.lineCap='round'; ctx.beginPath(); ctx.arc(sx,sy,R,-Math.PI/2,-Math.PI/2+Math.PI*2*sc/100); ctx.stroke();
+  ctx.fillStyle=C.fg; font(2.5*u,800); ctx.fillText(st.score==null?'–':String(sc), sx, sy-0.4*u);
+  ctx.fillStyle=C.mut; font(1.05*u,700); ctx.fillText('FORM', sx, sy+2.1*u);
+
+  // depth meter
+  const mx = W-3.6*u, my1 = 39*u, my2 = 72*u;
+  rr(mx-0.9*u,my1,1.8*u,my2-my1,0.9*u); ctx.fillStyle='rgba(255,255,255,.08)'; ctx.fill();
+  const depthPct = Math.min(1, st.p*st.rep.d);
+  const fillH = (my2-my1)*depthPct;
+  rr(mx-0.9*u,my1,1.8*u,Math.max(fillH,1.8*u),0.9*u); ctx.fillStyle = depthPct>=0.9?C.lime:C.org; ctx.fill();
+  const ty = my1 + (my2-my1)*0.9;
+  ctx.strokeStyle=C.fg; ctx.lineWidth=0.25*u; ctx.beginPath(); ctx.moveTo(mx-2*u,ty); ctx.lineTo(mx+1.4*u,ty); ctx.stroke();
+  ctx.save(); ctx.translate(mx-2.4*u,(my1+my2)/2); ctx.textAlign='center'; ctx.rotate(-Math.PI/2); ctx.fillStyle=C.mut; font(1.3*u,700); ctx.fillText('DEPTH', 0, 0); ctx.restore();
+
+  // cue toast
+  const [txt, col, kind] = cueFor(st);
+  font(2.3*u,700);
+  const tw = ctx.measureText(txt).width + 9*u;
+  const tx = (W-tw)/2, ty2 = 85*u;
+  rr(tx,ty2,tw,6*u,3*u);
+  ctx.fillStyle = kind==='ok' ? 'rgba(200,255,62,.16)' : kind==='warn' ? 'rgba(255,138,61,.18)' : kind==='bad' ? 'rgba(255,90,90,.18)' : 'rgba(8,10,9,.8)';
+  ctx.fill(); ctx.strokeStyle = kind==='info' ? 'rgba(255,255,255,.12)' : col; ctx.lineWidth=0.25*u; ctx.stroke();
+  ctx.fillStyle=col; ctx.beginPath(); ctx.arc(tx+3.3*u, ty2+3*u, 0.9*u, 0, Math.PI*2); ctx.fill();
+  ctx.textAlign='left'; ctx.fillStyle = kind==='info' ? C.fg : col; ctx.fillText(txt, tx+5.3*u, ty2+3.1*u);
+
+  ctx.textAlign='center'; ctx.fillStyle=C.dim; font(1.35*u,600);
+  ctx.fillText('Coaching guidance only · not a medical assessment', W/2, 95.2*u);
+  return {st, P};
+}
+
+// ---- side panel
+const $ = id => document.getElementById(id);
+let lastSig = '';
+function panel(info){
+  if (!info) return;
+  const {st, P} = info;
+  $('sReps').innerHTML = `${st.counted} <small>/ ${st.done.length}</small>`;
+  $('sScore').textContent = st.score==null ? '—' : st.score;
+  $('sKnee').textContent = Math.round(P.knee)+'°';
+  $('sLean').textContent = Math.round(P.lean)+'°';
+  const sig = st.done.length + ':' + st.i;
+  if (sig === lastSig) return; lastSig = sig;
+  const log = $('log');
+  if (!st.done.length){ log.innerHTML = '<li class="empty">Reps appear here as they finish.</li>'; return; }
+  const meta = {good:['Good rep','ok','Depth 55° · back 46°'], lean:['Forward lean','bad','Depth 55° · back 70° (limit 60°)'], shallow:['Too shallow','warn','Depth 93° (needs 75° or less) · not counted']};
+  log.innerHTML = st.done.map((r,j)=>{ const m = meta[verdict(r)]; return `<li><span class="n">#${j+1}</span><div><div>${m[0]}</div><div class="d">${m[2]}</div></div><span class="pill ${m[1]}">${verdict(r)==='shallow'?'No rep':verdict(r)==='lean'?'72':'100'}</span></li>`; }).reverse().join('');
+}
+
+function loop(now){
+  if (last==null) last = now;
+  const dt = Math.min(0.1,(now-last)/1000); last = now;
+  if (playing) T += dt*speed;
+  panel(draw(T));
+  requestAnimationFrame(loop);
+}
+
+// controls
+const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function setPlay(v){ playing=v; $('playTx').textContent = v?'Pause':'Play'; $('playIc').innerHTML = v?'<path d="M6 4h4v16H6zM14 4h4v16h-4z"/>':'<path d="M7 4l13 8-13 8z"/>'; }
+$('play').onclick = () => setPlay(!playing);
+$('sp05').onclick = () => { speed=.5; $('sp05').setAttribute('aria-pressed','true'); $('sp1').setAttribute('aria-pressed','false'); };
+$('sp1').onclick = () => { speed=1; $('sp1').setAttribute('aria-pressed','true'); $('sp05').setAttribute('aria-pressed','false'); };
+[['tSkel','skel'],['tAng','ang'],['tPath','path']].forEach(([id,k])=>{ $(id).onclick=()=>{ show[k]=!show[k]; $(id).setAttribute('aria-pressed', String(show[k])); }; });
+$('restart').onclick = () => { T = 0; lastSig=''; setPlay(true); };
+
+// hooks for offline video export
+window.__rec = (w,h) => { fixed=true; dpr=1; W=w; H=h; cv.width=w; cv.height=h; playing=false; };
+window.__frame = t => { draw(t); return cv.toDataURL('image/jpeg', 0.92); };
+
+size();
+if (reduce){ T = 1.6; setPlay(false); }
+requestAnimationFrame(loop);
+})();
+</script>

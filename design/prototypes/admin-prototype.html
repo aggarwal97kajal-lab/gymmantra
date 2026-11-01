@@ -1,0 +1,563 @@
+<title>GymMantra Admin Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: gym admin panel (sidebar · workspace) with a live member-app phone preview on the right. Deliberately single dark look matching the GymMantra designs. */
+:root{
+  --bg:#0F1110; --side:#0B0D0C; --card:#181B19; --card2:#202421; --field:#121413; --line:#2A2F2B;
+  --fg:#F3F6F1; --mut:#8C948D; --dim:#5E655F;
+  --lime:#C8FF3E; --limeD:rgba(200,255,62,.14); --limeB:#3A4A20;
+  --org:#FF7A2F; --orgD:rgba(255,122,47,.15); --red:#FF5A5A; --redD:rgba(255,90,90,.14); --blue:#5BB9FF; --blueD:rgba(91,185,255,.14);
+  --wa:#6EE59A; --waD:#1F3B2A;
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);-webkit-font-smoothing:antialiased;font-size:14px;
+  padding-left:max(0px,env(safe-area-inset-left,0px));padding-right:max(0px,env(safe-area-inset-right,0px))}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr) 380px;height:100%;min-height:0}
+/* sidebar */
+.side{background:var(--side);border-right:1px solid var(--line);padding:22px 14px;display:flex;flex-direction:column;gap:4px;min-height:0;overflow:auto}
+.brand{display:flex;gap:10px;align-items:center;padding:0 8px 22px}
+.brand i{width:34px;height:34px;border-radius:10px;background:var(--lime);display:grid;place-items:center;flex:none}
+.brand b{display:block;font-size:16px;letter-spacing:-.2px}
+.brand small{color:var(--mut);font-size:11.5px}
+.nav{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:11px;border:0;background:none;color:var(--mut);font-weight:500;width:100%;text-align:left}
+.nav:hover{background:var(--card)}
+.nav[aria-current="page"]{background:var(--limeD);color:var(--lime);font-weight:650}
+.nav .badge{margin-left:auto;font-size:11px;font-weight:700;padding:1px 7px;border-radius:7px;background:var(--orgD);color:var(--org)}
+.sidefoot{margin-top:auto;padding:12px;border-radius:14px;background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--mut);line-height:1.45}
+.sidefoot button{margin-top:8px;background:none;border:1px solid var(--line);border-radius:9px;padding:6px 10px;color:var(--mut);font-size:12px}
+/* main */
+.main{overflow:auto;min-height:0;padding:24px 28px 40px}
+.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.crumb{color:var(--mut);font-size:13px;font-weight:600}
+h1{font-size:28px;letter-spacing:-.6px;margin:2px 0 0;font-weight:750}
+h2{font-size:16px;margin:0;font-weight:700;letter-spacing:-.2px}
+.row{display:flex;align-items:center;gap:10px}
+.wrap{flex-wrap:wrap}
+.sp{justify-content:space-between}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px}
+.mut{color:var(--mut)} .dim{color:var(--dim)} .small{font-size:12px}
+.btn{border:0;border-radius:12px;padding:10px 16px;font-weight:700;background:var(--lime);color:#0F1110;display:inline-flex;gap:8px;align-items:center;justify-content:center}
+.btn.ghost{background:var(--card);color:var(--fg);border:1px solid var(--line);font-weight:600}
+.btn.sm{padding:6px 12px;font-size:12.5px;border-radius:9px}
+.btn.wa{background:var(--waD);color:var(--wa)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.ok{background:var(--limeD);color:var(--lime)} .warn{background:var(--orgD);color:var(--org)} .bad{background:var(--redD);color:var(--red)} .off{background:#23272A;color:var(--mut)} .info{background:var(--blueD);color:var(--blue)}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi .k{font-size:12.5px;color:var(--mut);font-weight:600}
+.kpi .v{font-size:28px;font-weight:800;letter-spacing:-.6px;margin-top:6px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:11px;padding:8px 13px;font-weight:600;font-size:13px;display:inline-flex;gap:8px;align-items:center}
+.tab span{font-size:11.5px;padding:1px 7px;border-radius:7px;background:var(--card2)}
+.tab[aria-pressed="true"]{background:var(--lime);color:#111;border-color:var(--lime)}
+.tab[aria-pressed="true"] span{background:rgba(0,0,0,.14)}
+.search{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 12px;min-width:240px}
+.search input{background:none;border:0;outline:0;height:40px;flex:1;min-width:0}
+.tblwrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+th{text-align:left;font-size:11.5px;color:var(--mut);font-weight:600;letter-spacing:.3px;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:11px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+tr.click{cursor:pointer} tr.click:hover td{background:rgba(255,255,255,.02)}
+.av{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:12.5px;flex:none}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field label{font-size:12px;font-weight:600;color:var(--mut)}
+.inp{height:42px;border-radius:11px;background:var(--field);border:1px solid var(--line);padding:0 12px;width:100%;outline:0}
+.inp:focus{border-color:#5E7A2A;box-shadow:0 0 0 3px rgba(200,255,62,.12)}
+select.inp{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--mut) 50%),linear-gradient(135deg,var(--mut) 50%,transparent 50%);background-position:calc(100% - 17px) 18px,calc(100% - 12px) 18px;background-size:5px 5px;background-repeat:no-repeat;padding-right:30px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.seg{display:flex;flex-wrap:wrap;background:var(--field);border:1px solid var(--line);border-radius:11px;padding:3px;gap:3px}
+.seg button{flex:1;border:0;background:none;border-radius:8px;padding:8px 10px;font-weight:600;font-size:13px;color:var(--mut);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--lime);color:#111}
+.chk{display:inline-flex;gap:8px;align-items:center;font-size:13px}
+.chk input{accent-color:#C8FF3E;width:16px;height:16px}
+.plans{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.price{font-size:28px;font-weight:800;letter-spacing:-.8px}
+.chip{display:inline-flex;padding:4px 9px;border-radius:999px;background:var(--card2);color:var(--mut);font-size:11.5px;font-weight:600}
+.switch{width:42px;height:24px;border-radius:12px;background:#2A2F2B;border:0;position:relative;flex:none;padding:0}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#8C948D;transition:left .15s}
+.switch[aria-checked="true"]{background:var(--lime)} .switch[aria-checked="true"]::after{left:21px;background:#111}
+.hint{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:14px;background:var(--limeD);border:1px solid var(--limeB);font-size:13px;line-height:1.45}
+.hint.o{background:var(--orgD);border-color:rgba(255,122,47,.28)}
+.hint.r{background:rgba(255,90,90,.08);border-color:rgba(255,90,90,.24)}
+.err{color:var(--red);font-size:12px;min-height:16px}
+.layout2{display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px;align-items:start}
+.layout2.la{grid-template-columns:360px minmax(0,1fr)}
+.layout2.ls{grid-template-columns:320px minmax(0,1fr)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:1100px){.layout2,.layout2.la,.layout2.ls{grid-template-columns:minmax(0,1fr)}}
+.scan{height:200px;border-radius:16px;background:radial-gradient(60% 60% at 50% 50%,#26302A,#121513);display:grid;place-items:center;position:relative;overflow:hidden}
+.scan .box{width:130px;height:130px;position:relative}
+.scan .box i{position:absolute;width:28px;height:28px;border:0 solid var(--lime)}
+.scan .line{position:absolute;left:8px;right:8px;top:50%;height:2px;background:var(--lime);box-shadow:0 0 14px var(--lime);animation:sweep 2.2s ease-in-out infinite}
+@keyframes sweep{0%,100%{transform:translateY(-50px)}50%{transform:translateY(50px)}}
+.result{border-radius:16px;padding:16px;border:1.5px solid}
+.chat{display:flex;flex-direction:column;gap:10px;padding:16px;min-height:300px}
+.msg{max-width:78%;padding:11px 13px;border-radius:15px;line-height:1.5}
+.msg.me{align-self:flex-end;background:var(--lime);color:#111;border-bottom-right-radius:5px;font-weight:500}
+.msg.them{background:var(--card2);border-bottom-left-radius:5px}
+.msg .t{font-size:11.5px;opacity:.6;margin-top:5px}
+.tlist button{width:100%;text-align:left;border:1px solid transparent;background:none;border-radius:13px;padding:11px 12px;display:flex;gap:10px;align-items:center}
+.tlist button[aria-current="true"]{background:var(--limeD);border-color:var(--limeB)}
+/* phone preview */
+.preview{border-left:1px solid var(--line);background:radial-gradient(80% 50% at 50% 30%,rgba(200,255,62,.06),transparent),#0C0E0D;padding:20px 18px;overflow:auto;min-height:0;display:flex;flex-direction:column;align-items:center;gap:12px}
+.preview .lbl{font-size:11.5px;font-weight:800;letter-spacing:.14em;color:var(--lime)}
+.phone{width:340px;max-width:100%;border-radius:44px;padding:10px;background:#1E211F;box-shadow:0 0 0 1.5px #2E332F,0 30px 70px rgba(0,0,0,.55)}
+.screen{border-radius:35px;background:var(--bg);height:640px;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.sbar{height:38px;display:flex;justify-content:space-between;align-items:center;padding:0 24px;font-size:13px;font-weight:600;flex:none}
+.pbody{flex:1;overflow:auto;padding:4px 16px 16px}
+.ptabs{display:flex;margin:10px 12px 12px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:4px;flex:none}
+.ptabs button{flex:1;border:0;background:none;padding:9px;border-radius:12px;font-weight:600;font-size:12.5px;color:var(--mut)}
+.ptabs button[aria-pressed="true"]{background:var(--limeD);color:var(--lime)}
+.mcard{border-radius:22px;padding:16px;background:linear-gradient(145deg,#D4FF5C 0%,#A8E62E 55%,#7BC425 100%);color:#111;position:relative;overflow:hidden}
+.mcard.exp{background:linear-gradient(145deg,#3A2A22,#2A1F1A);color:var(--fg);border:1px solid rgba(255,122,47,.3)}
+.mcard.none{background:var(--card);color:var(--fg);border:1px dashed var(--dim)}
+.prow{display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--line);font-size:13px}
+.prow:first-child{border-top:0}
+.notif{position:absolute;left:10px;right:10px;top:42px;z-index:5;border-radius:18px;padding:11px 12px;background:rgba(30,34,31,.97);border:1px solid var(--limeB);box-shadow:0 16px 36px rgba(0,0,0,.6);display:flex;gap:10px;align-items:center;transform:translateY(-140%);opacity:0;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s}
+.notif.show{transform:none;opacity:1}
+.toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom,0px));transform:translate(-50%,150%);background:#F3F6F1;color:#111;font-weight:650;padding:12px 18px;border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.5);transition:transform .3s;z-index:50;max-width:calc(100% - 32px)}
+.toast.show{transform:translate(-50%,0)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:grid;place-items:center;z-index:40;padding:16px}
+.modal .card{width:min(520px,100%);max-height:calc(100% - 32px);overflow:auto;background:#151816}
+.mobtoggle{display:none}
+@media (prefers-reduced-motion:reduce){.scan .line{animation:none}.notif,.toast{transition:none}}
+@media (max-width:1480px){
+  .app{grid-template-columns:220px minmax(0,1fr)}
+  .preview{position:fixed;right:0;top:0;bottom:0;width:min(380px,100%);z-index:30;transform:translateX(100%);transition:transform .3s;box-shadow:-20px 0 60px rgba(0,0,0,.5);padding-top:calc(20px + env(safe-area-inset-top,0px))}
+  .preview.open{transform:none}
+  .mobtoggle{display:inline-flex}
+}
+@media (max-width:760px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);height:auto;min-height:100%}
+  .side{flex-direction:row;overflow-x:auto;padding:10px 12px;border-right:0;border-bottom:1px solid var(--line);gap:6px;position:sticky;top:0;z-index:10}
+  .brand,.sidefoot{display:none}
+  .nav{width:auto;white-space:nowrap;padding:8px 12px}
+  .nav svg{display:none}
+  .main{padding:18px 16px 40px;overflow:visible}
+  .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid3,.grid2{grid-template-columns:minmax(0,1fr)}
+  h1{font-size:24px}
+}
+</style>
+
+<div class="app">
+  <nav class="side" aria-label="Admin sections">
+    <div class="brand"><i><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#111" stroke-width="2.6" stroke-linecap="round"><path d="M6 7v10M3 9v6M18 7v10M21 9v6M6 12h12"/></svg></i><div><b>GymMantra</b><small>Ironline Fitness · Admin</small></div></div>
+    <div id="navlist" style="display:contents"></div>
+    <div class="sidefoot">Prototype with sample data for 1 Nov 2026. Changes stay in this browser.<br><button type="button" id="reset">Reset sample data</button></div>
+  </nav>
+  <main class="main" id="main"></main>
+  <aside class="preview" id="preview" aria-label="Member app preview">
+    <div class="row sp" style="width:340px;max-width:100%"><span class="lbl">MEMBER APP · LIVE</span><button class="btn ghost sm mobtoggle" type="button" id="closePrev">Close</button></div>
+    <div class="field" style="width:340px;max-width:100%"><label for="pvSel">Preview as</label><select class="inp" id="pvSel"></select></div>
+    <div class="phone"><div class="screen" id="phone"></div></div>
+    <p class="small dim" style="width:340px;max-width:100%;text-align:center;line-height:1.5;margin:0">Save a membership or edit a plan in the admin panel and watch this phone update.</p>
+  </aside>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div id="modalRoot"></div>
+
+<script>
+(() => {
+const TODAY = new Date(2026,10,1);
+const KEY = 'gymmantra-admin-proto-v1';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const ICON = {
+  grid:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2 20c1-3.5 3.5-5 7-5s6 1.5 7 5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 15c2 .6 3.4 2.2 4 5"/>',
+  card:'<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M2 10h20"/>',
+  qr:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM18 18h3v3h-3z"/>',
+  msg:'<path d="M4 5h16v11H9l-5 4z"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>',
+  check:'<path d="M5 12l5 5 9-10"/>', x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  sync:'<path d="M20 11a8 8 0 0 0-14.5-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.5 4.5L20 16M20 20v-4h-4"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
+  wa:'<path d="M4 20l1.3-3.9A8 8 0 1 1 8 19z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-1.8-1-1 .8a4 4 0 0 1-2-2l.8-1-1-1.8z"/>',
+  phone:'<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/>', eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  back:'<path d="M15 6l-6 6 6 6"/>', send:'<path d="M4 12l16-8-6 16-2-6z"/>', bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4"/>'
+};
+const ic = (n, s=18, c='currentColor', w=1.9) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[n]}</svg>`;
+
+// ---------- dates & money
+const iso = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+const parse = s => { const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); };
+const fmt = s => parse(s).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+const addDays = (s,n) => { const d = parse(s); d.setDate(d.getDate()+n); return iso(d); };
+const endFor = (start, months) => { const d = parse(start); d.setMonth(d.getMonth()+months); d.setDate(d.getDate()-1); return iso(d); };
+const daysLeft = end => Math.round((parse(end) - TODAY)/86400000);
+const rs = n => '₹' + Number(n||0).toLocaleString('en-IN');
+
+// ---------- sample data
+function seed(){
+  const plans = [
+    {id:'p1', name:'Monthly', months:1, price:2499, joining:500, features:['Gym floor','Cardio'], visible:true},
+    {id:'p2', name:'Quarterly', months:3, price:6999, joining:500, features:['Gym floor','Cardio','Locker'], visible:true},
+    {id:'p3', name:'Half-yearly', months:6, price:12499, joining:0, features:['Gym floor','Cardio','Locker','1 freeze'], visible:true},
+    {id:'p4', name:'Annual', months:12, price:21999, joining:0, features:['All access','2 freezes'], visible:true},
+    {id:'p5', name:'Annual + PT', months:12, price:34000, joining:0, features:['All access','24 PT sessions'], visible:true},
+    {id:'p6', name:'Student Monthly', months:1, price:1799, joining:0, features:['Gym floor','Valid ID needed'], visible:false},
+  ];
+  const ms = (planId,start,end,price,discount,paid,mode,by,addedOn,note='') => ({planId,start,end,price,discount,paid,mode,by,addedOn,note});
+  const members = [
+    {id:'IRF-20418', name:'Arjun Kapoor', phone:'98450 21874', joined:'2026-02-10', hist:[ms('p2','2026-02-10','2026-05-09',6999,0,7499,'Cash','Priya (Front desk)','2026-02-10'),ms('p2','2026-05-12','2026-08-11',6999,0,6999,'Cash','Priya (Front desk)','2026-05-12'),ms('p5','2026-08-14','2027-08-13',34000,2000,32000,'UPI','Vikas (Owner)','2026-08-14')]},
+    {id:'IRF-20391', name:'Sneha Iyer', phone:'99860 44120', joined:'2026-08-04', hist:[ms('p2','2026-08-04','2026-11-03',6999,0,7499,'UPI','Priya (Front desk)','2026-08-04')]},
+    {id:'IRF-20377', name:'Rahul Verma', phone:'99001 33452', joined:'2026-08-01', hist:[ms('p1','2026-08-01','2026-08-31',2499,0,2999,'Cash','Vikas (Owner)','2026-08-01'),ms('p1','2026-09-01','2026-09-30',2499,0,2499,'Cash','Priya (Front desk)','2026-09-01'),ms('p1','2026-10-01','2026-10-31',2499,0,2499,'UPI','Priya (Front desk)','2026-10-01')]},
+    {id:'IRF-20352', name:'Ananya Gupta', phone:'98860 77213', joined:'2025-11-07', hist:[ms('p5','2025-11-07','2026-11-06',32000,0,32000,'Card','Vikas (Owner)','2025-11-07')]},
+    {id:'IRF-20340', name:'Vikram Singh', phone:'97400 19876', joined:'2026-09-30', hist:[ms('p1','2026-09-30','2026-10-29',2499,0,2999,'Cash','Priya (Front desk)','2026-09-30')]},
+    {id:'IRF-20322', name:'Meera Nair', phone:'95388 60412', joined:'2026-09-19', hist:[ms('p3','2026-09-19','2027-03-18',12499,0,12499,'UPI','Priya (Front desk)','2026-09-19')]},
+    {id:'IRF-20301', name:'Karan Mehta', phone:'99723 55018', joined:'2026-06-21', hist:[ms('p2','2026-06-21','2026-09-20',6999,0,7499,'Cash','Priya (Front desk)','2026-06-21'),ms('p2','2026-09-21','2026-12-20',6999,500,6499,'UPI','Priya (Front desk)','2026-09-21')]},
+    {id:'IRF-20288', name:'Pooja Desai', phone:'90080 31167', joined:'2026-10-06', hist:[ms('p1','2026-10-06','2026-11-05',2499,0,2999,'Cash','Vikas (Owner)','2026-10-06')]},
+  ];
+  const requests = [
+    {id:'r1', name:'Nikhil Rao', phone:'98801 22719', when:'Today, 8:10 am'},
+    {id:'r2', name:'Fatima Shaikh', phone:'97316 40255', when:'Yesterday, 7:45 pm'},
+  ];
+  const checkins = [
+    {time:'6:52 am', id:'IRF-20322', result:'ok', text:'Allowed'},
+    {time:'6:49 am', id:'IRF-20377', result:'bad', text:'Blocked · expired'},
+    {time:'6:47 am', id:'IRF-20301', result:'ok', text:'Allowed'},
+    {time:'6:41 am', id:'IRF-20391', result:'warn', text:'Allowed · ends soon'},
+    {time:'6:12 am', id:'IRF-20418', result:'ok', text:'Allowed'},
+  ];
+  const tickets = [
+    {id:'T-48412', member:'IRF-20377', subject:"Can't see my new plan in the app", topic:'Membership', open:true, when:'2 min', msgs:[{me:false, text:'Hi, I paid cash for the Quarterly plan this morning but my app still shows Monthly.', t:'10:05 am'}]},
+    {id:'T-48409', member:'IRF-20391', subject:'Can I freeze for 10 days in December?', topic:'Membership', open:true, when:'35 min', msgs:[{me:false, text:"I'm travelling 10–20 Dec. Can I freeze my membership for those days?", t:'9:32 am'}]},
+    {id:'T-48213', member:'IRF-20418', subject:'QR code not scanning at entrance', topic:'Check-in', open:false, when:'2 days', msgs:[{me:false,text:'The scanner did not read my QR this morning.',t:'30 Oct, 6:20 am'},{me:true,text:'Sorry about that, the scanner lens was dirty. It is cleaned now.',t:'30 Oct, 9:02 am',by:'Priya'}]},
+  ];
+  return {plans, members, requests, checkins, tickets, pv:'IRF-20418'};
+}
+let S;
+try { S = JSON.parse(localStorage.getItem(KEY)) || seed(); } catch(e){ S = seed(); }
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e){} };
+
+const plan = id => S.plans.find(p => p.id === id);
+const member = id => S.members.find(m => m.id === id);
+const cur = m => m.hist.length ? m.hist[m.hist.length-1] : null;
+function status(m){
+  const c = cur(m); if (!c) return {k:'none', label:'No plan', cls:'off', days:null};
+  const d = daysLeft(c.end);
+  if (d < 0) return {k:'expired', label:'Expired', cls:'bad', days:d};
+  if (d <= 7) return {k:'ending', label: d===0 ? 'Ends today' : `${d} day${d===1?'':'s'}`, cls:'warn', days:d};
+  return {k:'active', label:`${d} days`, cls:'ok', days:d};
+}
+const COLORS = ['#B98CFF','#5BB9FF','#FF7A2F','#C8FF3E','#FF5C8A','#36C8FF'];
+const avatar = (name, size=36, extra='') => { const c = COLORS[[...name].reduce((a,ch)=>a+ch.charCodeAt(0),0)%COLORS.length]; const ini = name.split(' ').map(w=>w[0]).slice(0,2).join(''); return `<span class="av" style="width:${size}px;height:${size}px;font-size:${Math.round(size*.34)}px;background:${c}22;color:${c};${extra}">${esc(ini)}</span>`; };
+
+// ---------- routing
+let view = 'dashboard', memberId = null, memberTab = 'all', q = '', ticketId = 'T-48412', lastScan = null;
+const NAV = [['dashboard','grid','Dashboard'],['members','users','Members'],['plans','card','Membership plans'],['attendance','qr','Attendance'],['support','msg','Member support']];
+function renderNav(){
+  const open = S.tickets.filter(t=>t.open).length;
+  $('#navlist').innerHTML = NAV.map(([k,i,l]) => `<button class="nav" type="button" data-nav="${k}" ${view===k || (k==='members' && view==='member') ? 'aria-current="page"' : ''}>${ic(i)}${l}${k==='support'&&open?`<span class="badge">${open}</span>`:''}${k==='members'&&S.requests.length?`<span class="badge" style="background:var(--blueD);color:var(--blue)">${S.requests.length}</span>`:''}</button>`).join('');
+}
+function go(v, id){ view = v; if (id) memberId = id; render(); $('#main').scrollTop = 0; window.scrollTo(0,0); }
+
+let toastT;
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(()=>t.classList.remove('show'), 3200); }
+
+const header = (crumb, title, right='') => `<div class="top"><div><div class="crumb">${crumb}</div><h1>${title}</h1></div><div class="row wrap">${right}<button class="btn ghost mobtoggle" type="button" data-act="openPrev">${ic('phone',16)} Member app</button></div></div>`;
+
+// ---------- views
+function vDashboard(){
+  const st = S.members.map(status);
+  const active = st.filter(s=>s.k==='active'||s.k==='ending').length, ending = st.filter(s=>s.k==='ending').length, expired = st.filter(s=>s.k==='expired').length;
+  const nov = S.members.flatMap(m=>m.hist).filter(h=>h.addedOn>='2026-11-01').reduce((a,h)=>a+Number(h.paid),0);
+  const due = S.members.filter(m=>['ending','expired'].includes(status(m).k)).sort((a,b)=>status(a).days-status(b).days);
+  return header('Ironline Fitness · Indiranagar · Sunday, 1 Nov 2026','Good morning, Vikas') + `
+  <div class="kpis">
+    <div class="card kpi"><div class="k">Active members</div><div class="v num">${active}</div></div>
+    <div class="card kpi"><div class="k">Ending in 7 days</div><div class="v num" style="color:var(--org)">${ending}</div></div>
+    <div class="card kpi"><div class="k">Expired</div><div class="v num" style="color:var(--red)">${expired}</div></div>
+    <div class="card kpi"><div class="k">Collected today</div><div class="v num" style="color:var(--lime)">${rs(nov)}</div></div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="row sp wrap"><h2>Renewals due</h2><span class="small mut">Expired or ending within 7 days</span></div>
+    <div class="tblwrap" style="margin-top:6px"><table><thead><tr><th>MEMBER</th><th>PLAN</th><th>ENDS ON</th><th>STATUS</th><th></th></tr></thead><tbody>
+    ${due.map(m=>{const c=cur(m), s=status(m);return `<tr class="click" data-member="${m.id}"><td><div class="row">${avatar(m.name,32)}<b style="font-weight:650">${esc(m.name)}</b></div></td><td>${esc(plan(c.planId)?.name)}</td><td class="mut num">${fmt(c.end)}</td><td><span class="pill ${s.cls}">${s.label}</span></td><td style="text-align:right"><button class="btn sm" type="button" data-member="${m.id}">Renew</button></td></tr>`}).join('') || `<tr><td colspan="5" class="mut">No renewals due. Everyone is paid up.</td></tr>`}
+    </tbody></table></div>
+  </div>
+  ${S.requests.length ? `<div class="hint" style="margin-top:14px;background:var(--blueD);border-color:rgba(91,185,255,.3)">${ic('users',18,'#5BB9FF')}<span style="flex:1"><b>${S.requests.length} join requests</b> from the app are waiting for approval.</span><button class="btn sm" type="button" data-act="toRequests">Review</button></div>` : ''}`;
+}
+
+function vMembers(){
+  const counts = {all:S.members.length, active:0, ending:0, expired:0, requests:S.requests.length};
+  S.members.forEach(m=>{const k=status(m).k; if(k==='active')counts.active++; if(k==='ending'){counts.ending++;counts.active++;} if(k==='expired')counts.expired++;});
+  const tabs = [['all','All members'],['active','Active'],['ending','Ending in 7 days'],['expired','Expired'],['requests','Join requests']];
+  let body;
+  if (memberTab==='requests'){
+    body = S.requests.length ? `<table><thead><tr><th>NAME</th><th>PHONE</th><th>REQUESTED</th><th></th></tr></thead><tbody>${S.requests.map(r=>`<tr><td><div class="row">${avatar(r.name,32)}<b style="font-weight:650">${esc(r.name)}</b></div></td><td class="num mut">+91 ${esc(r.phone)}</td><td class="mut">${esc(r.when)}</td><td style="text-align:right"><div class="row" style="justify-content:flex-end"><button class="btn ghost sm" type="button" data-reject="${r.id}">Decline</button><button class="btn sm" type="button" data-approve="${r.id}">Approve &amp; add plan</button></div></td></tr>`).join('')}</tbody></table>` : `<p class="mut" style="padding:12px 4px">No pending join requests.</p>`;
+  } else {
+    const list = S.members.filter(m=>{const k=status(m).k; if(memberTab==='active'&&!(k==='active'||k==='ending'))return false; if(memberTab==='ending'&&k!=='ending')return false; if(memberTab==='expired'&&k!=='expired')return false; const s=(m.name+' '+m.id+' '+m.phone).toLowerCase(); return s.includes(q.toLowerCase());});
+    body = `<table><thead><tr><th>MEMBER</th><th>PLAN</th><th>ENDS ON</th><th>DAYS LEFT</th><th>PHONE</th><th></th></tr></thead><tbody>${list.map(m=>{const c=cur(m), s=status(m);return `<tr class="click" data-member="${m.id}"><td><div class="row">${avatar(m.name)}<div><div style="font-weight:650">${esc(m.name)}</div><div class="small mut num">${m.id}</div></div></div></td><td>${c?esc(plan(c.planId)?.name):'—'}</td><td class="mut num">${c?fmt(c.end):'—'}</td><td><span class="pill ${s.cls}">${s.label}</span></td><td class="mut num">+91 ${esc(m.phone)}</td><td style="text-align:right"><button class="btn ${s.k==='active'?'ghost':''} sm" type="button" data-member="${m.id}">${s.k==='active'?'Open':'Renew'}</button></td></tr>`}).join('') || `<tr><td colspan="6" class="mut">No members match.</td></tr>`}</tbody></table>`;
+  }
+  return header('Ironline Fitness · Indiranagar','Members', `<label class="search">${ic('search',16,'#8C948D')}<input id="q" type="search" placeholder="Name, phone or member ID" value="${esc(q)}" aria-label="Search members"></label>`) + `
+  <div class="tabs" role="group" aria-label="Filter members">${tabs.map(([k,l])=>`<button class="tab" type="button" data-tab="${k}" aria-pressed="${memberTab===k}">${l}<span class="num">${counts[k]}</span></button>`).join('')}</div>
+  <div class="card" style="margin-top:14px;padding:8px 14px"><div class="tblwrap">${body}</div></div>`;
+}
+
+let form = null;
+function newForm(m){
+  const c = cur(m); const visible = S.plans;
+  const p = c ? plan(c.planId) : visible[0];
+  const active = c && daysLeft(c.end) >= 0;
+  const start = active ? addDays(c.end,1) : iso(TODAY);
+  const first = !m.hist.length;
+  return {planId:p.id, start, end:endFor(start,p.months), price:p.price + (first?p.joining:0), discount:0, paid:p.price + (first?p.joining:0), mode:'Cash', by:'Priya (Front desk)', note:'', wa:true, notify:true, endEdited:false, paidEdited:false};
+}
+function vMember(){
+  const m = member(memberId); if (!m) { view='members'; return vMembers(); }
+  if (!form || form.mid !== m.id) { form = newForm(m); form.mid = m.id; }
+  const c = cur(m), s = status(m), first = !m.hist.length;
+  const p = plan(form.planId);
+  return header(`<button class="btn ghost sm" type="button" data-nav="members" style="margin-bottom:8px">${ic('back',14)} Members</button><br>Members › ${esc(m.name)}`, s.k==='none'?'Add membership':'Renew membership', `<span class="btn ghost" style="font-weight:600">${ic('phone',15)} +91 ${esc(m.phone)}</span>`) + `
+  <div style="display:flex;flex-direction:column;gap:14px">
+    <div class="grid2">
+      <div class="card" style="text-align:center">${avatar(m.name,72,'margin:0 auto')}
+        <div style="font-weight:750;font-size:18px;margin-top:10px">${esc(m.name)}</div><div class="small mut num" style="margin-top:3px">${m.id} · Indiranagar</div>
+        <div class="row" style="justify-content:center;margin-top:10px"><span class="pill ${s.cls}">● ${s.k==='expired'?'Expired':s.k==='none'?'No plan yet':s.k==='ending'?'Ending soon':'Active'}</span></div></div>
+      <div class="card"><div class="small mut" style="font-weight:700;letter-spacing:.06em">CURRENT MEMBERSHIP</div>
+        ${c ? `<div style="font-weight:750;font-size:17px;margin-top:6px">${esc(plan(c.planId)?.name)}</div><div class="num mut" style="margin-top:6px;font-size:13px">${fmt(c.start)} → ${fmt(c.end)}</div><div style="margin-top:8px"><span class="pill ${s.cls}">${s.k==='expired'?`Ended ${-s.days} day${-s.days===1?'':'s'} ago`:(s.days===0?s.label:s.label+' left')}</span></div>` : `<p class="mut" style="margin:8px 0 0">No membership yet. Add the first one here.</p>`}
+      </div>
+    </div>
+    <div class="card">
+      <div class="row sp wrap"><h2>New membership details</h2><span class="small mut">Dates and price fill in from the plan</span></div>
+      <div class="grid3" style="margin-top:14px">
+        <div class="field"><label for="fPlan">Plan</label><select class="inp" id="fPlan">${S.plans.map(pl=>`<option value="${pl.id}" ${pl.id===form.planId?'selected':''}>${esc(pl.name)} · ${rs(pl.price)}${pl.visible?'':' (hidden)'}</option>`).join('')}</select></div>
+        <div class="field"><label for="fStart">Start date</label><input class="inp num" type="date" id="fStart" value="${form.start}"></div>
+        <div class="field"><label for="fEnd">End date ${form.endEdited?'':'<span style="color:var(--lime)">· auto</span>'}</label><input class="inp num" type="date" id="fEnd" value="${form.end}"></div>
+        <div class="field"><label for="fPrice">Price${first&&p.joining?` <span class="dim">(incl. ₹${p.joining} joining)</span>`:''}</label><input class="inp num" type="number" min="0" id="fPrice" value="${form.price}"></div>
+        <div class="field"><label for="fDisc">Discount (₹)</label><input class="inp num" type="number" min="0" id="fDisc" value="${form.discount}"></div>
+        <div class="field"><label for="fPaid">Amount received (₹)</label><input class="inp num" type="number" min="0" id="fPaid" value="${form.paid}" style="color:var(--lime)"></div>
+      </div>
+      <div class="field" style="margin-top:14px"><label id="modeL">How did the member pay?</label><div class="seg" role="group" aria-labelledby="modeL">${['Cash','UPI','Card','Bank transfer','Not paid yet'].map(x=>`<button type="button" data-mode="${x}" aria-pressed="${form.mode===x}">${x}</button>`).join('')}</div></div>
+      <div class="grid3" style="margin-top:14px;grid-template-columns:1fr 2fr">
+        <div class="field"><label for="fBy">Received by</label><select class="inp" id="fBy">${['Priya (Front desk)','Vikas (Owner)'].map(x=>`<option ${x===form.by?'selected':''}>${x}</option>`).join('')}</select></div>
+        <div class="field"><label for="fNote">Note (optional)</label><input class="inp" id="fNote" value="${esc(form.note)}" placeholder="e.g. Diwali offer, ₹500 off"></div>
+      </div>
+      <div class="err" id="fErr" style="margin-top:10px"></div>
+      <div class="row sp wrap" style="padding-top:12px;border-top:1px solid var(--line);margin-top:4px">
+        <div class="row wrap" style="gap:16px"><label class="chk"><input type="checkbox" id="fWa" ${form.wa?'checked':''}>Send receipt on WhatsApp</label><label class="chk"><input type="checkbox" id="fNotify" ${form.notify?'checked':''}>Notify member in app</label></div>
+        <button class="btn" type="button" id="fSave">${ic('sync',16,'#111',2.2)} Save &amp; update app</button>
+      </div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px;padding:12px 14px"><div class="row sp wrap" style="padding:4px 4px 6px"><h2>Membership history</h2><span class="small mut">Every change is logged with who made it</span></div>
+    <div class="tblwrap"><table><thead><tr><th>ADDED ON</th><th>PLAN</th><th>PERIOD</th><th>PAID</th><th>MODE</th><th>ADDED BY</th><th>STATUS</th></tr></thead><tbody>
+    ${[...m.hist].reverse().map((h,i)=>{const d=daysLeft(h.end); const st = i===0 ? (d<0?['bad','Expired']:d<=7?['warn','Ending']:['ok','Active']) : (parse(h.start)>TODAY?['info','Upcoming']:['off','Ended']); return `<tr><td class="num">${fmt(h.addedOn)}</td><td style="font-weight:600">${esc(plan(h.planId)?.name)}</td><td class="mut num">${fmt(h.start)} – ${fmt(h.end)}</td><td class="num" style="font-weight:600">${h.mode==='Not paid yet'?'<span style="color:var(--org)">Due '+rs(h.price-h.discount)+'</span>':rs(h.paid)}</td><td>${esc(h.mode)}</td><td class="mut">${esc(h.by)}</td><td><span class="pill ${st[0]}">${st[1]}</span></td></tr>`}).join('') || `<tr><td colspan="7" class="mut">No history yet.</td></tr>`}
+    </tbody></table></div></div>`;
+}
+
+function vPlans(){
+  return header('Ironline Fitness · Admin panel','Membership plans', `<button class="btn" type="button" data-act="newPlan">+ New plan</button>`) + `
+  <div class="hint" style="margin-bottom:14px">${ic('info',18,'#C8FF3E')}<span>Plans you create here show in your members' app when <b>Show in app</b> is on. Only your gym's members see them. Changing a price affects new and renewed memberships only.</span></div>
+  <div class="plans">${S.plans.map(p=>{const n=S.members.filter(m=>{const c=cur(m);return c&&c.planId===p.id&&daysLeft(c.end)>=0}).length; return `<div class="card" style="${p.visible?'':'opacity:.75'}">
+    <div class="row sp"><b style="font-size:16px">${esc(p.name)}</b><span class="pill ${p.visible?'ok':'off'}">${p.visible?'In app':'Hidden'}</span></div>
+    <div class="row" style="align-items:baseline;gap:6px;margin-top:10px"><span class="price num">${rs(p.price)}</span><span class="mut small">/ ${p.months} month${p.months>1?'s':''}</span></div>
+    <div class="small mut" style="margin-top:2px">${p.joining?'Joining fee '+rs(p.joining):'No joining fee'}</div>
+    <div class="row wrap" style="gap:6px;margin-top:10px">${p.features.map(f=>`<span class="chip">${esc(f)}</span>`).join('')}</div>
+    <div class="row sp" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="small mut"><b class="num" style="color:var(--fg)">${n}</b> active</span>
+      <div class="row"><button class="switch" type="button" role="switch" aria-checked="${p.visible}" aria-label="Show ${esc(p.name)} in member app" data-vis="${p.id}"></button><button class="btn ghost sm" type="button" data-edit="${p.id}">${ic('edit',13)} Edit</button></div></div>
+  </div>`}).join('')}</div>`;
+}
+
+function planModal(id){
+  const p = id ? plan(id) : {name:'', months:1, price:'', joining:0, features:[], visible:true};
+  $('#modalRoot').innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="pmT"><div class="card">
+    <div class="row sp"><h2 id="pmT" style="font-size:20px">${id?'Edit plan':'New plan'}</h2><button class="btn ghost sm" type="button" data-act="closeModal" aria-label="Close">${ic('x',14)}</button></div>
+    <div style="display:grid;gap:14px;margin-top:16px">
+      <div class="field"><label for="pName">Plan name</label><input class="inp" id="pName" value="${esc(p.name)}" placeholder="e.g. Couple Quarterly"></div>
+      <div class="grid3" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="field"><label for="pMonths">Months</label><input class="inp num" type="number" min="1" max="36" id="pMonths" value="${p.months}"></div>
+        <div class="field"><label for="pPrice">Price (₹)</label><input class="inp num" type="number" min="0" id="pPrice" value="${p.price}"></div>
+        <div class="field"><label for="pJoin">Joining fee (₹)</label><input class="inp num" type="number" min="0" id="pJoin" value="${p.joining}"></div>
+      </div>
+      <div class="field"><label for="pFeat">What's included (comma separated)</label><input class="inp" id="pFeat" value="${esc(p.features.join(', '))}" placeholder="Gym floor, Cardio, Locker"></div>
+      <label class="chk"><input type="checkbox" id="pVis" ${p.visible?'checked':''}>Show this plan in the member app</label>
+      <div class="err" id="pErr"></div>
+      <div class="row" style="justify-content:flex-end"><button class="btn ghost" type="button" data-act="closeModal">Cancel</button><button class="btn" type="button" data-saveplan="${id||''}">Save plan</button></div>
+    </div></div></div>`;
+  $('#pName').focus();
+}
+
+function vAttendance(){
+  const s = lastScan;
+  const stats = {total:S.checkins.length + 182, blocked:S.checkins.filter(c=>c.result==='bad').length + 2};
+  return header('Front desk · Indiranagar · Sunday, 1 Nov','Attendance') + `
+  <div class="layout2 la">
+    <div class="card">
+      <div class="row sp"><h2>Scan member QR</h2><span class="pill ok">● Demo scanner</span></div>
+      <div class="scan" style="margin-top:12px"><div class="box">${['left:0;top:0;border-left-width:4px;border-top-width:4px','right:0;top:0;border-right-width:4px;border-top-width:4px','left:0;bottom:0;border-left-width:4px;border-bottom-width:4px','right:0;bottom:0;border-right-width:4px;border-bottom-width:4px'].map(x=>`<i style="${x}"></i>`).join('')}<div class="line"></div></div></div>
+      <div class="field" style="margin-top:12px"><label for="scanSel">Pretend this member scans their QR</label><select class="inp" id="scanSel">${S.members.map(m=>`<option value="${m.id}">${esc(m.name)} · ${status(m).label}</option>`).join('')}</select></div>
+      <button class="btn" type="button" data-act="scan" style="width:100%;margin-top:10px">Scan</button>
+      ${s ? (()=>{const m=member(s.id), c=cur(m), ok=s.result!=='bad'; return `<div class="result" style="margin-top:14px;border-color:${ok?'#5E7A2A':'rgba(255,90,90,.5)'};background:${ok?'linear-gradient(135deg,rgba(200,255,62,.16),rgba(200,255,62,.04))':'rgba(255,90,90,.08)'}">
+        <div class="row">${avatar(m.name,48)}<div style="flex:1"><div style="font-weight:800;font-size:17px">${esc(m.name)}</div><div class="small mut num">${m.id} · ${c?esc(plan(c.planId)?.name):'No plan'}</div></div><span class="av" style="background:${ok?'var(--lime)':'var(--red)'}">${ic(ok?'check':'x',18,'#111',3)}</span></div>
+        <div style="margin-top:10px;font-weight:700;color:${ok?'var(--lime)':'var(--red)'}">${esc(s.text)} · ${s.time}</div>
+        ${ok?'':`<button class="btn sm" type="button" data-member="${m.id}" style="margin-top:10px">Renew now</button>`}</div>`})() : ''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))"><div class="card kpi"><div class="k">Check-ins today</div><div class="v num">${stats.total}</div></div><div class="card kpi"><div class="k">In the gym now</div><div class="v num" style="color:var(--lime)">82</div></div><div class="card kpi"><div class="k">Blocked today</div><div class="v num" style="color:var(--red)">${stats.blocked}</div></div></div>
+      <div class="card" style="padding:12px 14px"><div class="row sp" style="padding:4px 4px 6px"><h2>Latest check-ins</h2><span class="small mut">Live</span></div>
+      <div class="tblwrap"><table><thead><tr><th>TIME</th><th>MEMBER</th><th>PLAN</th><th>RESULT</th></tr></thead><tbody>${S.checkins.map(ci=>{const m=member(ci.id), c=cur(m); return `<tr><td class="num mut">${ci.time}</td><td><div class="row">${avatar(m.name,30)}<span style="font-weight:600">${esc(m.name)}</span></div></td><td class="mut">${c?esc(plan(c.planId)?.name):'—'}</td><td><span class="pill ${ci.result}">${esc(ci.text)}</span></td></tr>`}).join('')}</tbody></table></div></div>
+    </div>
+  </div>`;
+}
+
+function vSupport(){
+  const t = S.tickets.find(x=>x.id===ticketId) || S.tickets[0];
+  const m = member(t.member);
+  return header('Ironline Fitness','Member support') + `
+  <div class="layout2 ls">
+    <div class="card tlist" style="padding:8px">${S.tickets.map(x=>{const mm=member(x.member);return `<button type="button" data-ticket="${x.id}" aria-current="${x.id===t.id}">${avatar(mm.name,34)}<span style="flex:1;min-width:0"><b style="display:block;font-size:14px">${esc(mm.name)}</b><span class="small mut" style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(x.subject)}</span></span><span class="pill ${x.open?'warn':'ok'}" style="font-size:11px">${x.open?'Open':'Resolved'}</span></button>`}).join('')}
+      <p class="small dim" style="padding:8px 10px;line-height:1.5;margin:6px 0 0">App problems go to GymMantra support. You only see questions about your gym.</p></div>
+    <div class="card" style="padding:0;display:flex;flex-direction:column;min-width:0">
+      <div class="row sp wrap" style="padding:14px 16px;border-bottom:1px solid var(--line)"><div class="row">${avatar(m.name)}<div><b>${esc(m.name)}</b><div class="small mut num">#${t.id} · ${esc(t.topic)}</div></div></div>
+        <div class="row"><button class="btn ghost sm" type="button" data-member="${m.id}">Open member</button>${t.open?`<button class="btn sm" type="button" data-resolve="${t.id}">Mark resolved</button>`:'<span class="pill ok">Resolved</span>'}</div></div>
+      <div class="chat">${t.msgs.map(x=>`<div class="msg ${x.me?'me':'them'}">${esc(x.text)}<div class="t">${x.me?esc(x.by||'Priya')+' · ':''}${esc(x.t)}</div></div>`).join('')}</div>
+      <div style="padding:12px 16px;border-top:1px solid var(--line)">
+        <div class="row wrap" style="gap:6px;margin-bottom:10px">${["Thanks, we've fixed it","Please visit the front desk","We'll call you shortly"].map(x=>`<button class="tab" type="button" data-quick="${esc(x)}" style="font-size:12px;padding:6px 10px">${x}</button>`).join('')}</div>
+        <div class="row"><input class="inp" id="reply" placeholder="Write a reply…" aria-label="Reply"><button class="btn" type="button" data-act="send" aria-label="Send reply">${ic('send',16,'#111',2.2)}</button></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- member app preview
+let pvTab = 'membership', notifT;
+function renderPhone(note){
+  const sel = $('#pvSel');
+  sel.innerHTML = S.members.map(m=>`<option value="${m.id}" ${m.id===S.pv?'selected':''}>${esc(m.name)}</option>`).join('');
+  const m = member(S.pv) || S.members[0];
+  const c = cur(m), s = status(m), p = c && plan(c.planId);
+  let inner;
+  if (pvTab==='membership'){
+    const pct = c ? Math.max(0, Math.min(1, s.days / Math.max(1, daysLeft(c.end) - daysLeft(c.start)))) : 0;
+    const C = 2*Math.PI*21;
+    const card = !c ? `<div class="mcard none"><b style="font-size:17px">No membership yet</b><p class="mut small" style="margin:6px 0 0;line-height:1.45">Your gym will add your plan after you pay at the front desk.</p></div>`
+      : s.k==='expired' ? `<div class="mcard exp"><div style="font-weight:800;letter-spacing:2px;font-size:11px;opacity:.75">IRONLINE FITNESS</div><div style="font-size:21px;font-weight:800;margin-top:12px">${esc(p.name)}</div><div class="small" style="opacity:.7">${esc(m.name)} · ${m.id}</div><div style="margin-top:12px;font-weight:800;font-size:18px;color:var(--org)">Expired on ${fmt(c.end)}</div></div>`
+      : `<div class="mcard"><div class="row sp"><div style="font-weight:800;letter-spacing:2px;font-size:11px">IRONLINE FITNESS</div><div style="font-weight:700;font-size:11px;opacity:.7">Indiranagar</div></div><div style="font-size:21px;font-weight:800;margin-top:12px;letter-spacing:-.3px">${esc(p.name)}</div><div style="font-size:12px;font-weight:600;opacity:.7">${esc(m.name)} · ${m.id}</div>
+         <div class="row" style="margin-top:12px"><svg width="50" height="50" viewBox="-25 -25 50 50" aria-hidden="true"><circle r="21" fill="none" stroke="rgba(0,0,0,.15)" stroke-width="5"/><circle r="21" fill="none" stroke="#111" stroke-width="5" stroke-linecap="round" stroke-dasharray="${(C*pct).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90)"/></svg><div><div class="num" style="font-size:21px;font-weight:800;line-height:1">${s.days} days left</div><div class="num" style="font-size:11.5px;font-weight:600;opacity:.65;margin-top:3px">${fmt(c.start)} → ${fmt(c.end)}</div></div></div></div>`;
+    inner = `<div class="row sp" style="margin:4px 0 12px"><b style="font-size:21px;letter-spacing:-.4px">My membership</b>${c?`<span class="pill ${s.cls}">${s.k==='expired'?'Expired':s.k==='ending'?'Ending soon':'● Active'}</span>`:''}</div>${card}
+      ${c?`<div class="card" style="margin-top:10px;padding:4px 14px;border-radius:16px"><div class="prow"><span class="mut">Amount paid</span><b class="num">${c.mode==='Not paid yet'?'<span style="color:var(--org)">Due '+rs(c.price-c.discount)+'</span>':rs(c.paid)}</b></div><div class="prow"><span class="mut">Paid by</span><b>${esc(c.mode)}</b></div></div>
+      <div class="row" style="margin-top:10px;padding:10px 12px;border-radius:14px;background:var(--card);border:1px solid var(--line)"><span class="av" style="width:30px;height:30px;border-radius:9px;background:var(--limeD)">${ic('sync',15,'#C8FF3E')}</span><div><b style="font-size:12.5px">Updated by your gym</b><div class="small mut">${esc(c.by)} · ${fmt(c.addedOn)}</div></div></div>`:''}
+      <div class="hint o" style="margin-top:10px;font-size:12px">${ic('info',16,'#FF7A2F')}<span>Your gym manages your membership. To renew, visit the front desk or contact the gym.</span></div>
+      <div class="row" style="margin-top:10px"><span class="btn ghost" style="flex:1;font-size:13px">${ic('phone',15)} Call gym</span><span class="btn wa" style="flex:1;font-size:13px">${ic('wa',15,'#6EE59A')} WhatsApp</span></div>`;
+  } else {
+    const vis = S.plans.filter(x=>x.visible);
+    inner = `<b style="font-size:19px;letter-spacing:-.4px;display:block;margin:4px 0 4px">Membership plans</b><p class="small mut" style="margin:0 0 8px;line-height:1.45">Set by Ironline Fitness. Pay at the front desk; the gym activates your plan.</p>` +
+      (vis.map(x=>{const mine = c && c.planId===x.id && s.k!=='expired'; return `<div class="card" style="padding:12px 14px;border-radius:16px;margin-top:8px;${mine?'border-color:#5E7A2A':''}"><div class="row sp"><b>${esc(x.name)}</b>${mine?'<span class="pill ok">Your plan</span>':'<span class="small" style="color:var(--lime);font-weight:700">Ask gym</span>'}</div><div class="row" style="align-items:baseline;gap:5px;margin-top:4px"><span class="num" style="font-size:20px;font-weight:800">${rs(x.price)}</span><span class="small mut">/ ${x.months} mo</span></div><div class="small mut">${x.joining?'+ '+rs(x.joining)+' joining fee':'No joining fee'}</div></div>`}).join('') || '<p class="mut">Your gym has not published any plans yet.</p>');
+  }
+  $('#phone').innerHTML = `<div class="sbar"><span>9:41</span><span>●●● ▮</span></div>
+    <div class="notif" id="notif"><span class="av" style="width:34px;height:34px;border-radius:10px;background:var(--lime)">${ic('check',17,'#111',3)}</span><div style="flex:1;min-width:0"><b style="font-size:13px">${esc(note?.title||'')}</b><div class="small mut" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(note?.body||'')}</div></div><span class="small dim">now</span></div>
+    <div class="ptabs" role="group" aria-label="Member app screen"><button type="button" data-pv="membership" aria-pressed="${pvTab==='membership'}">My membership</button><button type="button" data-pv="plans" aria-pressed="${pvTab==='plans'}">Gym plans</button></div>
+    <div class="pbody">${inner}</div>`;
+  if (note){ requestAnimationFrame(()=>requestAnimationFrame(()=>$('#notif').classList.add('show'))); clearTimeout(notifT); notifT = setTimeout(()=>{ const n=$('#notif'); n&&n.classList.remove('show'); }, 4200); }
+}
+
+// ---------- render & events
+function render(){
+  renderNav();
+  $('#main').innerHTML = view==='dashboard'?vDashboard():view==='members'?vMembers():view==='member'?vMember():view==='plans'?vPlans():view==='attendance'?vAttendance():vSupport();
+  renderPhone();
+}
+
+function readForm(){
+  form.planId = $('#fPlan').value; form.start = $('#fStart').value; form.end = $('#fEnd').value;
+  form.price = Number($('#fPrice').value); form.discount = Number($('#fDisc').value); form.paid = Number($('#fPaid').value);
+  form.by = $('#fBy').value; form.note = $('#fNote').value; form.wa = $('#fWa').checked; form.notify = $('#fNotify').checked;
+}
+document.addEventListener('input', e => {
+  if (e.target.id === 'q'){ q = e.target.value; const pos = e.target.selectionStart; $('#main').innerHTML = vMembers(); const i = $('#q'); i.focus(); i.setSelectionRange(pos,pos); return; }
+  if (!form || view!=='member') return;
+  const id = e.target.id;
+  if (['fPrice','fDisc'].includes(id)){ readForm(); if (!form.paidEdited) { form.paid = Math.max(0, form.price - form.discount); $('#fPaid').value = form.paid; } }
+  if (id==='fPaid') { form.paidEdited = true; readForm(); }
+});
+document.addEventListener('change', e => {
+  const id = e.target.id;
+  if (id==='pvSel'){ S.pv = e.target.value; save(); renderPhone(); return; }
+  if (!form || view!=='member') return;
+  if (id==='fPlan' || id==='fStart'){
+    readForm(); const p = plan(form.planId), m = member(memberId), first = !m.hist.length;
+    form.end = endFor(form.start, p.months); form.endEdited = false;
+    if (id==='fPlan'){ form.price = p.price + (first?p.joining:0); form.paidEdited=false; form.paid = Math.max(0, form.price - form.discount); }
+    $('#main').innerHTML = vMember();
+  }
+  if (id==='fEnd'){ readForm(); form.endEdited = true; }
+});
+document.addEventListener('keydown', e => {
+  if (e.key==='Enter' && e.target.id==='reply') sendReply();
+  if (e.key==='Escape' && $('#modalRoot').innerHTML) $('#modalRoot').innerHTML = '';
+});
+function sendReply(text){
+  const t = S.tickets.find(x=>x.id===ticketId); const v = (text ?? $('#reply').value).trim(); if (!v) return;
+  t.msgs.push({me:true, text:v, t:'Just now', by:'Priya'}); save(); render(); toast('Reply sent to ' + member(t.member).name.split(' ')[0] + "'s app");
+}
+document.addEventListener('click', e => {
+  const el = e.target.closest('button,tr.click'); if (!el) return;
+  const d = el.dataset;
+  if (d.nav){ go(d.nav); return; }
+  if (d.member){ e.stopPropagation(); form = null; go('member', d.member); return; }
+  if (d.tab){ memberTab = d.tab; $('#main').innerHTML = vMembers(); return; }
+  if (d.mode){ readForm(); form.mode = d.mode; if (d.mode==='Not paid yet'){ form.paid = 0; form.paidEdited = true; } else if (form.paid===0){ form.paidEdited=false; form.paid=Math.max(0,form.price-form.discount);} $('#main').innerHTML = vMember(); return; }
+  if (d.pv){ pvTab = d.pv; renderPhone(); return; }
+  if (d.vis){ const p = plan(d.vis); p.visible = !p.visible; save(); render(); toast(p.visible ? `${p.name} now shows in the member app` : `${p.name} is hidden from the member app`); return; }
+  if (d.edit){ planModal(d.edit); return; }
+  if (d.ticket){ ticketId = d.ticket; render(); return; }
+  if (d.quick){ sendReply(d.quick); return; }
+  if (d.resolve){ S.tickets.find(x=>x.id===d.resolve).open = false; save(); render(); toast('Ticket marked as resolved'); return; }
+  if (d.approve){ const r = S.requests.find(x=>x.id===d.approve); S.requests = S.requests.filter(x=>x!==r); const id = 'IRF-' + (20419 + S.members.length); S.members.unshift({id, name:r.name, phone:r.phone, joined:iso(TODAY), hist:[]}); save(); form=null; toast(`${r.name} approved. Now add their plan.`); go('member', id); return; }
+  if (d.reject){ S.requests = S.requests.filter(x=>x.id!==d.reject); save(); render(); toast('Join request declined'); return; }
+  if (d.saveplan !== undefined){
+    const name = $('#pName').value.trim(), months = Number($('#pMonths').value), price = Number($('#pPrice').value), joining = Number($('#pJoin').value)||0;
+    const err = !name ? 'Enter a plan name.' : !(months>=1) ? 'Months must be 1 or more.' : !(price>0) ? 'Enter a price above ₹0.' : '';
+    if (err){ $('#pErr').textContent = err; return; }
+    const features = $('#pFeat').value.split(',').map(s=>s.trim()).filter(Boolean), visible = $('#pVis').checked;
+    if (d.saveplan){ Object.assign(plan(d.saveplan), {name, months, price, joining, features, visible}); }
+    else S.plans.push({id:'p'+Date.now(), name, months, price, joining, features, visible});
+    save(); $('#modalRoot').innerHTML = ''; render(); toast(visible ? `${name} saved and shown in the member app` : `${name} saved (hidden from app)`); pvTab='plans'; renderPhone(); return;
+  }
+  switch (d.act){
+    case 'newPlan': planModal(); break;
+    case 'closeModal': $('#modalRoot').innerHTML = ''; break;
+    case 'toRequests': memberTab='requests'; go('members'); break;
+    case 'openPrev': $('#preview').classList.add('open'); break;
+    case 'scan': {
+      const m = member($('#scanSel').value), s = status(m);
+      const result = (s.k==='expired'||s.k==='none') ? 'bad' : s.k==='ending' ? 'warn' : 'ok';
+      const text = result==='bad' ? (s.k==='none'?'Blocked · no plan':'Blocked · expired') : result==='warn' ? 'Allowed · ends soon' : 'Allowed';
+      const mins = 53 + S.checkins.length - 5; const time = `${6 + Math.floor(mins/60)}:${String(mins%60).padStart(2,'0')} am`;
+      lastScan = {id:m.id, result, text, time}; S.checkins.unshift({time, id:m.id, result, text}); save(); render(); break;
+    }
+    case 'send': sendReply(); break;
+  }
+  if (el.id==='fSave'){
+    readForm();
+    const err = !form.start || !form.end ? 'Choose start and end dates.' : form.end < form.start ? 'End date must be after the start date.' : '';
+    if (err){ $('#fErr').textContent = err; return; }
+    const m = member(memberId), p = plan(form.planId);
+    m.hist.push({planId:form.planId, start:form.start, end:form.end, price:form.price, discount:form.discount, paid:form.mode==='Not paid yet'?0:form.paid, mode:form.mode, by:form.by, addedOn:iso(TODAY), note:form.note});
+    const notify = form.notify, wa = form.wa;
+    S.pv = m.id; pvTab='membership'; save(); form = null;
+    render();
+    renderPhone(notify ? {title:'Membership updated', body:`Ironline Fitness · ${p.name} till ${fmt(m.hist[m.hist.length-1].end)}`} : null);
+    $('#preview').classList.add('open');
+    toast(`Saved. ${m.name.split(' ')[0]}'s app is updated.${wa?' Receipt sent on WhatsApp.':''}`);
+  }
+  if (el.id==='closePrev') $('#preview').classList.remove('open');
+  if (el.id==='reset'){ S = seed(); save(); form=null; lastScan=null; memberTab='all'; q=''; go('dashboard'); toast('Sample data restored'); }
+});
+
+render();
+})();
+</script>
