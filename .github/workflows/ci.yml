@@ -23,6 +23,7 @@ jobs:
   firebase-emulator:
     # Same API tests, but against the real Firebase Auth + Firestore adapters and firestore.rules
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -31,4 +32,8 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: "21" }
       - run: pnpm install --no-frozen-lockfile
-      - run: npx -y firebase-tools@13.29.1 emulators:exec --only auth,firestore --project demo-gymmantra "cd apps/worker && FIREBASE_EMULATOR=1 npx jest --runInBand"
+      - name: API tests on the Firebase emulators
+        run: npx -y firebase-tools@13.29.1 emulators:exec --only auth,firestore --project demo-gymmantra "cd apps/worker && FIREBASE_EMULATOR=1 npx jest --runInBand --verbose --forceExit --testTimeout=20000 test/rules.test.ts test/api.test.ts"
+      - name: Emulator logs
+        if: always()
+        run: tail -n 80 firestore-debug.log 2>/dev/null || true
