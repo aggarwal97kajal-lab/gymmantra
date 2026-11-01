@@ -7,9 +7,9 @@ services:
     plan: free
     region: singapore
     buildCommand: >-
-      corepack enable && pnpm install --no-frozen-lockfile --prod=false &&
-      pnpm --filter @gymmantra/admin build &&
-      pnpm --filter @gymmantra/api build
+      npx -y pnpm@9.12.3 install --no-frozen-lockfile --prod=false &&
+      npx -y pnpm@9.12.3 --filter @gymmantra/admin build &&
+      npx -y pnpm@9.12.3 --filter @gymmantra/api build
     startCommand: cd apps/api && npx prisma migrate deploy && node dist/main.js
     healthCheckPath: /api/v1/health
     autoDeploy: true
