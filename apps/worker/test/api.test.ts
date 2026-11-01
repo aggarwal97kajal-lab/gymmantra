@@ -1,10 +1,11 @@
 import { P } from '../src/core';
 import { makeQrToken } from '../src/lib/qr';
 import { addDays, todayIST } from '../src/lib/dates';
-import { setup } from './helpers';
+import { EMULATOR, resetEmulator, setup } from './helpers';
 
 let h: ReturnType<typeof setup>;
-beforeEach(() => {
+beforeEach(async () => {
+  if (EMULATOR) await resetEmulator();
   h = setup();
 });
 const qrSecret = async () => ((await h.store.get<any>(P.secrets)) as any).qr as string;
@@ -17,7 +18,7 @@ describe('auth', () => {
     const me = await h.api.get('/auth/me', u.token);
     expect(me.body.user.email).toBe(u.email);
     // Firebase holds the password account
-    expect(h.identity.accounts.has(u.email)).toBe(true);
+    if (!EMULATOR) expect(h.identity.accounts.has(u.email)).toBe(true);
   });
 
   it('rejects a duplicate signup', async () => {

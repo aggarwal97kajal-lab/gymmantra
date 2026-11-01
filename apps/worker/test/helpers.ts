@@ -1,15 +1,50 @@
 import { createApp } from '../src/app';
 import { Deps, resetSecretCache } from '../src/core';
-import { FakeIdentity } from '../src/identity';
+import { FakeIdentity, FirebaseIdentity, serverToken } from '../src/identity';
+import { FirestoreStore } from '../src/store/firestore';
 import { resetBaseCheck } from '../src/routes/super';
-import { MemoryStore } from '../src/store/store';
+import { MemoryStore, Store } from '../src/store/store';
+
+/**
+ * With FIREBASE_EMULATOR=1 the tests use the real Firebase adapters against the
+ * Firebase emulators (Auth + Firestore with firestore.rules). Otherwise they use
+ * the in-memory stand-ins.
+ */
+export const EMULATOR = process.env.FIREBASE_EMULATOR === '1';
+const PROJECT = 'demo-gymmantra';
+const AUTH_HOST = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com';
+const FS_HOST = 'http://127.0.0.1:8080';
+const SERVER_EMAIL = 'server@gymmantra.internal';
+const SERVER_PASSWORD = 'emulator-server-password';
+
+export async function resetEmulator() {
+  await fetch(`${FS_HOST}/emulator/v1/projects/${PROJECT}/databases/(default)/documents`, { method: 'DELETE' });
+  await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${PROJECT}/accounts`, { method: 'DELETE' });
+  const r = await fetch(`${AUTH_HOST}/v1/accounts:signUp?key=fake-key`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: SERVER_EMAIL, password: SERVER_PASSWORD, returnSecureToken: true }) });
+  if (!r.ok) throw new Error(`emulator server user: ${await r.text()}`);
+}
+
+class EmulatorIdentity extends FirebaseIdentity {
+  fake = new FakeIdentity();
+  // Google tokens cannot be minted in tests; use the fake verifier.
+  verifyGoogle(idToken: string) {
+    return this.fake.verifyGoogle(idToken);
+  }
+}
 import exercises from '../../../media/exercises/exercises.json';
 
 export function setup() {
   resetSecretCache();
   resetBaseCheck();
-  const store = new MemoryStore();
-  const identity = new FakeIdentity();
+  let store: Store;
+  let identity: any;
+  if (EMULATOR) {
+    identity = new EmulatorIdentity('fake-key', [], AUTH_HOST);
+    store = new FirestoreStore(PROJECT, serverToken(identity, SERVER_EMAIL, SERVER_PASSWORD), FS_HOST);
+  } else {
+    store = new MemoryStore();
+    identity = new FakeIdentity();
+  }
   const deps: Deps = { store, identity, superAdminEmail: 'boss@gymmantra.app', googleClientId: 'test-client', secure: false, assetJson: async () => exercises };
   const app = createApp(() => deps);
   let phoneN = 9000000000;
@@ -47,5 +82,5 @@ export function setup() {
     if (g.status !== 201) throw new Error(`gym failed ${JSON.stringify(g.body)}`);
     return { ...o, gym: g.body };
   }
-  return { app, store, identity, deps, api, signup, ownerWithGym, nextPhone };
+  return { app, store: store as MemoryStore, identity: identity as FakeIdentity, deps, api, signup, ownerWithGym, nextPhone };
 }

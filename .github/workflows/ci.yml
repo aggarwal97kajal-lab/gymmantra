@@ -19,3 +19,16 @@ jobs:
       - run: test -f apps/worker/public/index.html && test -f apps/worker/public/members/view/index.html && test -f apps/worker/public/media/exercises/exercises.json
       - name: Check the Cloudflare bundle (no upload)
         run: npx wrangler deploy --dry-run --outdir /tmp/wrangler-out
+
+  firebase-emulator:
+    # Same API tests, but against the real Firebase Auth + Firestore adapters and firestore.rules
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "21" }
+      - run: pnpm install --no-frozen-lockfile
+      - run: npx -y firebase-tools@13.29.1 emulators:exec --only auth,firestore --project demo-gymmantra "cd apps/worker && FIREBASE_EMULATOR=1 npx jest --runInBand"

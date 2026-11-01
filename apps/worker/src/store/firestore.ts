@@ -41,8 +41,9 @@ export class FirestoreStore implements Store {
   constructor(
     private projectId: string,
     private token: () => Promise<string>,
+    host = 'https://firestore.googleapis.com', // the Firebase emulator in tests
   ) {
-    this.base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+    this.base = `${host}/v1/projects/${projectId}/databases/(default)/documents`;
   }
 
   private name(path: string) {

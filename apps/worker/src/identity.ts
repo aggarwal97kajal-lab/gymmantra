@@ -25,10 +25,11 @@ export class FirebaseIdentity implements Identity {
   constructor(
     private apiKey: string,
     private googleClientIds: string[],
+    private host = 'https://identitytoolkit.googleapis.com', // the Firebase emulator in tests
   ) {}
 
   private async call(method: string, body: object) {
-    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${method}?key=${this.apiKey}`, {
+    const res = await fetch(`${this.host}/v1/accounts:${method}?key=${this.apiKey}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
