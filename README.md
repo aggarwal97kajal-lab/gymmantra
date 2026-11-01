@@ -10,7 +10,7 @@ Pilot gyms: **Lifetime Fitness** and **Athlete Gym**, Dwarka Sector 7, New Delhi
 
 | Folder | Contents |
 | --- | --- |
-| `apps/api` | Backend API (NestJS + PostgreSQL). Also serves the admin panel and exercise videos |
+| `apps/worker` | Server: Cloudflare Worker with Firebase login and Firestore database. Also serves the admin panel and exercise videos |
 | `apps/admin` | Admin panel and super admin (Next.js) |
 | `apps/mobile` | Member app (Flutter). Each push builds an APK under **Releases** |
 | `docs/MVP_SPEC.md` | What the MVP does and its business rules |

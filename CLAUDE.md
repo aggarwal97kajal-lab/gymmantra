@@ -6,11 +6,20 @@ Read this first, then `docs/MVP_SPEC.md` (features and business rules). The owne
 
 | Part | Folder | Stack | Status |
 | --- | --- | --- | --- |
-| Backend API | `apps/api` | NestJS 10, Prisma 5, PostgreSQL | Done, 30 tests |
-| Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the API | Done |
+| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 32 tests |
+| Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the Worker | Done |
 | Member app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v1), APK built by CI |
 
-One web service runs everything: the API serves the admin panel from `apps/admin/out` and the 3D exercise videos from `media/exercises`. Deploy with `render.yaml` (Render) and a Neon Postgres database. See `docs/DEPLOY_FROM_PHONE.md`.
+One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serves the admin panel and the 3D exercise videos as static assets. Firebase Authentication stores and checks passwords (via the Identity Toolkit REST API); Firestore is the database. The Worker reaches Firestore as the Firebase user `server@gymmantra.internal`, and `firestore.rules` lets only that user in. Apps never talk to Firebase directly. Setup: `docs/DEPLOY_FROM_PHONE.md`.
+
+### Data layout (Firestore)
+
+- `users/{uid}` holds profile, lockout counters, `memberships {tenantId: memberId}`, `requested`, and `staffOf {tenantId: {role, branchIds, active}}`. One read per request gives identity and gym access.
+- `phones/{+91…}` and `gymCodes/{code}` are unique indexes.
+- `tenants/{t}` has the gym and its branches. Under it: `members`, `subs` (memberships with embedded payments and freezes), `plans`, `staff`, `joinRequests`, `attendance`, `lastScan/{memberId}` (duplicate scans, recent visits, monthly count), `daily/{date}` (dashboard counters) and `audit`.
+- `tenants/{t}/roster/main` keeps every member's summary and membership terms in **one document**. Lists, dashboards and status checks read only this, to stay inside Firestore's free read quota. Keep it in sync whenever members or memberships change (`rosterPutSub`).
+- Top-level: `tickets` (messages embedded), `notifications/{uid}`, `photos/{uid}`, `saasPlans`, `settings/{platform,secrets,stats}`, `platformAudit`.
+- Queries are equality-only (no composite indexes needed). Sort in code.
 
 ## Decisions from the owner (Nov 2026)
 
@@ -23,27 +32,27 @@ One web service runs everything: the API serves the admin panel from `apps/admin
 
 ## Rules that must not break
 
-- Every gym-owned query is scoped by `tenantId` from the server-side session (`@Gym()` in `common/auth.ts`). The client may send `x-gym-id` only to choose among gyms where the user really is staff. Never trust a client tenant id.
-- `member_subscriptions` is insert-only. A correction is a new row with `replacesId`; payments and freezes carry over (`memberships/loader.ts`).
-- Membership status and the door decision live in `memberships/status.ts` (pure functions, unit tested).
-- Member QR tokens are HMAC-signed and change every 30 s (`attendance/qr-token.ts`). A second scan within 2 minutes is ignored.
+- Every gym-owned read and write uses the tenant from the server-side session (`gymOf()` in `apps/worker/src/core.ts`). The client may send `x-gym-id` only to choose among gyms where the user really is staff. Never trust a client tenant id.
+- Membership terms are never edited. A correction is a new `subs` document with `replacesId`; money already received (`carriedPaid`) and freezes carry over.
+- Membership status and the door decision live in `apps/worker/src/lib/status.ts` (pure functions, unit tested).
+- Member QR tokens are HMAC-signed and change every 30 s (`lib/qr.ts`; secrets are generated once and stored in `settings/secrets`). A second scan within 2 minutes is ignored.
 - Cookie sessions require the `x-gm-client` header on writes (CSRF). Mobile uses Bearer tokens.
-- Secrets only in environment variables (`apps/api/.env.example`).
+- Settings and secrets live in Cloudflare variables (`FIREBASE_API_KEY`, `FIREBASE_PROJECT_ID`, `SERVER_PASSWORD` as a secret, `SUPER_ADMIN_EMAIL`, optional `GOOGLE_CLIENT_IDS`). Never commit them.
+- Workers free plan: 10 ms CPU and 50 sub-requests per request. Keep Firestore calls per request small (batch reads with `getMany`).
 - Every change to memberships, plans, staff and SaaS plans writes `audit_logs`.
 
 ## Working in this sandbox
 
-npm and PyPI are blocked here; GitHub works. The `deps-snapshot` workflow installs `node_modules` on GitHub and pushes it to the `devdeps` branch as split tarballs; extract them to work offline. Postgres binaries come from the `@embedded-postgres/linux-x64` package (run `initdb`/`pg_ctl` as a non-root user). Prisma engines are in `node_modules/@prisma/engines`; set `PRISMA_QUERY_ENGINE_LIBRARY` and `PRISMA_SCHEMA_ENGINE_BINARY`. Flutter is not available locally; the `mobile` workflow analyzes, tests, builds and publishes the APK as a GitHub release.
+npm and PyPI are blocked here; GitHub works. The `deps-snapshot` workflow installs `node_modules` on GitHub and pushes it to the `devdeps` branch as split tarballs; extract them to work offline. Tests and the local preview use `MemoryStore` and `FakeIdentity`, so no Firebase account is needed to develop. Flutter is not available locally; the `mobile` workflow analyzes, tests, builds and publishes the APK as a GitHub release.
 
 ## Commands
 
 ```
 pnpm install
-pnpm --filter @gymmantra/api exec prisma migrate dev
-pnpm --filter @gymmantra/api seed          # demo data for the two pilot gyms
-TEST_DATABASE_URL=... pnpm --filter @gymmantra/api test
-pnpm --filter @gymmantra/admin build && pnpm --filter @gymmantra/api build
-cd apps/api && node dist/main.js           # API + admin on :4000
+pnpm --filter @gymmantra/worker test        # API tests (in-memory Firebase)
+pnpm run build:cf                           # admin panel + static assets
+pnpm --filter @gymmantra/worker dev         # preview on :8787 with two demo gyms
+npx wrangler deploy --dry-run --outdir /tmp/w   # check the Cloudflare bundle
 ```
 
 ## Next

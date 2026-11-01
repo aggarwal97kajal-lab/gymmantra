@@ -1,0 +1,13 @@
+rules_version = '2';
+// Only the GymMantra server (the Cloudflare Worker) may read or write.
+// Apps never talk to Firestore directly; they go through the server, which
+// checks who is allowed to see what.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null
+        && request.auth.token.email == 'server@gymmantra.internal'
+        && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+  }
+}

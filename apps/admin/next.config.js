@@ -1,5 +1,5 @@
 /** @type {import('next').NextConfig} */
-const API_URL = process.env.API_URL || 'http://localhost:4000';
+const API_URL = process.env.API_URL || 'http://localhost:8787';
 const dev = process.env.NODE_ENV === 'development';
 
 // The admin panel is a static site (out/) served by the API on the same

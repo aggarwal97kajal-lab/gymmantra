@@ -122,19 +122,19 @@ The full schema in the original brief (trainers, nutrition, marketplace, finance
 
 ## Tech stack, integrations and security
 
-The stack follows the original brief, trimmed to what the MVP uses.
+The MVP runs on free tiers with no credit card: Firebase for login and data, Cloudflare for the server and hosting.
 
 | Part | Choice |
 | --- | --- |
 | Member app | Flutter, Riverpod, GoRouter, Dio, secure storage, offline cache for QR and workouts |
-| Admin panel | Next.js, TypeScript, Tailwind CSS |
-| Backend | NestJS modular monolith, REST under /api/v1, background jobs on Redis |
-| Database | PostgreSQL with Prisma, migrations, row-level security per gym |
-| Login | Email/mobile + password (bcrypt), Google sign-in (ID token verified on the server). Phone OTP later |
+| Admin panel | Next.js (static), TypeScript, served by the Cloudflare Worker |
+| Backend | Cloudflare Worker (Hono), REST under /api/v1 |
+| Database | Firebase Firestore. Only the server account can read or write (security rules); every query is scoped to the signed-in user's gym on the server |
+| Login | Firebase Authentication (email/mobile + password), lockout added by the server; Google sign-in verified on the server. Phone OTP later |
 | Push | Firebase Cloud Messaging |
-| WhatsApp | Official WhatsApp Business API for receipts and renewal reminders |
-| Files | S3-compatible storage with signed URLs for profile photos and ticket screenshots |
-| Errors | Sentry |
+| WhatsApp | Each gym's own WhatsApp number; messages open ready-typed on the staff phone |
+| Files | Profile photos stored small in Firestore; exercise videos as static files on Cloudflare |
+| Errors | Cloudflare Workers logs |
 | 3D exercise guides | Pre-rendered MP4 videos stored as exercise media |
 
 **Security rules**
