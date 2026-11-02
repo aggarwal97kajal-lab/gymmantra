@@ -93,6 +93,7 @@ Isse database sirf GymMantra server khol sakta hai, koi aur nahi.
 **B4. Apna link dekho**
 - Worker ke page pe link dikhega, jaise `https://gymmantra.aapka-naam.workers.dev`.
 - Ye link **mujhe bhej do**, main member app ko isi link se jod ke nayi APK bana dunga.
+- **Enable Preview builds** ko off rakhna; GitHub pe kuch extra branches hain jinke builds bekaar chalenge.
 
 ---
 
