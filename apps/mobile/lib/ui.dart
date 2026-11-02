@@ -504,12 +504,10 @@ class NoticeBanner extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Text(context.t('NOTICE'), style: const TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.6)),
-              if (gym != null) ...[
-                const SizedBox(width: 6),
-                Flexible(child: Text('· $gym', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.mut, fontSize: 11))),
-              ],
               if (date != null) ...[const Spacer(), Text(fmtDate(date), style: TextStyle(color: p.mut, fontSize: 11))],
             ]),
+            // Full gym name (wraps to the next line instead of being cut).
+            if (gym != null) Text(gym!, style: TextStyle(color: p.mut, fontSize: 12, fontWeight: FontWeight.w600)),
             const SizedBox(height: 3),
             Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             const SizedBox(height: 2),

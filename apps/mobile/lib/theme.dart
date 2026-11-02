@@ -146,20 +146,27 @@ ThemeData buildTheme(Brightness b) {
   );
 }
 
-/// Fast screen change (220 ms, slight slide + fade). Flutter's default Android
-/// animation takes about 800 ms, which made screens feel slow to open.
+/// Fast screen change: the new screen slides in solid (no see-through fade, which looked
+/// like lag) in 240 ms while the old one moves a little to the left.
 class QuickPageTransitionsBuilder extends PageTransitionsBuilder {
   const QuickPageTransitionsBuilder();
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 220);
+  Duration get transitionDuration => const Duration(milliseconds: 240);
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 180);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
-    final a = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
-    return FadeTransition(
-      opacity: a,
-      child: SlideTransition(position: Tween(begin: const Offset(0.06, 0), end: Offset.zero).animate(a), child: child),
+    final inA = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    final outA = CurvedAnimation(parent: secondaryAnimation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return SlideTransition(
+      position: Tween(begin: Offset.zero, end: const Offset(-0.22, 0)).animate(outA),
+      child: SlideTransition(
+        position: Tween(begin: const Offset(1, 0), end: Offset.zero).animate(inA),
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: Theme.of(context).scaffoldBackgroundColor, boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 16)]),
+          child: child,
+        ),
+      ),
     );
   }
 }

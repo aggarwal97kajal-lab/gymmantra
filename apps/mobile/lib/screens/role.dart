@@ -9,7 +9,7 @@ import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
-import 'auth.dart' show LabeledField, LangSwitch;
+import 'auth.dart' show LabeledField, LangSwitch, PhoneField;
 import 'billing.dart' show Address, AddressFields;
 
 /// "Aap kaun ho?" — Member, Gym owner or Trainer.
@@ -177,7 +177,7 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
           Muted(context.t('First 3 months free. No card needed.'), size: 14.5),
           const SizedBox(height: 22),
           LabeledField(label: context.t('Gym name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
-          LabeledField(label: context.t('Gym phone number'), controller: phone, icon: Icons.phone_rounded, keyboard: TextInputType.phone),
+          PhoneField(label: context.t('Gym phone number'), controller: phone),
           AddressFields(value: place),
           const SizedBox(height: 4),
           ErrorText(error),
@@ -217,10 +217,10 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
   final years = TextEditingController();
   final phone = TextEditingController();
   Map? gym;
-  String speciality = 'Weight loss';
+  final specs = <String>{};
   bool busy = false;
   String? error;
-  static const specialities = ['Weight loss', 'Strength', 'Bodybuilding', 'Yoga', 'CrossFit', 'Cardio', 'Zumba'];
+  static const specialities = ['Weight loss', 'Strength', 'Bodybuilding', 'Yoga', 'CrossFit', 'Cardio', 'Zumba', 'Functional', 'Powerlifting', 'Calisthenics', 'Rehab', 'Nutrition'];
 
   Future<void> run(Future<void> Function() fn) async {
     FocusScope.of(context).unfocus();
@@ -287,27 +287,29 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
               ]),
             ),
             const SizedBox(height: 16),
-            Muted(context.t('Your speciality'), size: 13),
+            Muted(context.t('What do you teach? (choose one or more)'), size: 13),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 8, children: [
               for (final s in specialities)
-                ChoiceChip(
+                FilterChip(
                   label: Text(context.t(s)),
-                  selected: speciality == s,
+                  selected: specs.contains(s),
                   selectedColor: p.primary,
-                  labelStyle: TextStyle(color: speciality == s ? Colors.white : p.fg, fontWeight: FontWeight.w700),
-                  showCheckmark: false,
-                  onSelected: (_) => setState(() => speciality = s),
+                  checkmarkColor: Colors.white,
+                  labelStyle: TextStyle(color: specs.contains(s) ? Colors.white : p.fg, fontWeight: FontWeight.w700),
+                  onSelected: (on) => setState(() => on ? specs.add(s) : specs.remove(s)),
                 ),
             ]),
+            if (specs.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Muted(context.t('{n} chosen · members see these in the trainer list', {'n': specs.length}), size: 12)),
             const SizedBox(height: 14),
             LabeledField(label: context.t('Experience (years)'), controller: years, icon: Icons.timeline_rounded, keyboard: TextInputType.number),
             if (ref.watch(sessionProvider).user?['phone'] == null)
-              LabeledField(label: context.t('Your mobile number'), controller: phone, icon: Icons.phone_iphone_rounded, keyboard: TextInputType.phone, hint: '98765 43210'),
+              PhoneField(label: context.t('Your mobile number'), controller: phone),
             FilledButton(
               onPressed: busy
                   ? null
                   : () => run(() async {
+                        if (specs.isEmpty) throw ApiException(400, context.t('Choose at least one thing you teach'));
                         final s = ref.read(sessionProvider);
                         if (s.user?['phone'] == null) {
                           if (phone.text.trim().isEmpty) throw ApiException(400, context.t('Enter your mobile number'));
@@ -317,7 +319,7 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
                         await Api.instance.post('/me/join', {
                           'gymCode': code.text.trim(),
                           'as': 'TRAINER',
-                          'speciality': speciality,
+                          if (specs.isNotEmpty) 'speciality': specialities.where(specs.contains).join(', '),
                           if (int.tryParse(years.text.trim()) != null) 'experienceYears': int.parse(years.text.trim()),
                         });
                         await ref.read(sessionProvider).refreshUser();

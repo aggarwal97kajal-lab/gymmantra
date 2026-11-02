@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../haptics.dart';
+import '../back.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +13,8 @@ import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
 import 'pt.dart';
 import 'billing.dart';
+import 'auth.dart' show PhoneField;
+import 'dues.dart';
 
 // ============================================================ shell
 
@@ -24,8 +27,11 @@ class OwnerShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
     final dash = ref.watch(dashboardProvider).valueOrNull;
-    final pending = ((dash?['joinPending'] as int?) ?? 0) + ((dash?['ptPending'] as int?) ?? 0);
-    return Scaffold(
+    final pending = ((dash?['joinPending'] as int?) ?? 0) + ((dash?['ptPending'] as int?) ?? 0) + ((ref.watch(leadsProvider).valueOrNull as List?)?.length ?? 0);
+    return ShellBack(
+      location: location,
+      home: '/o/home',
+      child: Scaffold(
       body: child,
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(border: Border(top: BorderSide(color: context.c.line))),
@@ -48,6 +54,7 @@ class OwnerShell extends ConsumerWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -87,7 +94,10 @@ class OwnerHomeScreen extends ConsumerWidget {
         bottom: false,
         child: RefreshIndicator(
           color: context.c.primary,
-          onRefresh: () async => ref.invalidate(dashboardProvider),
+          onRefresh: () async {
+            ref.invalidate(dashboardProvider);
+            ref.invalidate(duesProvider);
+          },
           child: ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
             Row(children: [
               GestureDetector(onTap: () => context.push('/o/subscription'), child: const OwnerAvatar(size: 46)),
@@ -124,18 +134,7 @@ class OwnerHomeScreen extends ConsumerWidget {
                     const SizedBox(width: 10),
                     Expanded(child: StatTile(icon: Icons.schedule_rounded, value: '${t['endingSoon'] ?? 0}', label: context.t('Ending in 7 days'), color: C.warn)),
                   ]),
-                  if ((t['dueAmount'] as num? ?? 0) > 0) ...[
-                    const SizedBox(height: 10),
-                    Panel(
-                      onTap: () => context.go('/o/members'),
-                      child: Row(children: [
-                        const IconTile(Icons.account_balance_wallet_rounded, color: C.red),
-                        const SizedBox(width: 12),
-                        Expanded(child: Text(context.t('{amount} due from {n} members', {'amount': rupees(t['dueAmount'] as num?), 'n': t['dueMembers']}), style: const TextStyle(fontWeight: FontWeight.w700))),
-                        Icon(Icons.chevron_right_rounded, color: context.c.mut),
-                      ]),
-                    ),
-                  ],
+                  const DueCard(),
                   if (pending > 0) ...[
                     const SizedBox(height: 12),
                     Material(
@@ -245,7 +244,7 @@ class _GymCodeCard extends StatelessWidget {
             Expanded(
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: C.orangeDeep, minimumSize: const Size.fromHeight(44)),
-                onPressed: () => openUrl('https://wa.me/?text=${Uri.encodeComponent(shareGymText(context, name, code))}'),
+                onPressed: () => context.push('/o/gym-qr?share=1'),
                 icon: const Icon(Icons.share_rounded, size: 18),
                 label: Text(context.t('Share on WhatsApp')),
               ),
@@ -259,11 +258,8 @@ class _GymCodeCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(14),
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: code));
-                    toast(context, context.t('Copied'));
-                  },
-                  child: const Icon(Icons.copy_rounded, color: Colors.white, size: 19),
+                  onTap: () => context.push('/o/gym-qr'),
+                  child: const Icon(Icons.qr_code_2_rounded, color: Colors.white, size: 21),
                 ),
               ),
             ),
@@ -362,7 +358,11 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
                         leading: Avatar(name: m['name'] as String, url: m['photoUrl'] as String?, size: 42),
                         title: Text(m['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
                         subtitle: Text(
-                          [m['memberCode'], m['planName'], if ((m['due'] as num? ?? 0) > 0) '${context.t('Due')} ${rupees(m['due'] as num?)}'].where((x) => x != null).join(' · '),
+                          [
+                            m['memberCode'],
+                            m['planName'],
+                            if ((m['due'] as num? ?? 0) > 0) context.t('Due {due} · paid {paid} of {total}', {'due': rupees(m['due'] as num?), 'paid': rupees(m['duePaid'] as num?), 'total': rupees(m['dueTotal'] as num?)}),
+                          ].where((x) => x != null).join(' · '),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: context.c.mut, fontSize: 12),
@@ -396,9 +396,8 @@ class _AddMemberState extends ConsumerState<AddMemberScreen> {
       appBar: AppBar(title: Text(context.t('Add member'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         TextField(controller: name, textCapitalization: TextCapitalization.words, decoration: InputDecoration(labelText: context.t('Full name'))),
-        const SizedBox(height: 12),
-        TextField(controller: phone, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: context.t('Mobile number'))),
-        const SizedBox(height: 6),
+        const SizedBox(height: 14),
+        PhoneField(label: context.t('Mobile number'), controller: phone, bottom: 6),
         Muted(context.t('If this person already uses the GymMantra app with this number, they get linked automatically.'), size: 12),
         ErrorText(error),
         const SizedBox(height: 16),
@@ -446,6 +445,17 @@ class OwnerMemberScreen extends ConsumerWidget {
           final status = st['status'] as String;
           final due = st['due'] as num? ?? 0;
           final entry = st['entry'] as Map?;
+          final owing = history.where((h) => h['superseded'] != true && ((h['due'] as num?) ?? 0) > 0).toList()
+            ..sort((a, b) => ((a['startDate'] as String?) ?? '').compareTo((b['startDate'] as String?) ?? ''));
+          Future<void> pay(Map h) async {
+            if (await showPaymentSheet(context, h)) {
+              ref.invalidate(ownerMemberProvider(id));
+              ref.invalidate(ownerMembersProvider);
+              ref.invalidate(dashboardProvider);
+              ref.invalidate(duesProvider);
+            }
+          }
+
           return RefreshIndicator(
             color: context.c.primary,
             onRefresh: () async => ref.invalidate(ownerMemberProvider(id)),
@@ -456,13 +466,29 @@ class OwnerMemberScreen extends ConsumerWidget {
               Center(child: Muted('${m['memberCode']} · ${m['phone']}')),
               const SizedBox(height: 8),
               Center(child: StatusChip(status)),
+              const SizedBox(height: 10),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MemberProfileScreen(data: d as Map))),
+                  icon: const Icon(Icons.badge_outlined, size: 18),
+                  label: Text(context.t('Full profile')),
+                ),
+              ),
               const SizedBox(height: 16),
               Panel(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text((cur?['planName'] as String?) ?? context.t('No plan yet'), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
                   if (st['endsOn'] != null) Muted(context.t('Ends {date}', {'date': fmtDate(st['endsOn'] as String?)})),
                   if (st['daysLeft'] != null && (st['daysLeft'] as int) >= 0) Muted(context.t('{n} days left', {'n': st['daysLeft']})),
-                  if (due > 0) ...[const SizedBox(height: 6), Text('${context.t('Due')}: ${rupees(due)}', style: const TextStyle(color: C.red, fontWeight: FontWeight.w800))],
+                  if (due <= 0 && history.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Icon(Icons.check_circle_rounded, size: 17, color: C.ok),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(context.t('Nothing due'), style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700, fontSize: 13))),
+                    ]),
+                  ],
+                  for (final h in owing) OwingBox(sub: h, current: h['id'] == st['currentId'] || h['id'] == st['upcomingId'], onPay: () => pay(h)),
                   if (entry != null) ...[
                     const SizedBox(height: 10),
                     Row(children: [
@@ -494,6 +520,7 @@ class OwnerMemberScreen extends ConsumerWidget {
                     ref.invalidate(ownerMemberProvider(id));
                     ref.invalidate(ownerMembersProvider);
                     ref.invalidate(dashboardProvider);
+                    ref.invalidate(duesProvider);
                   }
                 },
                 icon: const Icon(Icons.autorenew_rounded),
@@ -516,7 +543,12 @@ class OwnerMemberScreen extends ConsumerWidget {
                         ),
                         Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                           Text(rupees(h['total'] as num?), style: const TextStyle(fontWeight: FontWeight.w800)),
-                          Muted('${context.t('Paid')} ${rupees(h['paid'] as num?)}', size: 11.5),
+                          if (h['superseded'] == true)
+                            Muted(context.t('Corrected'), size: 11.5)
+                          else if (((h['due'] as num?) ?? 0) > 0)
+                            Text(context.t('{amount} due', {'amount': rupees(h['due'] as num?)}), style: const TextStyle(color: C.red, fontWeight: FontWeight.w700, fontSize: 11.5))
+                          else
+                            Text('${context.t('Paid')} ${rupees(h['paid'] as num?)} ✓', style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700, fontSize: 11.5)),
                         ]),
                       ]),
                     ),
@@ -655,7 +687,7 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
     }
   }
 
-  bool ptTab = false;
+  int tab = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -670,15 +702,25 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
           preferredSize: const Size.fromHeight(58),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-            child: Seg<bool>(
-              value: ptTab,
-              items: [(false, '${context.t('Join')} ($joinN)', Icons.how_to_reg_rounded), (true, 'PT ($ptN)', Icons.sports_rounded)],
-              onChanged: (v) => setState(() => ptTab = v),
+            child: Seg<int>(
+              value: tab,
+              items: [
+                (0, '${context.t('Join')} ($joinN)', null),
+                (1, 'PT ($ptN)', null),
+                (2, '${context.t('Plans')} (${((ref.watch(leadsProvider).valueOrNull as List?) ?? const []).length})', null),
+              ],
+              onChanged: (v) => setState(() => tab = v),
             ),
           ),
         ),
       ),
-      body: ptTab
+      body: tab == 2
+          ? RefreshIndicator(
+              color: context.c.primary,
+              onRefresh: () async => ref.invalidate(leadsProvider),
+              child: const LeadsList(),
+            )
+          : tab == 1
           ? RefreshIndicator(
               color: context.c.primary,
               onRefresh: () async => ref.invalidate(ownerPtProvider('PENDING')),
@@ -1029,6 +1071,7 @@ class OwnerMoreScreen extends ConsumerWidget {
                             ? context.t('{plan} plan', {'plan': sub['plan']['name']})
                             : context.t('Trial ended — choose a plan'),
               ),
+            row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
             row(Icons.campaign_rounded, context.t('Notices'), () => context.push('/o/notices'), sub: context.t('Gym closed, timing change… to members or trainers')),
             row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices'), lock: 'pt'),
             row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer'), lock: 'pt'),
@@ -1106,6 +1149,7 @@ class OwnerTrainersScreen extends ConsumerWidget {
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text(t['name'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                             Muted([t['speciality'], if (t['experienceYears'] != null) context.t('{n} years', {'n': t['experienceYears']})].where((x) => x != null).join(' · '), size: 12),
+                            Muted(context.t('Checked in {n} days this month', {'n': t['visitsThisMonth'] ?? 0}), size: 11.5),
                           ]),
                         ),
                         Switch(

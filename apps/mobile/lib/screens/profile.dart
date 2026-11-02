@@ -12,6 +12,7 @@ import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
+import 'auth.dart' show PhoneField;
 
 class _Ratio4x5 implements CropAspectRatioPresetData {
   @override
@@ -332,33 +333,28 @@ class _NotificationsState extends ConsumerState<NotificationsScreen> {
                 Muted(context.t('No notifications yet.'), align: TextAlign.center, size: 14),
               ]);
             }
-            return ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
-              itemBuilder: (_, i) {
-                final n = list[i];
-                return Panel(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const IconTile(Icons.notifications_rounded, size: 38),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Row(children: [
-                          Expanded(child: Text(n['title'], style: const TextStyle(fontWeight: FontWeight.w700))),
-                          if (n['readAt'] == null) Container(width: 8, height: 8, decoration: const BoxDecoration(color: C.orange, shape: BoxShape.circle)),
-                        ]),
-                        const SizedBox(height: 2),
-                        Text(n['body'], style: TextStyle(color: context.c.mut, height: 1.35)),
-                        const SizedBox(height: 6),
-                        Muted(fmtDateTime(n['createdAt']), size: 11),
-                      ]),
-                    ),
-                  ]),
-                );
-              },
-            );
+            // Grouped by day: Today, Yesterday, then dates.
+            String dayOf(Map n) {
+              final t = DateTime.tryParse(n['createdAt'] as String? ?? '')?.toUtc().add(const Duration(hours: 5, minutes: 30));
+              return t == null ? '' : '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+            }
+            final today = todayYmdIst();
+            final yesterday = addDaysYmd(today, -1);
+            final rows = <Widget>[];
+            String? lastDay;
+            for (final n in list) {
+              final d = dayOf(n);
+              if (d != lastDay) {
+                lastDay = d;
+                final label = d == today ? context.t('Today') : d == yesterday ? context.t('Yesterday') : fmtDate(d);
+                rows.add(Padding(
+                  padding: EdgeInsets.fromLTRB(4, rows.isEmpty ? 0 : 10, 4, 8),
+                  child: Text(label.toUpperCase(), style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: context.c.mut)),
+                ));
+              }
+              rows.add(Padding(padding: const EdgeInsets.only(bottom: 10), child: _NoteCard(n: n)));
+            }
+            return ListView(padding: const EdgeInsets.all(16), children: rows);
           },
         ),
       ),
@@ -366,6 +362,58 @@ class _NotificationsState extends ConsumerState<NotificationsScreen> {
   }
 }
 
+
+/// One notification; the icon follows what it is about.
+class _NoteCard extends StatelessWidget {
+  const _NoteCard({required this.n});
+  final Map n;
+  @override
+  Widget build(BuildContext context) {
+    final title = (n['title'] as String?) ?? '';
+    final kind = (n['kind'] as String?) ?? (title.startsWith('Payment due') ? 'DUE' : '');
+    final (IconData icon, Color color) = switch (kind) {
+      'NOTICE' => (Icons.campaign_rounded, C.warn),
+      'DUE' => (Icons.currency_rupee_rounded, C.red),
+      _ => title.contains('PT') || title.contains('plan') || title.contains('diet')
+          ? (Icons.fitness_center_rounded, C.orange)
+          : title.contains('approved') || title.contains('renew')
+              ? (Icons.check_circle_rounded, C.ok)
+              : (Icons.notifications_rounded, C.orange),
+    };
+    final t = DateTime.tryParse(n['createdAt'] as String? ?? '')?.toLocal();
+    final time = t == null ? '' : TimeOfDay.fromDateTime(t).format(context);
+    return Panel(
+      padding: const EdgeInsets.all(14),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        IconTile(icon, color: color, size: 38),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (n['from'] != null) Text(n['from'] as String, style: TextStyle(color: context.c.mut, fontSize: 12, fontWeight: FontWeight.w600)),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700))),
+              const SizedBox(width: 8),
+              Muted(time, size: 11),
+              if (n['readAt'] == null) Container(margin: const EdgeInsets.only(left: 6, top: 4), width: 8, height: 8, decoration: const BoxDecoration(color: C.orange, shape: BoxShape.circle)),
+            ]),
+            const SizedBox(height: 2),
+            Text((n['body'] as String?) ?? '', style: TextStyle(color: context.c.mut, height: 1.35)),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
+String todayYmdIst() {
+  final n = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
+}
+
+String addDaysYmd(String ymd, int days) {
+  final d = DateTime.utc(int.parse(ymd.substring(0, 4)), int.parse(ymd.substring(5, 7)), int.parse(ymd.substring(8, 10))).add(Duration(days: days));
+  return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
 
 // ============================================================ personal details
 
@@ -383,8 +431,14 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
   late final address = TextEditingController(text: u['address'] as String? ?? '');
   late String? dob = u['dob'] as String?;
   late String? gender = u['gender'] as String?;
+  late final phone = TextEditingController(text: PhoneField.local(u['phone']));
+  late final email = TextEditingController(text: u['email'] as String? ?? '');
+  final pw = TextEditingController();
   bool busy = false;
   String? error;
+
+  bool get phoneChanged => phone.text.trim() != PhoneField.local(u['phone']);
+  bool get emailChanged => email.text.trim().toLowerCase() != ((u['email'] as String?) ?? '').toLowerCase();
 
   Future<void> save() async {
     setState(() {
@@ -402,6 +456,15 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
         'address': address.text.trim(),
       });
       ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(r as Map));
+      if (phoneChanged || emailChanged) {
+        final hasPw = u['hasPassword'] == true;
+        final c = await Api.instance.patch('/me/contact', {
+          if (phoneChanged) 'phone': phone.text.trim(),
+          if (emailChanged) 'email': email.text.trim(),
+          if (hasPw) 'password': pw.text,
+        });
+        ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(c as Map));
+      }
       if (mounted) {
         toast(context, saved);
         context.pop();
@@ -410,39 +473,6 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
       if (mounted) setState(() => error = e.toString());
     } finally {
       if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<void> contact(String field) async {
-    final s = ref.read(sessionProvider);
-    final hasPw = s.user?['hasPassword'] == true;
-    final value = TextEditingController(text: field == 'phone' ? ((s.user?['phone'] as String?) ?? '').replaceFirst('+91', '') : (s.user?['email'] as String?) ?? '');
-    final pw = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(field == 'phone' ? context.t('Change mobile number') : context.t('Change email')),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: value, keyboardType: field == 'phone' ? TextInputType.phone : TextInputType.emailAddress, decoration: InputDecoration(labelText: field == 'phone' ? context.t('New mobile number') : context.t('New email'))),
-          if (hasPw) ...[const SizedBox(height: 10), TextField(controller: pw, obscureText: true, decoration: InputDecoration(labelText: context.t('Current password')))],
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final saved = context.t('Saved');
-    try {
-      final r = await Api.instance.patch('/me/contact', {field: value.text.trim(), if (hasPw) 'password': pw.text});
-      s.patchUser(Map<String, dynamic>.from(r as Map));
-      if (mounted) {
-        toast(context, saved);
-        setState(() {});
-      }
-    } catch (e) {
-      if (mounted) toast(context, e.toString());
     }
   }
 
@@ -486,8 +516,27 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
         field(address, context.t('Address'), lines: 2),
         const SizedBox(height: 4),
         SectionTitle(context.t('Login details')),
-        tap(Icons.phone_iphone_rounded, context.t('Mobile number'), (cur['phone'] as String?) ?? '—', () => contact('phone')),
-        tap(Icons.mail_outline_rounded, context.t('Email'), (cur['email'] as String?) ?? '—', () => contact('email')),
+        PhoneField(label: context.t('Mobile number'), controller: phone, onChanged: (_) => setState(() {}), bottom: 12),
+        TextField(
+          controller: email,
+          keyboardType: TextInputType.emailAddress,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(labelText: context.t('Email'), prefixIcon: const Icon(Icons.mail_outline_rounded)),
+        ),
+        AnimatedSize(
+          duration: const Duration(milliseconds: 200),
+          child: (phoneChanged || emailChanged) && cur['hasPassword'] == true
+              ? Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: TextField(
+                    controller: pw,
+                    obscureText: true,
+                    decoration: InputDecoration(labelText: context.t('Current password'), helperText: context.t('Needed to change your mobile number or email'), prefixIcon: const Icon(Icons.lock_outline_rounded)),
+                  ),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+        const SizedBox(height: 4),
         ErrorText(error),
         const SizedBox(height: 12),
         FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save'))),

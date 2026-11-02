@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../haptics.dart';
+import '../back.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../api.dart';
@@ -20,7 +21,10 @@ class TrainerShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
-    return Scaffold(
+    return ShellBack(
+      location: location,
+      home: '/t/home',
+      child: Scaffold(
       body: child,
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(border: Border(top: BorderSide(color: context.c.line))),
@@ -37,6 +41,7 @@ class TrainerShell extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -96,6 +101,21 @@ class TrainerHomeScreen extends ConsumerWidget {
                       NoticeBanner(title: n['title'] as String, message: n['message'] as String, gym: g['name'] as String?, date: n['createdAt'] as String?),
                     for (final o in (g['offers'] as List).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?),
+                    Panel(
+                      onTap: () => context.push('/checkin'),
+                      child: Row(children: [
+                        const IconTile(Icons.qr_code_scanner_rounded, color: C.ok),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(context.t('Check in at the gym'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                            Muted(context.t('Scan the green check-in QR in the gym'), size: 12),
+                          ]),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: context.c.mut),
+                      ]),
+                    ),
+                    const SizedBox(height: 10),
                     Row(children: [
                       Expanded(child: StatTile(icon: Icons.groups_rounded, value: '${active.length}', label: context.t('PT clients'))),
                       const SizedBox(width: 9),

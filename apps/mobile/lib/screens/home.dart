@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import '../haptics.dart';
+import '../back.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../i18n.dart';
 import '../photo.dart';
+import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -20,7 +22,10 @@ class HomeShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
-    return Scaffold(
+    return ShellBack(
+      location: location,
+      home: '/home',
+      child: Scaffold(
       body: child,
       bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(border: Border(top: BorderSide(color: context.c.line))),
@@ -38,6 +43,104 @@ class HomeShell extends StatelessWidget {
             NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: context.t('Profile')),
           ],
         ),
+      ),
+    ),
+    );
+  }
+}
+
+/// "₹7,500 due" card on the member's home, plus a pop-up once a day when they open the app.
+class _DueBanner extends StatefulWidget {
+  const _DueBanner(this.m);
+  final Map m;
+  @override
+  State<_DueBanner> createState() => _DueBannerState();
+}
+
+class _DueBannerState extends State<_DueBanner> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _popup());
+  }
+
+  Future<void> _popup() async {
+    final n = DateTime.now();
+    final key = 'duePopup:${widget.m['memberId']}';
+    final today = '${n.year}-${n.month}-${n.day}';
+    if (Prefs.getString(key) == today || !mounted) return;
+    await Prefs.setString(key, today);
+    if (!mounted) return;
+    showDialog(context: context, builder: (_) => _DueDialog(m: widget.m));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.m;
+    final blocked = (m['entry'] as Map?)?['result'] == 'BLOCKED';
+    return Material(
+      color: C.red.withAlpha(context.c.dark ? 30 : 18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: C.red.withAlpha(90))),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: () => showDialog(context: context, builder: (_) => _DueDialog(m: m)),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(children: [
+            const IconTile(Icons.currency_rupee_rounded, color: C.red),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(context.t('{amount} due', {'amount': rupees(m['due'] as num?)}), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: C.red)),
+                Muted(context.t('Paid {paid} of {total}', {'paid': rupees(m['duePaid'] as num?), 'total': rupees(m['dueTotal'] as num?)}), size: 12.5),
+                if (blocked) Muted(context.t('Entry is stopped until you pay'), size: 12),
+              ]),
+            ),
+            Icon(Icons.chevron_right_rounded, color: context.c.mut),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _DueDialog extends StatelessWidget {
+  const _DueDialog({required this.m});
+  final Map m;
+  @override
+  Widget build(BuildContext context) {
+    final gym = m['gym'] as Map;
+    final paid = (m['duePaid'] as num?) ?? 0;
+    final total = (m['dueTotal'] as num?) ?? 0;
+    final wa = (gym['whatsappNumber'] ?? gym['phone']) as String?;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(26)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 24, 22, 14),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 64, height: 64, decoration: BoxDecoration(color: C.red.withAlpha(30), shape: BoxShape.circle), child: const Icon(Icons.currency_rupee_rounded, color: C.red, size: 32)),
+          const SizedBox(height: 12),
+          Text(context.t('{amount} due', {'amount': rupees(m['due'] as num?)}), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Muted('${gym['name']}${m['duePlan'] != null ? ' · ${m['duePlan']}' : ''}', align: TextAlign.center),
+          Muted(context.t('Paid {paid} of {total}', {'paid': rupees(paid), 'total': rupees(total)}), align: TextAlign.center),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(value: total <= 0 ? 0 : (paid / total).clamp(0, 1).toDouble(), minHeight: 8, backgroundColor: context.c.surf2, valueColor: const AlwaysStoppedAnimation(C.ok)),
+          ),
+          const SizedBox(height: 12),
+          Muted(context.t('Please pay at the front desk, or your entry may be stopped.'), align: TextAlign.center, size: 12.5),
+          const SizedBox(height: 16),
+          if (wa != null)
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: C.wa, minimumSize: const Size.fromHeight(48)),
+              onPressed: () => openUrl(waLink(wa, 'Hi, I am ${m['memberCode']}. About my due payment of ${rupees(m['due'] as num?)}.')),
+              icon: const Icon(Icons.chat_rounded),
+              label: Text(context.t('WhatsApp the gym')),
+            ),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text(context.t('OK'))),
+        ]),
       ),
     );
   }
@@ -100,6 +203,8 @@ class HomeScreen extends ConsumerWidget {
                   for (final m in list)
                     for (final o in ((m['offers'] as List?) ?? const []).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?),
+                  for (final m in list)
+                    if (((m['due'] as num?) ?? 0) > 0) ...[_DueBanner(m), const SizedBox(height: 12)],
                   for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],
                   for (final p in ((ref.watch(myPtProvider).valueOrNull as List?) ?? const []).cast<Map>().where((p) => p['state'] == 'ACTIVE'))
                     Padding(padding: const EdgeInsets.only(bottom: 12), child: MyTrainerCard(pt: p, tenantId: (p['gym'] as Map)['id'] as String)),

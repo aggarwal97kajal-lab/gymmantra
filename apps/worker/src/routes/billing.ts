@@ -76,6 +76,7 @@ export interface PlatformSettings {
   supportWhatsapp?: string | null;
   businessName?: string | null;
   businessAddress?: string | null;
+  appUrl?: string | null; // where people download the app (Play Store or any link); used in gym share messages
   gst?: GstSettings;
 }
 export const DEFAULT_GST: GstSettings = { registered: false, gstin: null, legalName: null, address: null, stateCode: '07', rate: 18, from: null, inclusive: false };
@@ -173,7 +174,7 @@ export function billingRoutes(app: App) {
     await authenticate(c);
     requireSuper(c);
     const s = (await c.var.deps.store.get<PlatformSettings>(P.platform)) ?? {};
-    return c.json({ trialMonths: s.trialMonths ?? 3, supportWhatsapp: s.supportWhatsapp ?? null, businessName: s.businessName ?? 'GymMantra', businessAddress: s.businessAddress ?? 'New Delhi, Delhi', gst: { ...DEFAULT_GST, ...(s.gst ?? {}) } });
+    return c.json({ trialMonths: s.trialMonths ?? 3, supportWhatsapp: s.supportWhatsapp ?? null, appUrl: s.appUrl ?? null, businessName: s.businessName ?? 'GymMantra', businessAddress: s.businessAddress ?? 'New Delhi, Delhi', gst: { ...DEFAULT_GST, ...(s.gst ?? {}) } });
   });
 
   app.patch('/api/v1/super/gst', async (c) => {

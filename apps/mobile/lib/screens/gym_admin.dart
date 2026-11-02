@@ -1,15 +1,19 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
 import '../api.dart';
 import '../haptics.dart';
 import '../i18n.dart';
+import '../photo.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
-import 'auth.dart' show LabeledField;
+import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
 
 // Owner tools that used to be on the website only: reports, membership plans and gym settings.
@@ -19,6 +23,8 @@ final ownerPlansProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.inst
 
 // ============================================================ reports
 
+final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => Api.instance.cachedGet('/reports/entries?days=$days'));
+
 class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
   @override
@@ -26,31 +32,273 @@ class ReportsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportsState extends ConsumerState<ReportsScreen> {
+  int view = 0; // 0 entries, 1 summary
   int days = 30;
+  String tab = 'ALL';
+  final q = TextEditingController();
+  Set<String> types = {}; // MEMBERSHIP, PT (empty = all)
+  int? minAmount;
+
+  int get filterCount => (types.isEmpty ? 0 : 1) + (minAmount == null ? 0 : 1);
+
+  List<Map> apply(List<Map> all) {
+    final needle = q.text.trim().toLowerCase();
+    return all.where((e) {
+      if (tab != 'ALL' && e['status'] != tab) return false;
+      if (types.isNotEmpty && !types.contains(e['kind'])) return false;
+      if (minAmount != null && (e['total'] as num) < minAmount!) return false;
+      if (needle.isNotEmpty) {
+        final hay = '${e['name']} ${e['memberCode']} ${e['title']}'.toLowerCase();
+        if (!hay.contains(needle)) return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  Future<void> filters() async {
+    var t = {...types};
+    var d = days;
+    final min = TextEditingController(text: minAmount?.toString() ?? '');
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) => StatefulBuilder(builder: (ctx, set) {
+        final p = ctx.c;
+        Widget chip(String label, bool on, VoidCallback tap) => ChoiceChip(
+              label: Text(label),
+              selected: on,
+              showCheckmark: false,
+              selectedColor: p.primary,
+              labelStyle: TextStyle(color: on ? Colors.white : p.fg, fontWeight: FontWeight.w700),
+              onSelected: (_) => set(tap),
+            );
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 8, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Center(child: Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 14), decoration: BoxDecoration(color: p.line, borderRadius: BorderRadius.circular(2)))),
+            Text(ctx.t('Filter'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            Muted(ctx.t('Type'), size: 13),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              chip(ctx.t('Membership'), t.contains('MEMBERSHIP'), () => t.contains('MEMBERSHIP') ? t.remove('MEMBERSHIP') : t.add('MEMBERSHIP')),
+              chip('PT', t.contains('PT'), () => t.contains('PT') ? t.remove('PT') : t.add('PT')),
+            ]),
+            const SizedBox(height: 14),
+            Muted(ctx.t('Date'), size: 13),
+            const SizedBox(height: 6),
+            Wrap(spacing: 8, runSpacing: 8, children: [
+              for (final (n, l) in [(7, '7 days'), (30, '30 days'), (90, '90 days'), (365, 'This year')]) chip(ctx.t(l), d == n, () => d = n),
+            ]),
+            const SizedBox(height: 14),
+            Muted(ctx.t('Amount at least (₹)'), size: 13),
+            const SizedBox(height: 6),
+            TextField(controller: min, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly], decoration: const InputDecoration(hintText: '1000')),
+            const SizedBox(height: 18),
+            Row(children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () => set(() {
+                    t = {};
+                    d = 30;
+                    min.clear();
+                  }),
+                  child: Text(ctx.t('Clear all')),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: FilledButton(style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)), onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Show')))),
+            ]),
+          ]),
+        );
+      }),
+    );
+    if (ok == true) {
+      setState(() {
+        types = t;
+        days = d;
+        minAmount = int.tryParse(min.text.trim());
+      });
+    }
+  }
+
+  Future<void> download(List<Map> rows) async {
+    final head = 'Date,Member,Code,Type,Item,Start,End,Total,Paid,Due,Status';
+    String cell(Object? v) => '"${'${v ?? ''}'.replaceAll('"', '""')}"';
+    final lines = [
+      head,
+      for (final e in rows) [e['date'], e['name'], e['memberCode'], e['type'], e['title'], e['startDate'], e['endDate'], e['total'], e['paid'], e['due'], e['status']].map(cell).join(','),
+    ];
+    try {
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/gymmantra_report_${days}d.csv');
+      await f.writeAsString(lines.join('\n'));
+      await Share.shareXFiles([XFile(f.path, mimeType: 'text/csv')], text: 'GymMantra report · last $days days');
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final v = ref.watch(reportsProvider(days));
+    final p = context.c;
+    final v = ref.watch(reportEntriesProvider(days));
+    final all = ((v.valueOrNull as Map?)?['entries'] as List?)?.cast<Map>() ?? const <Map>[];
+    final rows = apply(all);
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Reports'))),
+      appBar: AppBar(
+        title: Text(context.t('Reports')),
+        actions: [if (view == 0) IconButton(tooltip: context.t('Download'), onPressed: rows.isEmpty ? null : () => download(rows), icon: const Icon(Icons.download_rounded))],
+      ),
       body: RefreshIndicator(
-        color: context.c.primary,
-        onRefresh: () async => ref.invalidate(reportsProvider(days)),
+        color: p.primary,
+        onRefresh: () async {
+          ref.invalidate(reportEntriesProvider(days));
+          ref.invalidate(reportsProvider(days > 90 ? 90 : days));
+        },
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-          Seg<int>(
-            value: days,
-            items: [(7, context.t('7 days'), null), (30, context.t('30 days'), null), (90, context.t('90 days'), null)],
-            onChanged: (d) {
-              TapHaptics.buzz();
-              setState(() => days = d);
-            },
+          Seg<int>(value: view, items: [(0, context.t('Entries'), Icons.list_alt_rounded), (1, context.t('Summary'), Icons.bar_chart_rounded)], onChanged: (x) => setState(() => view = x)),
+          const SizedBox(height: 12),
+          if (view == 1) ...[
+            Seg<int>(
+              value: days > 90 ? 90 : days,
+              items: [(7, context.t('7 days'), null), (30, context.t('30 days'), null), (90, context.t('90 days'), null)],
+              onChanged: (d) {
+                TapHaptics.buzz();
+                setState(() => days = d);
+              },
+            ),
+            const SizedBox(height: 14),
+            AsyncBody(
+              value: ref.watch(reportsProvider(days > 90 ? 90 : days)),
+              onRetry: () => ref.invalidate(reportsProvider(days > 90 ? 90 : days)),
+              builder: (d) => _ReportBody(d: d as Map),
+            ),
+          ] else ...[
+            if (v.valueOrNull != null)
+              Muted(
+                context.t('{n} entries · {total} · last {d} days', {'n': all.length, 'total': rupees((v.valueOrNull as Map)['total'] as num?), 'd': days}),
+                size: 12.5,
+              ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: q,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: context.t('Search name, code or plan'),
+                    prefixIcon: const Icon(Icons.search_rounded),
+                    suffixIcon: q.text.isEmpty ? null : IconButton(icon: const Icon(Icons.close_rounded, size: 18), onPressed: () => setState(q.clear)),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Badge(
+                isLabelVisible: filterCount > 0,
+                label: Text('$filterCount'),
+                backgroundColor: p.primary,
+                child: Material(
+                  color: p.surf,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.line)),
+                  child: InkWell(borderRadius: BorderRadius.circular(14), onTap: filters, child: const SizedBox(width: 50, height: 50, child: Icon(Icons.filter_alt_outlined))),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 10),
+            Seg<String>(
+              value: tab,
+              items: [('ALL', context.t('All'), null), ('PAID', context.t('Paid'), null), ('PENDING', context.t('Pending'), null), ('OVERDUE', context.t('Overdue'), null)],
+              onChanged: (x) {
+                TapHaptics.buzz();
+                setState(() => tab = x);
+              },
+            ),
+            if (filterCount > 0 || days != 30) ...[
+              const SizedBox(height: 10),
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                InputChip(label: Text('${context.t('Date')}: ${context.t(days == 365 ? 'This year' : '{n} days', {'n': days})}'), onDeleted: days == 30 ? null : () => setState(() => days = 30)),
+                if (types.isNotEmpty) InputChip(label: Text('${context.t('Type')}: ${types.map((x) => x == 'PT' ? 'PT' : context.t('Membership')).join(', ')}'), onDeleted: () => setState(() => types = {})),
+                if (minAmount != null) InputChip(label: Text('${context.t('Amount')} ≥ ${rupees(minAmount)}'), onDeleted: () => setState(() => minAmount = null)),
+              ]),
+            ],
+            const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: Text.rich(TextSpan(children: [TextSpan(text: '${rows.length}', style: const TextStyle(fontWeight: FontWeight.w800)), TextSpan(text: ' ${context.t('of {n} entries', {'n': all.length})}')]), style: TextStyle(color: p.mut, fontSize: 12.5))),
+              if (filterCount > 0 || tab != 'ALL' || q.text.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() {
+                    tab = 'ALL';
+                    types = {};
+                    minAmount = null;
+                    q.clear();
+                  }),
+                  child: Text(context.t('Clear all')),
+                ),
+            ]),
+            AsyncBody(
+              value: v,
+              onRetry: () => ref.invalidate(reportEntriesProvider(days)),
+              builder: (_) => rows.isEmpty
+                  ? Padding(padding: const EdgeInsets.all(30), child: Muted(context.t('Nothing here'), align: TextAlign.center))
+                  : Panel(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                      child: Column(children: [
+                        for (var i = 0; i < rows.length; i++) ...[
+                          _EntryRow(e: rows[i]),
+                          if (i < rows.length - 1) Divider(height: 1, color: p.line),
+                        ],
+                      ]),
+                    ),
+            ),
+          ],
+        ]),
+      ),
+    );
+  }
+}
+
+class _EntryRow extends StatelessWidget {
+  const _EntryRow({required this.e});
+  final Map e;
+  @override
+  Widget build(BuildContext context) {
+    final (String label, Color color) = switch (e['status']) {
+      'PAID' => (context.t('Paid'), C.ok),
+      'OVERDUE' => (context.t('Overdue'), C.red),
+      _ => ((e['paid'] as num) > 0 ? context.t('Part paid') : context.t('Pending'), C.warn),
+    };
+    return InkWell(
+      onTap: () => context.push('/o/member/${e['memberId']}'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        child: Row(children: [
+          IconTile(e['kind'] == 'PT' ? Icons.fitness_center_rounded : Icons.card_membership_rounded, size: 36, color: context.c.fg),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(e['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+              Text(
+                '${e['title']} · ${context.t(e['type'] as String)} · ${fmtDate(e['date'] as String?)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: context.c.mut, fontSize: 11.5),
+              ),
+            ]),
           ),
-          const SizedBox(height: 14),
-          AsyncBody(
-            value: v,
-            onRetry: () => ref.invalidate(reportsProvider(days)),
-            builder: (d) => _ReportBody(d: d as Map),
-          ),
+          const SizedBox(width: 8),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text(rupees(e['total'] as num?), style: const TextStyle(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(color: color.withAlpha(34), borderRadius: BorderRadius.circular(99)),
+              child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w800)),
+            ),
+          ]),
         ]),
       ),
     );
@@ -461,8 +709,8 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
             Panel(
               child: Column(children: [
                 LabeledField(label: context.t('Gym name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
-                LabeledField(label: context.t('Gym phone'), controller: phone, icon: Icons.call_rounded, keyboard: TextInputType.phone),
-                LabeledField(label: context.t('Gym WhatsApp number'), controller: wa, icon: Icons.chat_rounded, keyboard: TextInputType.phone),
+                PhoneField(label: context.t('Gym phone'), controller: phone),
+                PhoneField(label: context.t('Gym WhatsApp number'), controller: wa),
                 Padding(
                   padding: const EdgeInsets.only(top: 0, bottom: 12),
                   child: Muted(context.t('Shown to members. Reminders and receipts go from this number.'), size: 12),
@@ -537,7 +785,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
               Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(backgroundColor: C.wa),
-                  onPressed: () => openUrl(waLink('', context.t('Join {gym} on the GymMantra app. Gym code: {code}', {'gym': g['name'], 'code': code}))),
+                  onPressed: () => context.push('/o/gym-qr?share=1'),
                   icon: const Icon(Icons.share_rounded, size: 18),
                   label: Text(context.t('Share')),
                 ),
@@ -606,6 +854,59 @@ class _BranchSheetState extends State<_BranchSheet> {
 
 // ============================================================ notices
 
+final noticeAudienceProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, f) => Api.instance.cachedGet('/notices/audience?filter=$f'));
+
+/// Who will get the notice — the list appears by itself (e.g. memberships ending in 7 days).
+class _Audience extends ConsumerStatefulWidget {
+  const _Audience({required this.filter});
+  final String filter;
+  @override
+  ConsumerState<_Audience> createState() => _AudienceState();
+}
+
+class _AudienceState extends ConsumerState<_Audience> {
+  bool all = false;
+  @override
+  Widget build(BuildContext context) {
+    final v = ref.watch(noticeAudienceProvider(widget.filter));
+    final d = v.valueOrNull as Map?;
+    if (d == null) return const SizedBox(height: 40, child: Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))));
+    final list = (d['members'] as List).cast<Map>();
+    final shown = all ? list : list.take(4).toList();
+    return Panel(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          context.t('{n} members · {a} use the app', {'n': d['count'], 'a': d['withApp']}),
+          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: list.isEmpty ? context.c.mut : C.warn),
+        ),
+        if (list.isEmpty) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Muted(context.t('Nobody in this group right now.'), size: 12.5)),
+        for (final m in shown)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(children: [
+              Avatar(name: m['name'] as String, url: m['photoUrl'] as String?, size: 30),
+              const SizedBox(width: 10),
+              Expanded(child: Text(m['name'] as String, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600))),
+              Muted(
+                widget.filter == 'DUE'
+                    ? rupees(m['due'] as num?)
+                    : m['daysLeft'] != null && (m['daysLeft'] as int) >= 0
+                        ? context.t('{n} days left', {'n': m['daysLeft']})
+                        : statusLabel(context, m['status'] as String),
+                size: 12,
+              ),
+              const SizedBox(width: 6),
+              Icon(m['hasApp'] == true ? Icons.check_rounded : Icons.phone_android_outlined, size: 16, color: m['hasApp'] == true ? context.c.primary : context.c.mut),
+            ]),
+          ),
+        if (list.length > 4)
+          TextButton(onPressed: () => setState(() => all = !all), child: Text(all ? context.t('Show less') : context.t('+{n} more', {'n': list.length - 4}))),
+      ]),
+    );
+  }
+}
+
 final noticesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/notices'));
 
 String _noticeAudience(BuildContext context, Map n) {
@@ -614,6 +915,8 @@ String _noticeAudience(BuildContext context, Map n) {
     parts.add(switch (n['memberFilter']) {
       'ACTIVE' => context.t('Active members'),
       'EXPIRED' => context.t('Expired members'),
+      'ENDING' => context.t('Members ending in 7 days'),
+      'DUE' => context.t('Members who owe money'),
       _ => context.t('All members'),
     });
   }
@@ -872,11 +1175,19 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
           const SizedBox(height: 12),
           Muted(context.t('Which members?'), size: 13),
           const SizedBox(height: 6),
-          Seg<String>(
-            value: filter,
-            items: [('ALL', context.t('All'), null), ('ACTIVE', context.t('Active'), null), ('EXPIRED', context.t('Expired'), null)],
-            onChanged: (v) => setState(() => filter = v),
-          ),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            for (final (k, l) in [('ALL', 'All'), ('ACTIVE', 'Active'), ('ENDING', 'Ending in 7 days'), ('EXPIRED', 'Expired'), ('DUE', 'Money due')])
+              ChoiceChip(
+                label: Text(context.t(l)),
+                selected: filter == k,
+                showCheckmark: false,
+                selectedColor: p.primary,
+                labelStyle: TextStyle(color: filter == k ? Colors.white : p.fg, fontWeight: FontWeight.w700),
+                onSelected: (_) => setState(() => filter = k),
+              ),
+          ]),
+          const SizedBox(height: 10),
+          _Audience(filter: filter),
         ],
         const SizedBox(height: 16),
         Text(context.t('Show on dashboard till'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),

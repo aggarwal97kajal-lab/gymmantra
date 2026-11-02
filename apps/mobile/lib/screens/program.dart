@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import '../api.dart';
 import '../i18n.dart';
 import '../theme.dart';
+import '../session.dart';
 import '../ui.dart';
+import 'pdf.dart';
 
 final myProgramProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/program'));
 
@@ -67,6 +69,11 @@ class _MyPlanState extends ConsumerState<MyPlanScreen> {
             final prog = list.first;
             final diet = prog['diet'] as Map?;
             final wk = prog['workout'] as Map?;
+            final dietPdf = prog['dietPdf'] as Map?;
+            final workoutPdf = prog['workoutPdf'] as Map?;
+            final me = ref.watch(sessionProvider).user ?? {};
+            final mark = '${me['name'] ?? ''} · ${(prog['gym'] as Map?)?['name'] ?? ''}';
+            final tid = (prog['gym'] as Map)['id'] as String;
             final days = ((wk?['days'] as List?) ?? const []).cast<Map>();
             final todayName = weekDays[DateTime.now().weekday - 1];
             if (day < 0 || day >= days.length) {
@@ -81,8 +88,11 @@ class _MyPlanState extends ConsumerState<MyPlanScreen> {
               ),
               const SizedBox(height: 12),
               if (!workout) ...[
-                if (diet == null)
+                if (dietPdf != null) PdfCard(meta: dietPdf, tenantId: tid, kind: 'diet', watermark: mark),
+                if (diet == null && dietPdf == null)
                   Muted(context.t('Your trainer has not made a diet chart yet.'), align: TextAlign.center)
+                else if (diet == null)
+                  const SizedBox.shrink()
                 else ...[
                   Row(children: [
                     Expanded(child: StatTile(icon: Icons.local_fire_department_rounded, value: diet['kcal'] == null ? '—' : '${diet['kcal']}', label: context.t('kcal a day'), color: C.warn)),
@@ -112,8 +122,11 @@ class _MyPlanState extends ConsumerState<MyPlanScreen> {
                   Muted(context.t('Made by {name} · {date}', {'name': diet['updatedBy'], 'date': fmtDate(diet['updatedAt'] as String?)}), size: 11.5),
                 ],
               ] else ...[
-                if (days.isEmpty)
+                if (workoutPdf != null) PdfCard(meta: workoutPdf, tenantId: tid, kind: 'workout', watermark: mark),
+                if (days.isEmpty && workoutPdf == null)
                   Muted(context.t('Your trainer has not made a workout plan yet.'), align: TextAlign.center)
+                else if (days.isEmpty)
+                  const SizedBox.shrink()
                 else ...[
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
@@ -213,6 +226,7 @@ class _ProgramEditState extends ConsumerState<ProgramEditScreen> {
   final meals = <_MealRow>[];
   final days = <_Day>[];
   int sel = 0;
+  Map? pdf;
 
   @override
   void initState() {
@@ -225,6 +239,7 @@ class _ProgramEditState extends ConsumerState<ProgramEditScreen> {
       final p = await Api.instance.get('/programs/${widget.memberId}?tenantId=${widget.tenantId}');
       final diet = p['diet'] as Map?;
       final wk = p['workout'] as Map?;
+      pdf = p[widget.workout ? 'workoutPdf' : 'dietPdf'] as Map?;
       kcal.text = diet?['kcal']?.toString() ?? '';
       protein.text = diet?['protein']?.toString() ?? '';
       dietNotes.text = diet?['notes'] as String? ?? '';
@@ -301,6 +316,21 @@ class _ProgramEditState extends ConsumerState<ProgramEditScreen> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
               Muted(context.t('For {name}', {'name': widget.memberName}), size: 13),
+              const SizedBox(height: 12),
+              PdfUploadBox(
+                tenantId: widget.tenantId,
+                memberId: widget.memberId,
+                memberName: widget.memberName,
+                kind: widget.workout ? 'workout' : 'diet',
+                meta: pdf,
+                onChanged: (m) => setState(() => pdf = m),
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(child: Divider(color: p.line)),
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Muted(context.t('or write it here'), size: 12)),
+                Expanded(child: Divider(color: p.line)),
+              ]),
               const SizedBox(height: 12),
               if (!widget.workout) ...[
                 Row(children: [

@@ -651,15 +651,43 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
     final sel = selected ?? todayYmd();
     final current = (pt['log'] as Map?)?[sel] as String?;
     final inRange = pt['startDate'] != null && sel.compareTo(pt['startDate'] as String) >= 0 && (pt['endDate'] == null || sel.compareTo(pt['endDate'] as String) <= 0);
-    final future = sel.compareTo(todayYmd()) > 0;
-    Widget act(String m, String label, Color bg, Color fg, IconData icon) => Expanded(
-          child: FilledButton.icon(
-            style: FilledButton.styleFrom(backgroundColor: bg, foregroundColor: fg, minimumSize: const Size.fromHeight(44), padding: const EdgeInsets.symmetric(horizontal: 6)),
-            onPressed: busy || (m == 'DONE' && future) ? null : () => mark(sel, current == m ? 'CLEAR' : m),
-            icon: Icon(current == m ? Icons.undo_rounded : icon, size: 17),
-            label: Text(current == m ? context.t('Undo') : label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    final today = todayYmd();
+    final future = sel.compareTo(today) > 0;
+    final past = sel.compareTo(today) < 0;
+    // Trainers may change Done / Missed only for today and the 2 days before; the owner can fix any day.
+    final me = ref.watch(sessionProvider).user ?? {};
+    final asTrainer = me['isTrainer'] == true && me['isOwner'] != true;
+    final lockedOld = asTrainer && past && sel.compareTo(ymdOf(DateTime.parse('${today}T00:00:00Z').subtract(const Duration(days: 2)))) < 0;
+    bool allowed(String m) {
+      if (lockedOld) return false;
+      if ((m == 'DONE' || m == 'MISSED') && future) return false;
+      if (m == 'PLANNED' && past && current != 'PLANNED') return false;
+      return true;
+    }
+
+    Widget act(String m, String label, Color bg, Color fg, IconData icon) {
+      final ok = allowed(m);
+      final on = current == m;
+      return Expanded(
+        child: Material(
+          color: ok ? bg : p.surf2,
+          borderRadius: BorderRadius.circular(14),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: busy || !ok ? null : () => mark(sel, on ? 'CLEAR' : m),
+            child: SizedBox(
+              height: 58,
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(!ok ? Icons.lock_outline_rounded : on ? Icons.undo_rounded : icon, size: 19, color: ok ? fg : p.mut),
+                const SizedBox(height: 3),
+                Text(on && ok ? context.t('Undo') : label, maxLines: 1, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: ok ? fg : p.mut)),
+              ]),
+            ),
           ),
-        );
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text(pt['memberName'] as String)),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
@@ -701,7 +729,16 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
                 padding: const EdgeInsets.all(14),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(fmtDate(sel), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                  Muted(inRange ? context.t('Tap a date on the calendar to change it') : context.t('This date is outside the PT dates'), size: 12),
+                  Muted(
+                    !inRange
+                        ? context.t('This date is outside the PT dates')
+                        : lockedOld
+                            ? context.t('Locked: older than 2 days. Ask the owner to change it.')
+                            : future
+                                ? context.t('Coming day: you can only mark it Planned')
+                                : context.t('Tap a date on the calendar to change it'),
+                    size: 12,
+                  ),
                   const SizedBox(height: 12),
                   if (inRange)
                     Row(children: [
@@ -709,7 +746,7 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
                       const SizedBox(width: 8),
                       act('MISSED', context.t('Missed'), C.red.withAlpha(40), C.red, Icons.close_rounded),
                       const SizedBox(width: 8),
-                      act('PLANNED', context.t('Planned'), p.surf2, p.fg, Icons.event_rounded),
+                      act('PLANNED', context.t('Planned'), C.blue.withAlpha(36), C.blue, Icons.event_rounded),
                     ]),
                 ]),
               ),

@@ -133,9 +133,10 @@ async function enforceRole(c: C, uid: string, user: UserDoc, chose: AppRole | nu
 }
 
 export function authRoutes(app: App) {
-  app.get('/api/v1/auth/config', (c) =>
-    c.json({ googleClientId: c.var.deps.googleClientId, maxLoginAttempts: MAX_LOGIN_ATTEMPTS, lockMinutes: LOCK_MINUTES }),
-  );
+  app.get('/api/v1/auth/config', async (c) => {
+    const s = await c.var.deps.store.get<{ appUrl?: string | null }>(P.platform).catch(() => null);
+    return c.json({ googleClientId: c.var.deps.googleClientId, maxLoginAttempts: MAX_LOGIN_ATTEMPTS, lockMinutes: LOCK_MINUTES, appUrl: s?.appUrl ?? null });
+  });
 
   app.post('/api/v1/auth/signup', async (c) => {
     const b = body(await c.req.json().catch(() => null));

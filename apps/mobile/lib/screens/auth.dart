@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../api.dart';
@@ -53,6 +54,83 @@ class LabeledField extends StatelessWidget {
           ),
         ]),
       );
+}
+
+/// Indian mobile number box: 🇮🇳 +91 is fixed in front, only 10 digits are typed.
+class PhoneField extends StatelessWidget {
+  const PhoneField({super.key, required this.label, required this.controller, this.hint, this.action, this.onSubmitted, this.onChanged, this.bottom = 14});
+  final String label;
+  final TextEditingController controller;
+  final String? hint;
+  final TextInputAction? action;
+  final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
+  final double bottom;
+
+  /// "+91 98765 43210" / "919876543210" → "9876543210" for the box.
+  static String local(dynamic v) {
+    final d = ((v as String?) ?? '').replaceAll(RegExp(r'[^0-9]'), '');
+    return d.length > 10 ? d.substring(d.length - 10) : d;
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.only(bottom: bottom),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.c.mut))),
+          TextField(
+            controller: controller,
+            keyboardType: TextInputType.phone,
+            textInputAction: action,
+            onSubmitted: onSubmitted,
+            onChanged: onChanged,
+            autofillHints: const [AutofillHints.telephoneNumberNational],
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
+            style: const TextStyle(fontWeight: FontWeight.w600, letterSpacing: 0.4),
+            decoration: InputDecoration(
+              hintText: hint ?? '98765 43210',
+              prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+              prefixIcon: Padding(
+                padding: const EdgeInsets.only(left: 14, right: 10),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const IndiaFlag(),
+                  const SizedBox(width: 8),
+                  const Text('+91', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  const SizedBox(width: 10),
+                  Container(width: 1, height: 22, color: context.c.line),
+                ]),
+              ),
+            ),
+          ),
+        ]),
+      );
+}
+
+/// Small Indian flag drawn in code (no image needed).
+class IndiaFlag extends StatelessWidget {
+  const IndiaFlag({super.key, this.width = 22});
+  final double width;
+  @override
+  Widget build(BuildContext context) {
+    final h = width * 2 / 3;
+    return Container(
+      width: width,
+      height: h,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(2), border: Border.all(color: const Color(0x22000000), width: 0.5)),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+        Expanded(child: Container(color: const Color(0xFFFF9933))),
+        Expanded(
+          child: Container(
+            color: Colors.white,
+            alignment: Alignment.center,
+            child: Container(width: h / 3, height: h / 3, decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: const Color(0xFF000080), width: 0.8))),
+          ),
+        ),
+        Expanded(child: Container(color: const Color(0xFF138808))),
+      ]),
+    );
+  }
 }
 
 /// Small EN / हि switch for screens before log-in.
@@ -281,7 +359,7 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
         const RoleBadge(),
         LabeledField(label: context.t('Full name'), controller: name, icon: Icons.person_outline_rounded, caps: TextCapitalization.words, action: TextInputAction.next),
         LabeledField(label: context.t('Email'), controller: email, icon: Icons.mail_outline_rounded, keyboard: TextInputType.emailAddress, action: TextInputAction.next),
-        LabeledField(label: context.t('Mobile number'), controller: phone, icon: Icons.phone_iphone_rounded, hint: context.t('10-digit number'), keyboard: TextInputType.phone, action: TextInputAction.next),
+        PhoneField(label: context.t('Mobile number'), controller: phone, action: TextInputAction.next),
         LabeledField(
           label: context.t('Password (at least 8 characters)'),
           controller: pw,

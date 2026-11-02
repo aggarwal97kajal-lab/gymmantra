@@ -176,6 +176,11 @@ export function superRoutes(app: App) {
       if (w && !p) throw bad('Enter a valid WhatsApp number');
       patch.supportWhatsapp = p;
     }
+    if (b.appUrl !== undefined) {
+      const a = optStr(b, 'appUrl', { max: 300 }) ?? null;
+      if (a && !/^https:\/\/\S+$/.test(a)) throw bad('App link must start with https://');
+      patch.appUrl = a;
+    }
     if (b.businessName !== undefined) patch.businessName = optStr(b, 'businessName', { max: 120 }) ?? null;
     if (b.businessAddress !== undefined) patch.businessAddress = optStr(b, 'businessAddress', { max: 300 }) ?? null;
     const out = await c.var.deps.store.tx(async (t) => {

@@ -1048,6 +1048,7 @@ class _AdminSettingsState extends ConsumerState<AdminSettings> {
   final address = TextEditingController();
   final rate = TextEditingController();
   final wa = TextEditingController();
+  final appUrl = TextEditingController();
   final bizName = TextEditingController();
   final bizAddress = TextEditingController();
   final trial = TextEditingController();
@@ -1072,6 +1073,7 @@ class _AdminSettingsState extends ConsumerState<AdminSettings> {
       rate.text = '${g['rate'] ?? 18}';
       from = DateTime.tryParse(g['from'] as String? ?? '');
       wa.text = (s['supportWhatsapp'] as String? ?? '').replaceFirst('+91', '');
+      appUrl.text = s['appUrl'] as String? ?? '';
       bizName.text = s['businessName'] as String? ?? '';
       bizAddress.text = s['businessAddress'] as String? ?? '';
       trial.text = '${s['trialMonths'] ?? 3}';
@@ -1089,6 +1091,8 @@ class _AdminSettingsState extends ConsumerState<AdminSettings> {
               TextField(controller: bizAddress, decoration: InputDecoration(labelText: context.t('Address on receipts'))),
               const SizedBox(height: 10),
               TextField(controller: wa, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: context.t('Support WhatsApp (gyms message here to buy a plan)'))),
+              const SizedBox(height: 12),
+              TextField(controller: appUrl, keyboardType: TextInputType.url, decoration: InputDecoration(labelText: context.t('App download link (Play Store)'), helperText: context.t('Goes in the message gyms share on WhatsApp'))),
               const SizedBox(height: 10),
               TextField(controller: trial, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: context.t('Free trial (months) for new gyms'))),
               const SizedBox(height: 20),
@@ -1147,6 +1151,7 @@ class _AdminSettingsState extends ConsumerState<AdminSettings> {
                             'businessName': bizName.text.trim(),
                             'businessAddress': bizAddress.text.trim(),
                             'supportWhatsapp': wa.text.trim(),
+                            'appUrl': appUrl.text.trim(),
                             if (int.tryParse(trial.text.trim()) != null) 'trialMonths': int.parse(trial.text.trim()),
                           });
                           await Api.instance.patch('/super/gst', {

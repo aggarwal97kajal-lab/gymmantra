@@ -50,6 +50,8 @@ class Session extends ChangeNotifier {
   Future<void> loadConfig() async {
     try {
       final c = await api.get('/auth/config');
+      final app = c['appUrl'] as String?;
+      if (app != null) Prefs.setString('appUrl', app);
       final id = c['googleClientId'] as String?;
       if (id != googleClientId) {
         googleClientId = id;
@@ -137,6 +139,8 @@ class Session extends ChangeNotifier {
           '/join-requests',
           '/offers',
           '/notices',
+          '/dues',
+          '/leads',
           '/gym',
           '/plans',
           '/subscription',

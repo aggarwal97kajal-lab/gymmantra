@@ -7,6 +7,7 @@ import '../i18n.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
+import 'auth.dart' show PhoneField;
 
 class JoinScreen extends ConsumerStatefulWidget {
   const JoinScreen({super.key});
@@ -85,11 +86,7 @@ class _JoinState extends ConsumerState<JoinScreen> {
           ],
           if (ref.watch(sessionProvider).user?['phone'] == null) ...[
             const SizedBox(height: 12),
-            TextField(
-              controller: phone,
-              keyboardType: TextInputType.phone,
-              decoration: InputDecoration(labelText: context.t('Your mobile number'), hintText: '98765 43210', prefixIcon: const Icon(Icons.phone_iphone_rounded, size: 20)),
-            ),
+            PhoneField(label: context.t('Your mobile number'), controller: phone, bottom: 0),
           ],
           const SizedBox(height: 12),
           FilledButton(
@@ -217,12 +214,33 @@ class MembershipScreen extends ConsumerWidget {
       );
 }
 
-class PlansScreen extends ConsumerWidget {
+class PlansScreen extends ConsumerStatefulWidget {
   const PlansScreen({super.key, required this.tenantId});
   final String tenantId;
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final v = ref.watch(plansProvider(tenantId));
+  ConsumerState<PlansScreen> createState() => _PlansScreenState();
+}
+
+class _PlansScreenState extends ConsumerState<PlansScreen> {
+  final busy = <String>{};
+
+  Future<void> interested(Map p) async {
+    setState(() => busy.add(p['id'] as String));
+    final ok = context.t('The gym knows — they will contact you 👍');
+    try {
+      await Api.instance.post('/me/gyms/${widget.tenantId}/plans/${p['id']}/interest');
+      ref.invalidate(plansProvider(widget.tenantId));
+      if (mounted) toast(context, ok);
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+    } finally {
+      if (mounted) setState(() => busy.remove(p['id']));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = ref.watch(plansProvider(widget.tenantId));
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Gym plans'))),
       body: AsyncBody(
@@ -231,25 +249,53 @@ class PlansScreen extends ConsumerWidget {
           final plans = (d as List).cast<Map>();
           if (plans.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('Your gym has not listed plans in the app yet.'), align: TextAlign.center)));
           return ListView(padding: const EdgeInsets.all(16), children: [
-            Muted(context.t('To buy or renew, contact your gym. They will update your membership here.')),
+            Muted(context.t('Tap "Interested" and the gym will contact you to start or change your plan.')),
             const SizedBox(height: 12),
             for (final p in plans) ...[
-              Panel(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(p['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                  const SizedBox(height: 6),
-                  Text.rich(TextSpan(children: [
-                    TextSpan(text: rupees(p['price']), style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: context.c.primary)),
-                    TextSpan(text: '  /  ${context.t('{n} months', {'n': p['months']})}', style: TextStyle(color: context.c.mut)),
-                  ])),
-                  if ((p['joiningFee'] as int) > 0) Muted(context.t('+ {fee} joining fee for new members', {'fee': rupees(p['joiningFee'])}), size: 12),
-                  if ((p['freezeDays'] as int) > 0) Muted(context.t('{n} freeze days', {'n': p['freezeDays']}), size: 12),
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 6, runSpacing: 6, children: [
-                    for (final f in (p['features'] as List))
-                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: context.c.surf2, borderRadius: BorderRadius.circular(99)), child: Text('$f', style: const TextStyle(fontSize: 12))),
+              Material(
+                color: context.c.surf,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                  side: BorderSide(color: p['active'] == true ? C.ok : context.c.line, width: p['active'] == true ? 1.8 : 1),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(p['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          Text.rich(TextSpan(children: [
+                            TextSpan(text: rupees(p['price']), style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: context.c.primary)),
+                            TextSpan(text: '  /  ${context.t('{n} months', {'n': p['months']})}', style: TextStyle(color: context.c.mut)),
+                          ])),
+                        ]),
+                      ),
+                      const SizedBox(width: 8),
+                      if (p['active'] == true)
+                        _PlanTag(icon: Icons.check_rounded, text: context.t('Active plan'), color: C.ok)
+                      else if (p['interested'] == true)
+                        _PlanTag(icon: Icons.check_rounded, text: context.t('Request sent'), color: context.c.primary)
+                      else
+                        FilledButton.icon(
+                          style: FilledButton.styleFrom(minimumSize: const Size(0, 38), padding: const EdgeInsets.symmetric(horizontal: 14), textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+                          onPressed: busy.contains(p['id']) ? null : () => interested(p),
+                          icon: const Icon(Icons.favorite_border_rounded, size: 16),
+                          label: Text(context.t('Interested')),
+                        ),
+                    ]),
+                    if ((p['joiningFee'] as int) > 0) Muted(context.t('+ {fee} joining fee for new members', {'fee': rupees(p['joiningFee'])}), size: 12),
+                    if ((p['freezeDays'] as int) > 0) Muted(context.t('{n} freeze days', {'n': p['freezeDays']}), size: 12),
+                    if ((p['features'] as List).isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 6, runSpacing: 6, children: [
+                        for (final f in (p['features'] as List))
+                          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: context.c.surf2, borderRadius: BorderRadius.circular(99)), child: Text('$f', style: const TextStyle(fontSize: 12))),
+                      ]),
+                    ],
                   ]),
-                ]),
+                ),
               ),
               const SizedBox(height: 10),
             ],
@@ -258,4 +304,21 @@ class PlansScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+class _PlanTag extends StatelessWidget {
+  const _PlanTag({required this.icon, required this.text, required this.color});
+  final IconData icon;
+  final String text;
+  final Color color;
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(color: color.withAlpha(34), borderRadius: BorderRadius.circular(99)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 12)),
+        ]),
+      );
 }

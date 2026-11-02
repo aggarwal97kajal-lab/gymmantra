@@ -7,6 +7,7 @@ import 'haptics.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/gym_admin.dart';
+import 'screens/checkin.dart';
 import 'screens/auth.dart';
 import 'screens/billing.dart';
 import 'screens/gym.dart';
@@ -20,13 +21,14 @@ import 'screens/qr.dart';
 import 'screens/role.dart';
 import 'screens/trainer.dart';
 import 'screens/workouts.dart';
+import 'photo.dart';
 import 'session.dart';
 import 'theme.dart';
 import 'ui.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Prefs.init();
+  await Future.wait([Prefs.init(), PhotoCache.init()]);
   AppSettings.instance.load();
   TapHaptics.install();
   runApp(const ProviderScope(child: GymMantraApp()));
@@ -67,7 +69,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
           return open.contains(loc) ? null : '/login';
         }
         // Each kind of person has their own part of the app.
-        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/'];
+        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/', '/checkin', '/pdf'];
         if (shared.any((p) => loc.startsWith(p))) return null;
         final (home, prefix) = switch (session.mode) {
           'owner' => ('/o/home', '/o/'),
@@ -96,7 +98,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
           builder: (context, state, child) => HomeShell(location: state.matchedLocation, child: child),
           routes: [
             GoRoute(path: '/home', pageBuilder: (_, __) => const NoTransitionPage(child: HomeScreen())),
-            GoRoute(path: '/qr', pageBuilder: (_, __) => const NoTransitionPage(child: QrScreen())),
+            GoRoute(path: '/qr', pageBuilder: (_, __) => const NoTransitionPage(child: ScanCheckinScreen())),
             GoRoute(path: '/trainers', pageBuilder: (_, __) => const NoTransitionPage(child: MemberTrainersScreen())),
             GoRoute(path: '/my-plan', pageBuilder: (_, __) => const NoTransitionPage(child: MyPlanScreen())),
             GoRoute(path: '/workouts', pageBuilder: (_, __) => const NoTransitionPage(child: WorkoutsScreen())),
@@ -105,6 +107,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
           ],
         ),
         GoRoute(path: '/join', builder: (_, __) => const JoinScreen()),
+        GoRoute(path: '/my-qr', builder: (_, __) => const QrScreen()),
+        GoRoute(path: '/checkin', builder: (_, __) => const ScanCheckinScreen(standalone: true)),
         GoRoute(path: '/membership/:id', builder: (_, s) => MembershipScreen(memberId: s.pathParameters['id']!)),
         GoRoute(path: '/plans/:tenantId', builder: (_, s) => PlansScreen(tenantId: s.pathParameters['tenantId']!)),
         GoRoute(path: '/exercise', builder: (_, s) => ExerciseScreen(exercise: s.extra as Map)),
@@ -129,6 +133,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
+        GoRoute(path: '/o/gym-qr', builder: (_, s) => GymQrScreen(share: s.uri.queryParameters['share'] == '1')),
         GoRoute(path: '/o/notices', builder: (_, __) => const NoticesScreen()),
         GoRoute(path: '/o/notices/new', builder: (_, __) => const NewNoticeScreen()),
         GoRoute(path: '/o/plans', builder: (_, __) => const ManagePlansScreen()),
