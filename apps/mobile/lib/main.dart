@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'admin.dart';
 import 'haptics.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/auth.dart';
+import 'screens/billing.dart';
 import 'screens/gym.dart';
 import 'screens/help.dart';
 import 'screens/home.dart';
@@ -46,6 +48,10 @@ class _AppState extends ConsumerState<GymMantraApp> {
     super.initState();
     final session = ref.read(sessionProvider);
     session.start();
+    if (adminApp) {
+      router = adminRouter(session, splashDone, const SplashScreen(), () => splashDone.value);
+      return;
+    }
     router = GoRouter(
       initialLocation: '/splash',
       refreshListenable: Listenable.merge([session, splashDone]),
@@ -110,6 +116,9 @@ class _AppState extends ConsumerState<GymMantraApp> {
           },
         ),
         GoRoute(path: '/o/pt', builder: (_, __) => const OwnerPtClientsScreen()),
+        GoRoute(path: '/o/subscription', builder: (_, __) => const SubscriptionScreen()),
+        GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
+        GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),
         // ---- choosing a role ----
         GoRoute(path: '/role', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen())),
@@ -155,7 +164,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
       child: ListenableBuilder(
         listenable: settings,
         builder: (_, __) => MaterialApp.router(
-          title: 'GymMantra',
+          title: adminApp ? 'GymMantra Admin' : 'GymMantra',
           debugShowCheckedModeBanner: false,
           theme: buildTheme(Brightness.light),
           darkTheme: buildTheme(Brightness.dark),
@@ -265,7 +274,7 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
                             scaleX: (1 + 0.14 * sq) * beat,
                             scaleY: (1 - 0.16 * sq) * beat,
                             alignment: Alignment.bottomCenter,
-                            child: Opacity(opacity: fadeIn.value, child: Logo(size: 116, mark: Colors.white, pulse: pulse.value)),
+                            child: Opacity(opacity: fadeIn.value, child: Logo(size: 116, body: adminApp ? C.gold : C.orange, mark: Colors.white, pulse: pulse.value)),
                           ),
                         ),
                       ),
@@ -326,7 +335,7 @@ class _Letters extends StatelessWidget {
               offset: Offset(0, 22 * (1 - e)),
               child: Text(
                 text[i],
-                style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: -0.8, color: i < 3 ? Colors.white : C.orange, height: 1.1),
+                style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: -0.8, color: i < 3 ? Colors.white : (adminApp ? C.gold : C.orange), height: 1.1),
               ),
             ),
           );

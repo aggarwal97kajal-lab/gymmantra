@@ -186,6 +186,7 @@ final gymsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.c
 final membershipProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, memberId) => Api.instance.cachedGet('/me/memberships/$memberId'));
 final plansProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, tenantId) => Api.instance.cachedGet('/me/gyms/$tenantId/plans'));
 final ticketsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/tickets'));
+final superTicketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/super/tickets/$id'));
 final ticketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/me/tickets/$id'));
 final notificationsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/notifications'));
 final exercisesProvider = StreamProvider<dynamic>((ref) => Api.instance.cachedGet('/exercises'));

@@ -10,6 +10,7 @@ import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
 import 'pt.dart';
+import 'billing.dart';
 
 // ============================================================ shell
 
@@ -85,7 +86,7 @@ class OwnerHomeScreen extends ConsumerWidget {
           onRefresh: () async => ref.invalidate(dashboardProvider),
           child: ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
             Row(children: [
-              GestureDetector(onTap: () => context.push('/o/profile'), child: Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: 46)),
+              GestureDetector(onTap: () => context.push('/o/subscription'), child: const OwnerAvatar(size: 46)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -96,6 +97,8 @@ class OwnerHomeScreen extends ConsumerWidget {
               _RoundIcon(icon: Icons.notifications_none_rounded, onTap: () => context.push('/notifications')),
             ]),
             const SizedBox(height: 16),
+            const _PlanStrip(),
+            const AdsStrip(role: 'OWNER'),
             AsyncBody(
               value: d,
               onRetry: () => ref.invalidate(dashboardProvider),
@@ -166,8 +169,12 @@ class OwnerHomeScreen extends ConsumerWidget {
                     childAspectRatio: 2.6,
                     children: [
                       _Quick(Icons.person_add_alt_1_rounded, context.t('Add member'), () => context.push('/o/members/new')),
-                      _Quick(Icons.local_offer_rounded, context.t('Create offer'), () => context.push('/o/offers/new')),
-                      _Quick(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers')),
+                      _Quick(Icons.local_offer_rounded, context.t('Create offer'), () async {
+                        if (await checkUnlocked(context, ref, 'offers') && context.mounted) context.push('/o/offers/new');
+                      }),
+                      _Quick(Icons.sports_rounded, context.t('Trainers'), () async {
+                        if (await checkUnlocked(context, ref, 'pt') && context.mounted) context.push('/o/trainers');
+                      }),
                       _Quick(Icons.language_rounded, context.t('Website'), () => openUrl(Api.instance.base)),
                     ],
                   ),
@@ -789,6 +796,7 @@ class OwnerOffersScreen extends ConsumerWidget {
               backgroundColor: context.c.primary,
               foregroundColor: Colors.white,
               onPressed: () async {
+                if (!await checkUnlocked(context, ref, 'offers') || !context.mounted) return;
                 await context.push('/o/offers/new');
                 ref.invalidate(offersProvider);
               },
@@ -969,20 +977,27 @@ class OwnerMoreScreen extends ConsumerWidget {
     final s = ref.watch(sessionProvider);
     final u = s.user ?? {};
     final gym = s.myGym ?? {};
-    Widget row(IconData icon, String title, VoidCallback onTap, {String? sub}) => ListTile(
-          leading: IconTile(icon, size: 36),
-          title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: sub == null ? null : Text(sub, style: TextStyle(color: context.c.mut, fontSize: 12)),
-          trailing: Icon(Icons.chevron_right_rounded, color: context.c.mut),
-          onTap: onTap,
-        );
+    final sub = ref.watch(subscriptionProvider).valueOrNull;
+    Widget row(IconData icon, String title, VoidCallback onTap, {String? sub, String? lock}) {
+      final locked = lock != null && !isUnlocked(ref, lock);
+      return ListTile(
+        leading: Opacity(opacity: locked ? 0.5 : 1, child: IconTile(icon, size: 36)),
+        title: Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: locked ? context.c.mut : null)),
+        subtitle: sub == null ? null : Text(sub, style: TextStyle(color: context.c.mut, fontSize: 12)),
+        trailing: locked ? LockChip(featurePlan[lock]!) : Icon(Icons.chevron_right_rounded, color: context.c.mut),
+        onTap: () async {
+          if (lock != null && !await checkUnlocked(context, ref, lock)) return;
+          onTap();
+        },
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: Text(context.t('More'))),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
         Panel(
           onTap: () => context.push('/o/profile'),
           child: Row(children: [
-            Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: 52, ring: true),
+            const OwnerAvatar(size: 52),
             const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -997,10 +1012,25 @@ class OwnerMoreScreen extends ConsumerWidget {
         Panel(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
-            row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices')),
-            row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer')),
-            if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets')),
-            row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers')),
+            if (gym['role'] == 'OWNER')
+              row(
+                Icons.workspace_premium_rounded,
+                context.t('Subscription'),
+                () => context.push('/o/subscription'),
+                sub: sub == null
+                    ? null
+                    : sub['inTrial'] == true
+                        ? context.t('Free trial · {n} days left', {'n': sub['trialDaysLeft']})
+                        : sub['plan'] != null
+                            ? context.t('{plan} plan', {'plan': sub['plan']['name']})
+                            : context.t('Trial ended — choose a plan'),
+              ),
+            row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices'), lock: 'pt'),
+            row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer'), lock: 'pt'),
+            if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets'), lock: 'pt'),
+            row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers'), lock: 'offers'),
+            row(Icons.bar_chart_rounded, context.t('Reports'), () => openUrl('${Api.instance.base}/dashboard/'), sub: context.t('On the website'), lock: 'reports'),
+            if (gym['role'] == 'OWNER') row(Icons.place_rounded, context.t('Gym address'), () => context.push('/o/address')),
             row(Icons.receipt_long_rounded, context.t('Membership plans'), () => openUrl('${Api.instance.base}/plans/'), sub: context.t('On the website')),
             row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => openUrl('${Api.instance.base}/settings/'), sub: context.t('On the website')),
             row(Icons.language_rounded, context.t('Full panel on the website'), () => openUrl(Api.instance.base)),
@@ -1241,5 +1271,69 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
         TextButton(onPressed: remove, child: Text(context.t('Remove trainer'), style: const TextStyle(color: C.red))),
       ]),
     );
+  }
+}
+
+
+/// Trial meter / plan line and the "complete your address" reminder on the owner home.
+class _PlanStrip extends ConsumerWidget {
+  const _PlanStrip();
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sub = ref.watch(subscriptionProvider).valueOrNull;
+    if (sub == null) return const SizedBox.shrink();
+    final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
+    final items = <Widget>[];
+    if (sub['inTrial'] == true) {
+      final left = sub['trialDaysLeft'] as int? ?? 0;
+      final total = sub['trialTotalDays'] as int? ?? 90;
+      items.add(Panel(
+        onTap: owner ? () => context.push('/o/subscription') : null,
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: Stack(alignment: Alignment.center, children: [
+              CircularProgressIndicator(value: total == 0 ? 0 : (left / total).clamp(0.0, 1.0), strokeWidth: 5, color: C.ok, backgroundColor: C.ok.withAlpha(40)),
+              Text('$left', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13)),
+            ]),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(context.t('Free trial · all unlocked 🔓'), style: const TextStyle(fontWeight: FontWeight.w800)),
+              Muted(context.t('{n} days left', {'n': left}), size: 12),
+            ]),
+          ),
+          if (owner) Icon(Icons.chevron_right_rounded, color: context.c.mut),
+        ]),
+      ));
+    } else if (sub['plan'] == null) {
+      items.add(Panel(
+        color: C.red.withAlpha(24),
+        onTap: owner ? () => context.push('/o/subscription') : null,
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          const IconTile(Icons.lock_clock_rounded, color: C.red),
+          const SizedBox(width: 12),
+          Expanded(child: Text(context.t('Trial ended — choose a plan'), style: const TextStyle(fontWeight: FontWeight.w800))),
+          Icon(Icons.chevron_right_rounded, color: context.c.mut),
+        ]),
+      ));
+    }
+    if (owner && sub['addressComplete'] == false) {
+      items.add(Panel(
+        onTap: () => context.push('/o/address'),
+        padding: const EdgeInsets.all(14),
+        child: Row(children: [
+          const IconTile(Icons.place_rounded, color: C.warn),
+          const SizedBox(width: 12),
+          Expanded(child: Text(context.t('Add your gym’s full address (state, city, PIN)'), style: const TextStyle(fontWeight: FontWeight.w700))),
+          Icon(Icons.chevron_right_rounded, color: context.c.mut),
+        ]),
+      ));
+    }
+    return Column(children: [for (final w in items) Padding(padding: const EdgeInsets.only(bottom: 12), child: w)]);
   }
 }

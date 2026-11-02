@@ -235,6 +235,16 @@ export function billingRoutes(app: App) {
     });
   });
 
+  app.get('/api/v1/super/gyms/:id/bills/:billId', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    const bid = c.req.param('billId');
+    const b = isUuid(id) && isUuid(bid) ? await c.var.deps.store.get<BillDoc>(P.bill(id, bid)) : null;
+    if (!b) throw notFound('Bill not found');
+    return c.json(b);
+  });
+
   /** Super admin records a plan payment (until online payment is added). Makes the receipt. */
   app.post('/api/v1/super/gyms/:id/subscription', async (c) => {
     const u = await authenticate(c);

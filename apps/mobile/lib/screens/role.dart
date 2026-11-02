@@ -8,6 +8,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show LabeledField, LangSwitch;
+import 'billing.dart' show Address, AddressFields;
 
 /// "Aap kaun ho?" — Member, Gym owner or Trainer.
 class RolePickScreen extends ConsumerStatefulWidget {
@@ -127,7 +128,7 @@ class RegisterGymScreen extends ConsumerStatefulWidget {
 class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
   final name = TextEditingController();
   final phone = TextEditingController();
-  final address = TextEditingController();
+  final place = Address();
   bool busy = false;
   String? error;
 
@@ -143,7 +144,7 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
       error = null;
     });
     try {
-      await Api.instance.post('/gyms', {'name': name.text.trim(), 'phone': phone.text.trim(), 'address': address.text.trim()});
+      await Api.instance.post('/gyms', {'name': name.text.trim(), 'phone': phone.text.trim(), ...place.toJson()});
       await ref.read(sessionProvider).refreshUser();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -167,7 +168,8 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
           const SizedBox(height: 22),
           LabeledField(label: context.t('Gym name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
           LabeledField(label: context.t('Gym phone number'), controller: phone, icon: Icons.phone_rounded, keyboard: TextInputType.phone),
-          LabeledField(label: context.t('Address'), controller: address, icon: Icons.place_outlined, caps: TextCapitalization.words),
+          AddressFields(value: place),
+          const SizedBox(height: 4),
           ErrorText(error),
           const SizedBox(height: 10),
           FilledButton(onPressed: busy ? null : save, child: Text(busy ? context.t('Please wait…') : context.t('Register gym'))),

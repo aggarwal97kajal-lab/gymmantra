@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+/// Built as the separate GymMantra Admin app (super admin only): --dart-define=APP=admin
+const bool adminApp = String.fromEnvironment('APP') == 'admin';
+
 /// Brand colours that are the same in light and dark mode.
 class C {
   static const orange = Color(0xFFFF5A1F);
@@ -11,6 +14,8 @@ class C {
   static const blue = Color(0xFF3B82F6);
   static const wa = Color(0xFF25D366);
   static const night = Color(0xFF0D1015);
+  static const indigo = Color(0xFF6366F1);
+  static const gold = Color(0xFFFBBF24);
 }
 
 /// Colours that change with the theme. Use `context.c.surf` etc.
@@ -27,7 +32,7 @@ class Pal {
     line: Color(0xFF262C36),
     fg: Color(0xFFF4F6FA),
     mut: Color(0xFF8B95A5),
-    primary: C.orange,
+    primary: adminApp ? C.indigo : C.orange,
     tint: Color(0xFF2A1A12),
   );
   static const lightPal = Pal(
@@ -38,7 +43,7 @@ class Pal {
     line: Color(0xFFE3E7ED),
     fg: Color(0xFF0F172A),
     mut: Color(0xFF64748B),
-    primary: C.orangeDeep,
+    primary: adminApp ? Color(0xFF4F46E5) : C.orangeDeep,
     tint: Color(0xFFFFEDE5),
   );
 }

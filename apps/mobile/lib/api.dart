@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'prefs.dart';
+import 'theme.dart' show adminApp;
 
 /// Server address. Set at build time with --dart-define=API_BASE=...,
 /// and can be changed in the app (long-press the logo on the login screen).
@@ -27,7 +28,7 @@ class Api {
     connectTimeout: const Duration(seconds: 20),
     receiveTimeout: const Duration(seconds: 30),
     validateStatus: (_) => true,
-    headers: {'x-gm-client': 'mobile'},
+    headers: {'x-gm-client': adminApp ? 'admin-app' : 'mobile'},
   ));
 
   Future<void> load() async {

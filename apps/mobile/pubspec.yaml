@@ -28,6 +28,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/india.json
   fonts:
     # Plus Jakarta Sans (SIL Open Font License 1.1). Hindi text uses the phone's Devanagari font.
     - family: Jakarta

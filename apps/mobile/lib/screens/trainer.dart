@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl;
 import 'pt.dart';
+import 'billing.dart' show AdsStrip;
 
 class TrainerShell extends StatelessWidget {
   const TrainerShell({super.key, required this.child, required this.location});
@@ -71,6 +72,7 @@ class TrainerHomeScreen extends ConsumerWidget {
               GestureDetector(onTap: () => context.go('/t/profile'), child: Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: 42)),
             ]),
             const SizedBox(height: 16),
+            const AdsStrip(role: 'TRAINER'),
             AsyncBody(
               value: v,
               onRetry: () => ref.invalidate(trainerHomeProvider),

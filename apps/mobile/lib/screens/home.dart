@@ -8,6 +8,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'pt.dart' show MyTrainerCard, myPtProvider;
+import 'billing.dart' show AdsStrip;
 
 /// Bottom navigation shell.
 class HomeShell extends StatelessWidget {
@@ -79,6 +80,7 @@ class HomeScreen extends ConsumerWidget {
               GestureDetector(onTap: () => context.go('/profile'), child: Avatar(name: name, url: u['photoUrl'] as String?, size: 42)),
             ]),
             const SizedBox(height: 18),
+            const AdsStrip(role: 'MEMBER'),
             AsyncBody(
               value: gyms,
               onRetry: () => ref.invalidate(gymsProvider),

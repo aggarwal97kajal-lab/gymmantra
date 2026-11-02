@@ -234,8 +234,9 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
 }
 
 class TicketScreen extends ConsumerStatefulWidget {
-  const TicketScreen({super.key, required this.id});
+  const TicketScreen({super.key, required this.id, this.admin = false});
   final String id;
+  final bool admin;
   @override
   ConsumerState<TicketScreen> createState() => _TicketState();
 }
@@ -246,7 +247,8 @@ class _TicketState extends ConsumerState<TicketScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final t = ref.watch(ticketProvider(widget.id));
+    final prov = widget.admin ? superTicketProvider(widget.id) : ticketProvider(widget.id);
+    final t = ref.watch(prov);
     final me = ref.watch(sessionProvider).user?['id'];
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Ticket'))),
@@ -297,9 +299,9 @@ class _TicketState extends ConsumerState<TicketScreen> {
                             if (msg.text.trim().isEmpty) return;
                             setState(() => busy = true);
                             try {
-                              await Api.instance.post('/me/tickets/${widget.id}/messages', {'body': msg.text.trim()});
+                              await Api.instance.post('${widget.admin ? '/super' : '/me'}/tickets/${widget.id}/messages', {'body': msg.text.trim()});
                               msg.clear();
-                              ref.invalidate(ticketProvider(widget.id));
+                              ref.invalidate(prov);
                             } catch (e) {
                               if (mounted) toast(context, e.toString());
                             } finally {
