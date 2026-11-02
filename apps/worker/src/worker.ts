@@ -1,5 +1,6 @@
 import { createApp } from './app';
-import type { Deps } from './core';
+import { loadSecrets, type Deps } from './core';
+import { ensureBaseData } from './routes/super';
 import { FirebaseIdentity, serverToken } from './identity';
 import { FirestoreStore } from './store/firestore';
 
@@ -86,6 +87,17 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
           ? 'Firestore database not created yet, or FIREBASE_PROJECT_ID is wrong. Copy projectId exactly from Firebase'
           : `Firestore error: ${st || f.status} ${fd?.error?.message ?? ''}`;
       add('Database (Firestore) is reachable', f.ok || missingDoc, `${ffix} [${f.status} ${msg.slice(0, 160)}]`);
+    }
+  }
+  if (steps.every((x) => x.ok)) {
+    // Run the same first steps every API request runs, and report the real error if any.
+    try {
+      const d = depsFor(env, new URL('https://check.local/'));
+      await loadSecrets(d.store);
+      await ensureBaseData(d.store);
+      add('Server can save data in the database', true);
+    } catch (e: any) {
+      add('Server can save data in the database', false, `${e?.name ?? 'Error'}: ${String(e?.message ?? e).slice(0, 400)}`);
     }
   }
   const allOk = steps.every((s) => s.ok);

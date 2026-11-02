@@ -18,7 +18,9 @@ export function createApp(getDeps: () => Deps) {
     if (err instanceof HttpError) return c.json({ statusCode: err.status, message: err.message, ...err.extra }, err.status as any);
     if (err instanceof AlreadyExists) return c.json({ statusCode: 409, message: 'This already exists' }, 409);
     console.error(err);
-    return c.json({ statusCode: 500, message: 'Something went wrong on the server. Please try again.' }, 500);
+    // Show the first part of the error so problems can be reported from a phone screenshot.
+    const detail = String((err as any)?.message ?? err).slice(0, 200);
+    return c.json({ statusCode: 500, message: `Something went wrong on the server. Please try again. (${detail})` }, 500);
   });
 
   app.use('/api/*', async (c, next) => {
