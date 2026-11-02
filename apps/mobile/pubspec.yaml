@@ -25,7 +25,7 @@ dependencies:
   geolocator: ^13.0.2
   share_plus: ^10.1.4
   gal: ^2.3.1
-  file_picker: ^8.3.7
+  file_picker: ^10.3.7
   pdfx: ^2.8.0
 
 dev_dependencies:
