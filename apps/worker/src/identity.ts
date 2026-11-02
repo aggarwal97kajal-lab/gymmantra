@@ -12,7 +12,9 @@ export interface GoogleProfile {
 }
 
 export interface Identity {
-  signUp(email: string, password: string): Promise<{ uid: string }>;
+  signUp(email: string, password: string): Promise<{ uid: string; idToken?: string }>;
+  /** Removes a Firebase account we just created (when saving the GymMantra record failed). */
+  deleteAccount(idToken: string): Promise<void>;
   /** Throws HttpError(401) on a wrong email/password. */
   signIn(email: string, password: string): Promise<{ uid: string; idToken: string; expiresIn: number }>;
   changePassword(email: string, current: string | null, next: string): Promise<{ uid: string }>;
@@ -53,7 +55,10 @@ export class FirebaseIdentity implements Identity {
 
   async signUp(email: string, password: string) {
     const d = await this.call('signUp', { email, password, returnSecureToken: true });
-    return { uid: d.localId as string };
+    return { uid: d.localId as string, idToken: d.idToken as string };
+  }
+  async deleteAccount(idToken: string) {
+    await this.call('delete', { idToken });
   }
   async signIn(email: string, password: string) {
     const d = await this.call('signInWithPassword', { email, password, returnSecureToken: true });
@@ -87,7 +92,11 @@ export class FakeIdentity implements Identity {
     if (password.length < 6) throw bad('Password is too weak. Use at least 8 characters');
     const uid = crypto.randomUUID().replace(/-/g, '').slice(0, 28);
     this.accounts.set(email, { uid, password });
-    return { uid };
+    return { uid, idToken: `fake.${uid}` };
+  }
+  async deleteAccount(idToken: string) {
+    const uid = idToken.replace('fake.', '');
+    for (const [e, a] of this.accounts) if (a.uid === uid) this.accounts.delete(e);
   }
   async signIn(email: string, password: string) {
     const a = this.accounts.get(email);
@@ -102,6 +111,7 @@ export class FakeIdentity implements Identity {
   }
   resets: string[] = [];
   async sendPasswordReset(email: string) {
+    if (!this.accounts.has(email)) throw unauthorized('WRONG_PASSWORD');
     this.resets.push(email);
   }
   /** Test tokens look like "google:<sub>:<email>". */

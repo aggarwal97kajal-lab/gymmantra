@@ -47,29 +47,52 @@ function tooMany(until: string) {
   return new HttpError(429, `Too many attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}`, { retryAfterMinutes: mins });
 }
 
+const PHONE_TAKEN = 'This mobile number is already used by another GymMantra account. Each account needs its own mobile number. Please log in, or use a different number';
+
 /** Mobile numbers with no email get a private sign-in address for Firebase. */
 export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phone.gymmantra.app`;
 
 /** Creates a password account in Firebase and the GymMantra user record. */
 export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string }) {
   const { store, identity, superAdminEmail } = c.var.deps;
-  if (await store.get(P.phone(input.phone))) throw conflict('An account with this mobile number already exists. Please log in');
+  // The mobile number must be free. An index left behind by a removed account does not count.
+  const phoneRef = await store.get<{ uid: string }>(P.phone(input.phone));
+  const phoneOwner = phoneRef ? await store.get<UserDoc>(P.user(phoneRef.uid)) : null;
+  if (phoneOwner && !phoneOwner.deleted) throw conflict(PHONE_TAKEN);
   const authEmail = input.email ?? phoneAuthEmail(input.phone);
-  let fb: { uid: string };
+  let fb: { uid: string; idToken?: string };
+  let fresh = true;
   try {
     fb = await identity.signUp(authEmail, input.password);
   } catch (e) {
-    if (e instanceof HttpError && e.message === 'EMAIL_EXISTS') throw conflict('An account with this email already exists. Please log in');
-    throw e;
+    if (!(e instanceof HttpError && e.message === 'EMAIL_EXISTS')) throw e;
+    const owner = (await store.query<UserDoc>('users', [['authEmail', authEmail]])).find((r) => !r.data.deleted);
+    if (owner) throw conflict(input.email ? 'An account with this email already exists. Please log in' : PHONE_TAKEN);
+    // Firebase has the login but GymMantra has no record (an earlier sign-up did not finish).
+    // If the password matches, finish that sign-up now.
+    try {
+      fb = await identity.signIn(authEmail, input.password);
+      fresh = false;
+    } catch {
+      throw conflict('This email was used in a sign-up that did not finish. Tap "Forgot password?" on the login page to set a new password, then sign up again with that password');
+    }
   }
   const uid = fb.uid;
   const user = newUser(input.name, { email: input.email, authEmail, fbUid: uid, phone: input.phone }, !!input.email && input.email === superAdminEmail);
-  await store.tx(async (t) => {
-    t.create(P.phone(input.phone), { uid });
-    t.set(P.user(uid), user);
-    const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };
-    t.set(P.stats, { ...st, users: (st.users ?? 0) + 1 });
-  });
+  try {
+    await store.tx(async (t) => {
+      if (phoneRef) t.set(P.phone(input.phone), { uid });
+      else t.create(P.phone(input.phone), { uid });
+      t.set(P.user(uid), user);
+      const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };
+      t.set(P.stats, { ...st, users: (st.users ?? 0) + 1 });
+    });
+  } catch (e) {
+    // Don't leave a half-made login behind, or the same email could never sign up again.
+    if (fresh && fb.idToken) await identity.deleteAccount(fb.idToken).catch(() => {});
+    if (e instanceof AlreadyExists) throw conflict(PHONE_TAKEN);
+    throw e;
+  }
   return { uid, user };
 }
 
@@ -145,7 +168,7 @@ export function authRoutes(app: App) {
   app.post('/api/v1/auth/google/signup', async (c) => {
     const { store, identity, superAdminEmail } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
-    const g = await identity.verifyGoogle(str(b, 'idToken'));
+    const g = await identity.verifyGoogle(str(b, 'idToken', { max: 8000, label: 'the Google sign-in token' }));
     const uid = `g_${g.sub}`;
     if (await store.get(P.user(uid))) throw conflict('You already signed up with this Google account. Please log in with Google');
     if (g.email && (await store.query('users', [['email', g.email]])).length) {
@@ -176,7 +199,7 @@ export function authRoutes(app: App) {
   app.post('/api/v1/auth/google/login', async (c) => {
     const { store, identity } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
-    const g = await identity.verifyGoogle(str(b, 'idToken'));
+    const g = await identity.verifyGoogle(str(b, 'idToken', { max: 8000, label: 'the Google sign-in token' }));
     const uid = `g_${g.sub}`;
     const user = await store.get<UserDoc>(P.user(uid));
     if (!user || user.deleted) throw notFound('No GymMantra account for this Google account. Please sign up with Google first');
@@ -200,6 +223,16 @@ export function authRoutes(app: App) {
       user = uid ? await store.get<UserDoc>(P.user(uid)) : null;
     } else {
       user = (await store.query<UserDoc>('users', [['email', email!]]))[0]?.data ?? null;
+    }
+    if ((!user || user.deleted) && email) {
+      // A login from a sign-up that did not finish: let them reset it, then sign up again.
+      try {
+        await identity.sendPasswordReset(email);
+      } catch {
+        throw notFound('No GymMantra account found with this email or mobile number');
+      }
+      const [n, d] = email.split('@');
+      return c.json({ sent: true, to: `${n.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, n.length - 1)))}@${d}` });
     }
     if (!user || user.deleted) throw notFound('No GymMantra account found with this email or mobile number');
     if (!user.authEmail) throw bad('This account uses Google sign-in. Use "Continue with Google" to log in');

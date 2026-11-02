@@ -52,6 +52,32 @@ describe('auth', () => {
     expect((h.deps.identity as any).resets).toContain(u.email);
   });
 
+  it('sign-up: a used mobile number gets a clear message, a new email works', async () => {
+    const u = await h.signup();
+    const r = await h.api.post('/auth/signup', { name: 'Other', email: 'other@test.in', phone: u.phone, password: 'secret123' });
+    expect(r.status).toBe(409);
+    expect(r.body.message).toMatch(/mobile number is already used/);
+    const ok = await h.api.post('/auth/signup', { name: 'Other', email: 'other@test.in', phone: h.nextPhone(), password: 'secret123' });
+    expect(ok.status).toBe(201);
+  });
+
+  it('sign-up finishes a half-made login (Firebase account but no GymMantra record)', async () => {
+    const email = 'half@test.in';
+    await h.deps.identity.signUp(email, 'secret123'); // left behind by an earlier failed sign-up
+    const wrong = await h.api.post('/auth/signup', { name: 'Half', email, phone: h.nextPhone(), password: 'other-pass1' });
+    expect(wrong.status).toBe(409);
+    expect(wrong.body.message).toMatch(/Forgot password/);
+    expect((await h.api.post('/auth/forgot', { identifier: email })).status).toBe(200);
+    const r = await h.api.post('/auth/signup', { name: 'Half', email, phone: h.nextPhone(), password: 'secret123' });
+    expect(r.status).toBe(201);
+    expect((await h.api.post('/auth/login', { identifier: email, password: 'secret123' })).status).toBe(200);
+  });
+
+  it('accepts real-length Google tokens', async () => {
+    const r = await h.api.post('/auth/google/login', { idToken: 'x'.repeat(1200) });
+    expect(r.status).toBe(401);
+  });
+
   it('Google login only works after Google signup', async () => {
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-1:g1@test.in' })).status).toBe(404);
     expect((await h.api.post('/auth/google/signup', { idToken: 'google:g-1:g1@test.in' })).status).toBe(201);
