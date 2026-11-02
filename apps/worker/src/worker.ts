@@ -46,9 +46,53 @@ function depsFor(env: WorkerEnv, url: URL): Deps {
   return deps;
 }
 
+/**
+ * Setup check for the owner: says which setup step is missing, without showing
+ * any secret. Open /api/setup-check in a browser.
+ */
+async function setupCheck(env: WorkerEnv): Promise<Response> {
+  const steps: { step: string; ok: boolean; fix?: string }[] = [];
+  const add = (step: string, ok: boolean, fix?: string) => steps.push({ step, ok, ...(ok ? {} : { fix }) });
+  add('FIREBASE_PROJECT_ID is set', !!env.FIREBASE_PROJECT_ID, 'Cloudflare → gymmantra → Settings → Runtime variables: add FIREBASE_PROJECT_ID');
+  add('FIREBASE_API_KEY is set', !!env.FIREBASE_API_KEY, 'Cloudflare → Settings → Runtime variables: add FIREBASE_API_KEY');
+  add('SERVER_PASSWORD is set', !!env.SERVER_PASSWORD, 'Cloudflare → Settings → Runtime variables: add SERVER_PASSWORD (type Secret)');
+  add('SUPER_ADMIN_EMAIL is set', !!env.SUPER_ADMIN_EMAIL, 'Cloudflare → Settings → Runtime variables: add SUPER_ADMIN_EMAIL');
+  if (env.FIREBASE_API_KEY && env.SERVER_PASSWORD) {
+    const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${env.FIREBASE_API_KEY}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: env.SERVER_EMAIL || 'server@gymmantra.internal', password: env.SERVER_PASSWORD, returnSecureToken: true }),
+    });
+    const d: any = await r.json().catch(() => ({}));
+    const code = String(d?.error?.message ?? '');
+    const fix = code.includes('API_KEY') || code.includes('API key')
+      ? 'FIREBASE_API_KEY is wrong. Copy apiKey again from Firebase → Project settings → Your apps'
+      : code.includes('OPERATION_NOT_ALLOWED')
+        ? 'Firebase → Authentication → Sign-in method: enable Email/Password'
+        : code.includes('INVALID') || code.includes('EMAIL_NOT_FOUND') || code.includes('PASSWORD')
+          ? 'Firebase → Authentication → Users: user server@gymmantra.internal must exist and SERVER_PASSWORD must be exactly its password'
+          : `Firebase login error: ${code || r.status}`;
+    add('Server account can log in to Firebase', r.ok, fix);
+    if (r.ok && env.FIREBASE_PROJECT_ID) {
+      const f = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/settings/platform`, { headers: { authorization: `Bearer ${d.idToken}` } });
+      const fd: any = await f.json().catch(() => ({}));
+      const st = String(fd?.error?.status ?? '');
+      const ffix = st === 'PERMISSION_DENIED'
+        ? 'Firestore → Rules: paste the GymMantra rules and press Publish (or FIREBASE_PROJECT_ID belongs to another project)'
+        : st === 'NOT_FOUND' || f.status === 404
+          ? 'Firestore database not created yet, or FIREBASE_PROJECT_ID is wrong. Copy projectId exactly from Firebase'
+          : `Firestore error: ${st || f.status} ${fd?.error?.message ?? ''}`;
+      add('Database (Firestore) is reachable', f.ok || (f.status === 404 && !st), ffix);
+    }
+  }
+  const allOk = steps.every((s) => s.ok);
+  return new Response(JSON.stringify({ allOk, steps }, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
 export default {
   async fetch(req: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(req.url);
+    if (url.pathname === '/api/setup-check') return setupCheck(env);
     let res: Response;
     if (url.pathname.startsWith('/api/')) {
       const app = createApp(() => depsFor(env, url));
