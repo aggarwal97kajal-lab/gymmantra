@@ -80,6 +80,20 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
       const msg = String(fd?.error?.message ?? '');
       // A missing document is fine (the database exists); a missing database is not.
       const missingDoc = f.status === 404 && /^Document /i.test(msg);
+      // Try each kind of database call the server uses, one by one.
+      const base = `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents`;
+      const auth = { authorization: `Bearer ${d.idToken}`, 'content-type': 'application/json' };
+      const name = `projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/settings/check`;
+      const probe = async (label: string, url: string, body: unknown) => {
+        const r = await fetch(url, { method: 'POST', headers: auth, body: JSON.stringify(body) });
+        const j: any = await r.json().catch(() => ({}));
+        add(`Database ${label}`, r.ok, `${r.status} ${j?.error?.status ?? ''} ${String(j?.error?.message ?? '').slice(0, 200)}`);
+        return j;
+      };
+      await probe('write', `${base}:commit`, { writes: [{ update: { name, fields: { at: { stringValue: new Date().toISOString() } } } }] });
+      await probe('batch read', `${base}:batchGet`, { documents: [name] });
+      const tx = await probe('start transaction', `${base}:beginTransaction`, { options: { readWrite: {} } });
+      if (tx?.transaction) await probe('transaction commit', `${base}:commit`, { writes: [], transaction: tx.transaction });
       const st = missingDoc ? '' : String(fd?.error?.status ?? '');
       const ffix = st === 'PERMISSION_DENIED'
         ? 'Firestore → Rules: paste the GymMantra rules and press Publish (or FIREBASE_PROJECT_ID belongs to another project)'

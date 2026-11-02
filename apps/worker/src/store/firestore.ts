@@ -67,7 +67,8 @@ export class FirestoreStore implements Store {
     if (!res.ok) {
       const status = data?.error?.status ?? '';
       if (status === 'ALREADY_EXISTS' || (status === 'FAILED_PRECONDITION' && /exist/i.test(data?.error?.message ?? ''))) throw new AlreadyExists('');
-      const err = new Error(`Firestore ${res.status} ${status}: ${data?.error?.message ?? ''}`);
+      const op = url.split('/documents')[1]?.split('?')[0] || url;
+      const err = new Error(`Firestore ${res.status} ${status} on ${method} ${op}: ${data?.error?.message ?? ''}`);
       (err as any).fsStatus = status;
       throw err;
     }
