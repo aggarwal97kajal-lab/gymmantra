@@ -3,6 +3,7 @@ import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, int, oneOf, optBool, optInt, optStr, str } from '../lib/validate';
 import type { Reader } from '../store/store';
+import { requireFeature } from './billing';
 
 // ---------- Trainers (staff with role TRAINER) and gym offers ----------
 
@@ -218,6 +219,7 @@ export function trainerRoutes(app: App) {
   app.post('/api/v1/offers', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
+    await requireFeature(c.var.deps.store, g.tenant, 'offers');
     const b = body(await c.req.json().catch(() => null));
     const o: OfferDoc = { id: uuid(), ...readOffer(b), active: true, createdById: u.id, createdAt: nowIso() };
     if (o.validTill < todayIST()) throw bad('The last date has already passed');

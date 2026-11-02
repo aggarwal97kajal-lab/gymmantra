@@ -32,6 +32,7 @@ import { body, int, oneOf, optBool, optInt, optStr, str, strList } from '../lib/
 import type { Tx } from '../store/store';
 import { gymLimits } from './gym';
 import { newTrainer } from './trainers';
+import { requireFeature } from './billing';
 import type { ScanLog } from './attendance';
 
 export interface PlanDoc {
@@ -500,6 +501,7 @@ export function memberRoutes(app: App) {
       if (!ju || ju.deleted) throw bad('This account no longer exists');
       if (jr.kind === 'TRAINER') {
         if (g.role !== 'OWNER') throw forbidden('Only the gym owner can approve trainers');
+        await requireFeature(t, g.tenant, 'pt');
         if (isDeskStaff(ju)) throw bad('This person runs a gym and cannot be a trainer');
         const now = nowIso();
         t.set(P.staff(g.tenantId, jr.userId), { userId: jr.userId, role: 'TRAINER', branchIds: [], active: true, createdAt: now });

@@ -1,15 +1,17 @@
 import { App, audit, authenticate, P, requireSuper, Role, TenantDoc } from '../core';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { isYmd } from '../lib/dates';
-import { body, int, oneOf, optBool, optInt, str, strList } from '../lib/validate';
+import { body, int, oneOf, optBool, optInt, optStr, str, strList } from '../lib/validate';
 import type { Store } from '../store/store';
 import type { SaasPlan } from './gym';
+import { FEATURE_KEYS } from './billing';
+import { normalizePhone } from '../lib/phone';
 
 /** Starting SaaS plans. Created once; after that the super admin edits them in the panel. */
 export const DEFAULT_SAAS_PLANS = [
-  { name: 'Starter', monthlyPrice: 399, annualPrice: 3990, memberLimit: 150, branchLimit: 1, staffLimit: 3, whatsappLimit: 0, features: ['Admin panel', 'Member app', 'Plans & manual memberships', 'QR attendance', 'Support inbox'], sortOrder: 1 },
-  { name: 'Growth', monthlyPrice: 799, annualPrice: 7990, memberLimit: 500, branchLimit: 1, staffLimit: 5, whatsappLimit: 1000, features: ['Everything in Starter', 'WhatsApp reminders & receipts', 'Excel import', 'Reports'], sortOrder: 2 },
-  { name: 'Pro', monthlyPrice: 1399, annualPrice: 13990, memberLimit: null, branchLimit: 3, staffLimit: 15, whatsappLimit: 5000, features: ['Everything in Growth', '3D exercise guides', 'Multi-branch view', 'Priority support'], sortOrder: 3 },
+  { name: 'Starter', monthlyPrice: 399, annualPrice: 3990, memberLimit: 150, branchLimit: 1, staffLimit: 3, whatsappLimit: 0, features: ['Admin panel', 'Member app', 'Plans & manual memberships', 'QR attendance', 'Support inbox'], unlocks: [] as string[], sortOrder: 1 },
+  { name: 'Growth', monthlyPrice: 799, annualPrice: 7990, memberLimit: 500, branchLimit: 1, staffLimit: 5, whatsappLimit: 1000, features: ['Everything in Starter', 'Offers', 'Trainers, PT and diet plans', 'PT accounts'], unlocks: ['offers', 'pt'], sortOrder: 2 },
+  { name: 'Pro', monthlyPrice: 1399, annualPrice: 13990, memberLimit: null, branchLimit: 3, staffLimit: 15, whatsappLimit: 5000, features: ['Everything in Growth', 'Reports', 'Up to 3 branches', 'Priority support'], unlocks: ['offers', 'pt', 'reports', 'branches'], sortOrder: 3 },
 ];
 
 let baseChecked = false;
@@ -46,6 +48,8 @@ function planFields(b: Record<string, unknown>, partial: boolean) {
   if (f !== undefined || !partial) o.features = f ?? [];
   const v = optBool(b, 'visible');
   if (v !== undefined || !partial) o.visible = v ?? true;
+  const un = strList(b, 'unlocks', 10);
+  if (un !== undefined) (o as { unlocks?: string[] }).unlocks = un.filter((k) => (FEATURE_KEYS as readonly string[]).includes(k));
   return o;
 }
 
@@ -164,10 +168,19 @@ export function superRoutes(app: App) {
     const u = await authenticate(c);
     requireSuper(c);
     const b = body(await c.req.json().catch(() => null));
-    const trialMonths = int(b, 'trialMonths', { min: 0, max: 24, label: 'trial months' });
+    const patch: Record<string, unknown> = {};
+    if (b.trialMonths !== undefined) patch.trialMonths = int(b, 'trialMonths', { min: 0, max: 24, label: 'trial months' });
+    if (b.supportWhatsapp !== undefined) {
+      const w = optStr(b, 'supportWhatsapp', { max: 20 });
+      const p = w ? normalizePhone(w) : null;
+      if (w && !p) throw bad('Enter a valid WhatsApp number');
+      patch.supportWhatsapp = p;
+    }
+    if (b.businessName !== undefined) patch.businessName = optStr(b, 'businessName', { max: 120 }) ?? null;
+    if (b.businessAddress !== undefined) patch.businessAddress = optStr(b, 'businessAddress', { max: 300 }) ?? null;
     const out = await c.var.deps.store.tx(async (t) => {
       const before = await t.get(P.platform);
-      const after = { ...(before ?? {}), trialMonths };
+      const after = { ...(before ?? {}), ...patch };
       t.set(P.platform, after);
       audit(t, null, u.id, 'settings.update', 'platform_settings', '1', before, after);
       return after;

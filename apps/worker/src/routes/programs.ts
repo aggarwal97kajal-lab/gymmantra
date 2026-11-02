@@ -3,6 +3,7 @@ import { bad, forbidden, notFound, nowIso } from '../lib/http';
 import { body, str } from '../lib/validate';
 import type { PtDoc } from './pt';
 import { ptState } from './pt';
+import { requireFeature } from './billing';
 
 // ---------- Diet chart and workout plan a trainer makes for a PT client ----------
 
@@ -107,6 +108,8 @@ export function programRoutes(app: App) {
     const memberId = c.req.param('memberId');
     await canWrite(c, tenantId, memberId);
     const { store } = c.var.deps;
+    const gymDoc = await store.get<TenantDoc>(P.tenant(tenantId));
+    if (gymDoc) await requireFeature(store, gymDoc, 'pt');
     const out = await store.tx(async (t) => {
       const m = await t.get<MemberDoc>(P.member(tenantId, memberId));
       if (!m) throw notFound('Member not found');

@@ -60,6 +60,16 @@ export interface TenantDoc {
   memberCount: number;
   branches: Branch[];
   createdAt: string;
+  // Full address (required for new gyms; decides CGST+SGST or IGST once GymMantra charges GST)
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  stateCode?: string | null;
+  pincode?: string | null;
+  gstin?: string | null;
+  // GymMantra subscription
+  planCycle?: 'MONTHLY' | 'ANNUAL' | null;
+  planEndsAt?: string | null;
 }
 
 export interface MemberDoc {
@@ -173,6 +183,11 @@ export const P = {
   notes: (uid: string) => `notifications/${uid}`,
   photo: (uid: string) => `photos/${uid}`,
   saasPlans: 'saasPlans',
+  bills: (t: string) => `tenants/${t}/bills`,
+  bill: (t: string, id: string) => `tenants/${t}/bills/${id}`,
+  ads: 'ads',
+  ad: (id: string) => `ads/${id}`,
+  adImage: (id: string) => `adImages/${id}`,
   saasPlan: (id: string) => `saasPlans/${id}`,
   platform: 'settings/platform',
   secrets: 'settings/secrets',
@@ -268,12 +283,16 @@ export async function authenticate(c: C): Promise<AuthUser> {
   const user = { ...u, id: uid };
   // Owner decision: the GymMantra admin uses the website (and later the admin app), not the gym app.
   if (isMobile(c) && isWebOnly(user)) throw unauthorized(WEB_ONLY_MESSAGE);
+  if (isAdminApp(c) && !user.isSuperAdmin) throw unauthorized(ADMIN_ONLY_MESSAGE);
   c.set('user', user);
   return user;
 }
 
 export const WEB_ONLY_MESSAGE = 'This is the GymMantra super admin account. Please use the GymMantra website to log in.';
 export const isMobile = (c: C) => c.req.header('x-gm-client') === 'mobile';
+/** The separate GymMantra Admin app (super admin only). */
+export const isAdminApp = (c: C) => c.req.header('x-gm-client') === 'admin-app';
+export const ADMIN_ONLY_MESSAGE = 'This app is only for the GymMantra admin. Gym owners, trainers and members use the GymMantra app.';
 export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isSuperAdmin;
 
 /** True if the person runs a gym (owner or front desk) anywhere. */

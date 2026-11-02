@@ -1,7 +1,7 @@
 import { P } from '../src/core';
 import { makeQrToken } from '../src/lib/qr';
 import { addDays, todayIST } from '../src/lib/dates';
-import { EMULATOR, resetEmulator, setup } from './helpers';
+import { EMULATOR, GYM_ADDRESS, resetEmulator, setup } from './helpers';
 
 let h: ReturnType<typeof setup>;
 beforeEach(async () => {
@@ -110,7 +110,7 @@ describe('auth', () => {
     const u = await h.signup();
     const cookie = { cookie: `gm_session=${u.token}` };
     expect((await h.api.post('/gyms', { name: 'Cookie Gym' }, undefined, cookie)).status).toBe(403);
-    expect((await h.api.post('/gyms', { name: 'Cookie Gym' }, undefined, { ...cookie, 'x-gm-client': 'admin' })).status).toBe(201);
+    expect((await h.api.post('/gyms', { name: 'Cookie Gym', ...GYM_ADDRESS }, undefined, { ...cookie, 'x-gm-client': 'admin' })).status).toBe(201);
   });
 
   it('gym owners can use the app; the super admin cannot', async () => {
@@ -488,5 +488,95 @@ describe('personal training', () => {
     await h.api.post(`/join-requests/${j2.id}/approve`, {}, A.token);
     expect((await h.api.put(`/programs/${memberId}`, { tenantId: A.gym.id, diet: null }, tr2.token)).status).toBe(403);
     expect((await h.api.get(`/programs/${memberId}?tenantId=${A.gym.id}`, A.token)).status).toBe(200);
+  });
+});
+
+describe('gym address, plans and bills', () => {
+  it('a new gym needs a full address with a matching PIN', async () => {
+    const o = await h.signup('Address Owner');
+    expect((await h.api.post('/gyms', { name: 'No Address Gym' }, o.token)).status).toBe(400);
+    const bad = await h.api.post('/gyms', { name: 'Wrong Pin Gym', addressLine: 'SCO 44, Sector 29', state: 'Haryana', city: 'Gurugram', pincode: '110075' }, o.token);
+    expect(bad.status).toBe(400);
+    expect(bad.body.message).toMatch(/not from Haryana/);
+    const ok = await h.api.post('/gyms', { name: 'Good Gym', addressLine: 'SCO 44, Sector 29', state: 'Haryana', city: 'Gurugram', pincode: '122001' }, o.token);
+    expect(ok.status).toBe(201);
+    expect(ok.body.stateCode).toBe('06');
+  });
+
+  it('trial unlocks everything; a plan unlocks only its features; receipts have no GST until the switch is on', async () => {
+    const A = await h.ownerWithGym('Plan Gym');
+    let sub = await h.api.get('/subscription', A.token);
+    expect(sub.body.inTrial).toBe(true);
+    expect(sub.body.ring).toBe('trial');
+    expect(sub.body.unlocks).toEqual(['offers', 'pt', 'reports', 'branches']);
+    const starter = sub.body.plans.find((p: any) => p.name === 'Starter');
+    const growth = sub.body.plans.find((p: any) => p.name === 'Growth');
+    // super admin
+    await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const boss = (await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' })).body.token;
+    expect((await h.api.post(`/super/gyms/${A.gym.id}/subscription`, { planId: starter.id, cycle: 'MONTHLY', mode: 'UPI' }, A.token)).status).toBe(403);
+    const bill = await h.api.post(`/super/gyms/${A.gym.id}/subscription`, { planId: starter.id, cycle: 'MONTHLY', mode: 'UPI', ref: '1234' }, boss);
+    expect(bill.status).toBe(201);
+    expect(bill.body.kind).toBe('RECEIPT');
+    expect(bill.body.gst).toBeNull();
+    expect(bill.body.total).toBe(399);
+    sub = await h.api.get('/subscription', A.token);
+    expect(sub.body.ring).toBe('starter');
+    expect(sub.body.unlocks).toEqual([]);
+    expect(sub.body.bills).toHaveLength(1);
+    // Starter: offers locked
+    const far = addDays(todayIST(), 5);
+    const off = await h.api.post('/offers', { title: 'Locked offer', validTill: far, forMembers: true }, A.token);
+    expect(off.status).toBe(403);
+    expect(off.body.message).toMatch(/Growth plan/);
+    // GST switch on: Delhi gym gets CGST + SGST on the next bill
+    expect((await h.api.patch('/super/gst', { registered: true }, boss)).status).toBe(400);
+    expect((await h.api.patch('/super/gst', { registered: true, gstin: '07ABCDE1234F1Z5' }, boss)).status).toBe(200);
+    const b2 = await h.api.post(`/super/gyms/${A.gym.id}/subscription`, { planId: growth.id, cycle: 'ANNUAL', mode: 'UPI' }, boss);
+    expect(b2.body.kind).toBe('TAX_INVOICE');
+    expect(b2.body.gst.type).toBe('CGST_SGST');
+    expect(b2.body.total).toBe(9428.2);
+    expect(b2.body.number).toMatch(/^GM\/\d{2}-\d{2}\/0001$/);
+    expect((await h.api.post('/offers', { title: 'Now open', validTill: far, forMembers: true }, A.token)).status).toBe(201);
+    const full = await h.api.get(`/subscription/bills/${b2.body.id}`, A.token);
+    expect(full.body.seller.gstin).toBe('07ABCDE1234F1Z5');
+  });
+});
+
+describe('ads', () => {
+  it('super admin runs an ad for chosen roles and states', async () => {
+    await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const boss = (await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' })).body.token;
+    const A = await h.ownerWithGym('Ad Gym'); // Delhi
+    const mem = await h.signup('Ad Member');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem.token);
+    const jr = (await h.api.get('/join-requests', A.token)).body[0];
+    await h.api.post(`/join-requests/${jr.id}/approve`, {}, A.token);
+    const end = addDays(todayIST(), 10);
+    expect((await h.api.post('/super/ads', { title: 'Nope', endsOn: end }, A.token)).status).toBe(403);
+    const ad = await h.api.post('/super/ads', { title: 'ProFuel Whey 20% off', endsOn: end, forMembers: true, states: ['Delhi'], linkKind: 'URL', linkValue: 'https://example.com' }, boss);
+    expect(ad.status).toBe(201);
+    await h.api.post('/super/ads', { title: 'Only Mumbai', endsOn: end, forMembers: true, states: ['Maharashtra'] }, boss);
+    await h.api.post('/super/ads', { title: 'Owners only', endsOn: end, forMembers: false, forOwners: true }, boss);
+    const seen = await h.api.get('/ads?role=MEMBER', mem.token);
+    expect(seen.body.map((a: any) => a.title)).toEqual(['ProFuel Whey 20% off']);
+    expect((await h.api.get('/ads?role=OWNER', A.token)).body.map((a: any) => a.title)).toEqual(['Owners only']);
+    await h.api.post(`/ads/${ad.body.id}/event`, { type: 'view', role: 'MEMBER' }, mem.token);
+    await h.api.post(`/ads/${ad.body.id}/event`, { type: 'click', role: 'MEMBER' }, mem.token);
+    const list = await h.api.get('/super/ads', boss);
+    const mine = list.body.find((a: any) => a.id === ad.body.id);
+    expect(mine.views.MEMBER).toBe(1);
+    expect(mine.clicks.MEMBER).toBe(1);
+    await h.api.patch(`/super/ads/${ad.body.id}`, { active: false }, boss);
+    expect((await h.api.get('/ads?role=MEMBER', mem.token)).body).toHaveLength(0);
+  });
+
+  it('only the super admin can use the admin app', async () => {
+    const A = await h.ownerWithGym('Admin App Gym');
+    const r = await h.api.post('/auth/login', { identifier: A.email, password: 'secret123' }, undefined, { 'x-gm-client': 'admin-app' });
+    expect(r.status).toBe(403);
+    await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const ok = await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' }, undefined, { 'x-gm-client': 'admin-app' });
+    expect(ok.status).toBe(200);
   });
 });

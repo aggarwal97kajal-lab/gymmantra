@@ -3,7 +3,7 @@ import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } f
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
-import { isDeskStaff, isTrainer } from '../core';
+import { ADMIN_ONLY_MESSAGE, isAdminApp, isDeskStaff, isTrainer } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
 export const LOCK_MINUTES = 15;
@@ -167,6 +167,7 @@ export function authRoutes(app: App) {
       return next;
     });
     if (isMobile(c) && isWebOnly(fresh)) throw forbidden(WEB_ONLY_MESSAGE);
+    if (isAdminApp(c) && !fresh.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, fresh) });
   });
@@ -212,6 +213,7 @@ export function authRoutes(app: App) {
     if (!user || user.deleted) throw notFound('No GymMantra account for this Google account. Please sign up with Google first');
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
     if (isMobile(c) && isWebOnly(user)) throw forbidden(WEB_ONLY_MESSAGE);
+    if (isAdminApp(c) && !user.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, user) });
   });

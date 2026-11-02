@@ -10,6 +10,7 @@ import { MemoryStore, Store } from '../src/store/store';
  * Firebase emulators (Auth + Firestore with firestore.rules). Otherwise they use
  * the in-memory stand-ins.
  */
+export const GYM_ADDRESS = { addressLine: 'Plot 12, Sector 7, Dwarka', state: 'Delhi', city: 'New Delhi', pincode: '110075' };
 export const EMULATOR = process.env.FIREBASE_EMULATOR === '1';
 const PROJECT = 'demo-gymmantra';
 const AUTH_HOST = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com';
@@ -85,7 +86,7 @@ export function setup() {
   }
   async function ownerWithGym(name: string) {
     const o = await signup(`${name} Owner`);
-    const g = await api.post('/gyms', { name, phone: o.phone }, o.token);
+    const g = await api.post('/gyms', { name, phone: o.phone, ...GYM_ADDRESS }, o.token);
     if (g.status !== 201) throw new Error(`gym failed ${JSON.stringify(g.body)}`);
     return { ...o, gym: g.body };
   }

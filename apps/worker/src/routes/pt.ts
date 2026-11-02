@@ -4,6 +4,7 @@ import { bad, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, int, oneOf, optInt, optStr, str } from '../lib/validate';
 import type { Reader, Tx } from '../store/store';
 import { photoUrlOf, TrainerDoc, trainerView } from './trainers';
+import { requireFeature } from './billing';
 
 // ---------- Personal training (PT): request → owner approves → trainer marks sessions ----------
 // PT money is kept apart from memberships: the member pays the gym, the owner pays the trainer their share.
@@ -165,6 +166,10 @@ export function ptRoutes(app: App) {
     const packageId = str(b, 'packageId', { label: 'a PT package' });
     const m = await myMemberAt(c, tid);
     const { store } = c.var.deps;
+    const gymDoc = await store.get<TenantDoc>(P.tenant(tid));
+    if (gymDoc) await requireFeature(store, gymDoc, 'pt').catch(() => {
+      throw forbidden('Your gym has not turned on PT in the app yet. Ask at the front desk');
+    });
     const out = await store.tx(async (t) => {
       const tr = await t.get<TrainerDoc>(P.trainer(tid, trainerId));
       if (!tr || !tr.active || !tr.visible) throw notFound('Trainer not found');
@@ -252,6 +257,7 @@ export function ptRoutes(app: App) {
   app.post('/api/v1/pt/:id/approve', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
+    await requireFeature(c.var.deps.store, g.tenant, 'pt');
     const b = body(await c.req.json().catch(() => ({})));
     const start = optStr(b, 'startDate') ?? todayIST();
     if (!isYmd(start)) throw bad('Start date is not valid');
@@ -368,6 +374,7 @@ export function ptRoutes(app: App) {
   app.get('/api/v1/pt-accounts', async (c) => {
     await authenticate(c);
     const g = await gymOf(c, 'OWNER');
+    await requireFeature(c.var.deps.store, g.tenant, 'pt');
     const month = c.req.query('month') ?? todayIST().slice(0, 7);
     if (!/^\d{4}-\d{2}$/.test(month)) throw bad('Month is not valid');
     const { store } = c.var.deps;
@@ -411,6 +418,7 @@ export function ptRoutes(app: App) {
   app.post('/api/v1/pt-payouts', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
+    await requireFeature(c.var.deps.store, g.tenant, 'pt');
     const b = body(await c.req.json().catch(() => null));
     const trainerId = str(b, 'trainerId', { label: 'a trainer' });
     const amount = int(b, 'amount', { min: 1, max: 10_000_000, label: 'amount' });

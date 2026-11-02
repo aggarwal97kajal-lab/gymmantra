@@ -5,6 +5,7 @@ import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optBool, optStr, str, strList } from '../lib/validate';
 import type { Reader } from '../store/store';
 import { createPasswordUser } from './auth';
+import { pinMatchesState, stateByName } from '../lib/india';
 
 export interface SaasPlan {
   id: string;
@@ -49,6 +50,23 @@ function prefixFrom(name: string) {
   return p.length >= 2 ? p : (words[0] ?? 'GM').slice(0, 3);
 }
 
+/** Gym address: line, state (from the list), city, PIN that fits the state, optional GSTIN. */
+function readAddress(b: Record<string, unknown>, required: boolean) {
+  if (!required && b.state === undefined && b.city === undefined && b.pincode === undefined && b.addressLine === undefined) return null;
+  const addressLine = str(b, 'addressLine', { min: 3, max: 200, label: 'the gym address' });
+  const state = str(b, 'state', { label: 'the state' });
+  const st = stateByName(state);
+  if (!st) throw bad('Choose the state from the list');
+  const city = str(b, 'city', { min: 2, max: 60, label: 'the city' });
+  const pincode = str(b, 'pincode', { label: 'the PIN code' }).replace(/\s/g, '');
+  if (!/^[1-9]\d{5}$/.test(pincode)) throw bad('Enter a valid 6-digit PIN code');
+  if (!pinMatchesState(pincode, state)) throw bad(`This PIN code is not from ${state}. Check the PIN or the state`);
+  const g = (optStr(b, 'gstin', { max: 15 }) ?? '').toUpperCase();
+  if (g && !/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(g)) throw bad('GSTIN is not valid');
+  if (g && g.slice(0, 2) !== st.code) throw bad(`This GSTIN is not from ${state}`);
+  return { addressLine, state, stateCode: st.code, city, pincode, gstin: g || null };
+}
+
 function phoneOrNull(v: string | undefined, label: string) {
   if (v === undefined) return undefined;
   if (!v) return null;
@@ -65,7 +83,8 @@ export function gymRoutes(app: App) {
     const { store } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const name = str(b, 'name', { min: 2, max: 80, label: 'the gym name' });
-    const address = optStr(b, 'address', { max: 300 }) ?? null;
+    const place = readAddress(b, true)!;
+    const address = [place.addressLine, place.city, place.state, place.pincode].join(', ');
     const phone = phoneOrNull(optStr(b, 'phone'), 'gym phone number') ?? null;
     const wa = phoneOrNull(optStr(b, 'whatsappNumber'), 'WhatsApp number') ?? phone;
     const settings = await store.get<{ trialMonths: number }>(P.platform);
@@ -90,6 +109,9 @@ export function gymRoutes(app: App) {
       memberCount: 0,
       branches: [branch],
       createdAt: nowIso(),
+      ...place,
+      planCycle: null,
+      planEndsAt: null,
     };
     await store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
@@ -116,6 +138,8 @@ export function gymRoutes(app: App) {
     const patch: Partial<TenantDoc> = {};
     if (b.name !== undefined) patch.name = str(b, 'name', { min: 2, max: 80, label: 'the gym name' });
     if (b.address !== undefined) patch.address = optStr(b, 'address', { max: 300 }) ?? null;
+    const place = readAddress(b, false);
+    if (place) Object.assign(patch, place, { address: [place.addressLine, place.city, place.state, place.pincode].join(', ') });
     if (b.logoUrl !== undefined) patch.logoUrl = optStr(b, 'logoUrl', { max: 500 }) ?? null;
     const phone = phoneOrNull(optStr(b, 'phone') ?? (b.phone === '' ? '' : undefined), 'gym phone number');
     if (phone !== undefined) patch.phone = phone;
