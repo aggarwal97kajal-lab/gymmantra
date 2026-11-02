@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
+import 'package:go_router/go_router.dart';
 import '../i18n.dart';
+import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -12,13 +14,16 @@ import 'billing.dart' show Address, AddressFields;
 
 /// "Aap kaun ho?" — Member, Gym owner or Trainer.
 class RolePickScreen extends ConsumerStatefulWidget {
-  const RolePickScreen({super.key});
+  const RolePickScreen({super.key, this.beforeLogin = false});
+
+  /// Shown first, before log-in: the choice is kept and applied after log-in / sign-up.
+  final bool beforeLogin;
   @override
   ConsumerState<RolePickScreen> createState() => _RolePickState();
 }
 
 class _RolePickState extends ConsumerState<RolePickScreen> {
-  String role = 'MEMBER';
+  String role = Prefs.getString('pendingRole') ?? 'MEMBER';
   bool busy = false;
   String? error;
 
@@ -28,6 +33,11 @@ class _RolePickState extends ConsumerState<RolePickScreen> {
       error = null;
     });
     try {
+      await Prefs.setString('pendingRole', role);
+      if (widget.beforeLogin) {
+        if (mounted) context.go('/login');
+        return;
+      }
       await ref.read(sessionProvider).chooseRole(role);
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -91,7 +101,7 @@ class _RolePickState extends ConsumerState<RolePickScreen> {
           const SizedBox(height: 12),
           FilledButton(onPressed: busy ? null : go, child: Text(context.t('Continue'))),
           const SizedBox(height: 10),
-          Center(child: TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: Text(context.t('Log out')))),
+          if (!widget.beforeLogin) Center(child: TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: Text(context.t('Log out')))),
         ]),
       ),
     );

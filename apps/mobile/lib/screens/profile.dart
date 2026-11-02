@@ -44,7 +44,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
   }
 
   /// Pick → crop (any shape) → show at once → upload in the background.
-  Future<void> pickPhoto(ImageSource source, bool circle) async {
+  Future<void> pickPhoto(ImageSource source) async {
     final cropTitle = context.t('Crop photo');
     final doneMsg = context.t('Photo updated');
     final XFile? file;
@@ -72,7 +72,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
           cropFrameColor: Colors.white,
           initAspectRatio: CropAspectRatioPreset.square,
           lockAspectRatio: false,
-          cropStyle: circle ? CropStyle.circle : CropStyle.rectangle,
+          cropStyle: CropStyle.rectangle,
           aspectRatioPresets: [
             CropAspectRatioPreset.original,
             CropAspectRatioPreset.square,
@@ -80,7 +80,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
             CropAspectRatioPreset.ratio16x9,
           ],
         ),
-        IOSUiSettings(title: cropTitle, cropStyle: circle ? CropStyle.circle : CropStyle.rectangle),
+        IOSUiSettings(title: cropTitle),
       ],
     );
     if (cropped == null) return;
@@ -109,111 +109,50 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
   }
 
   void photoSheet(bool hasPhoto) {
-    var circle = Prefs.getString('cropShape') != 'free';
     showModalBottomSheet(
       context: context,
-      builder: (sheet) => StatefulBuilder(
-        builder: (sheet, setSheet) => SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(context.t('Profile photo'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
-              Muted(context.t('After choosing, crop it any way you like: square, 4:5, 16:9 or free. You can also rotate and zoom.'), size: 12.5),
-              const SizedBox(height: 14),
-              Muted(context.t('Crop shape'), size: 12),
-              const SizedBox(height: 6),
-              Seg<bool>(
-                value: circle,
-                items: [(true, context.t('Circle'), Icons.circle_outlined), (false, context.t('Rectangle'), Icons.crop_free_rounded)],
-                onChanged: (v) {
-                  setSheet(() => circle = v);
-                  Prefs.setString('cropShape', v ? 'circle' : 'free');
-                },
-              ),
-              const SizedBox(height: 8),
+      builder: (sheet) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(context.t('Profile photo'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const IconTile(Icons.photo_camera_rounded),
+              title: Text(context.t('Take photo')),
+              onTap: () {
+                Navigator.pop(sheet);
+                pickPhoto(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const IconTile(Icons.photo_library_rounded),
+              title: Text(context.t('Choose from gallery')),
+              onTap: () {
+                Navigator.pop(sheet);
+                pickPhoto(ImageSource.gallery);
+              },
+            ),
+            if (hasPhoto)
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                leading: const IconTile(Icons.photo_camera_rounded),
-                title: Text(context.t('Take photo')),
+                leading: const IconTile(Icons.delete_outline_rounded, color: C.red),
+                title: Text(context.t('Remove photo'), style: const TextStyle(color: C.red)),
                 onTap: () {
                   Navigator.pop(sheet);
-                  pickPhoto(ImageSource.camera, circle);
+                  final s = ref.read(sessionProvider);
+                  run(() async {
+                    await Api.instance.delete('/me/photo');
+                    s.patchUser({'photoUrl': null});
+                  }, done: context.t('Photo removed'));
                 },
               ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const IconTile(Icons.photo_library_rounded),
-                title: Text(context.t('Choose from gallery')),
-                onTap: () {
-                  Navigator.pop(sheet);
-                  pickPhoto(ImageSource.gallery, circle);
-                },
-              ),
-              if (hasPhoto)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const IconTile(Icons.delete_outline_rounded, color: C.red),
-                  title: Text(context.t('Remove photo'), style: const TextStyle(color: C.red)),
-                  onTap: () {
-                    Navigator.pop(sheet);
-                    final s = ref.read(sessionProvider);
-                    run(() async {
-                      await Api.instance.delete('/me/photo');
-                      s.patchUser({'photoUrl': null});
-                    }, done: context.t('Photo removed'));
-                  },
-                ),
-            ]),
-          ),
+          ]),
         ),
       ),
     );
-  }
-
-  Future<void> editName(String current) async {
-    final c = TextEditingController(text: current);
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(context.t('Your name')),
-        content: TextField(controller: c, autofocus: true, textCapitalization: TextCapitalization.words),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      final s = ref.read(sessionProvider);
-      await run(() async {
-        await Api.instance.patch('/me/profile', {'name': c.text.trim()});
-        s.patchUser({'name': c.text.trim()});
-      }, done: context.t('Saved'));
-    }
-  }
-
-  Future<void> changePassword(bool hasPassword) async {
-    final cur = TextEditingController();
-    final next = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(hasPassword ? context.t('Change password') : context.t('Set a password')),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (hasPassword) TextField(controller: cur, obscureText: true, decoration: InputDecoration(labelText: context.t('Current password'))),
-          const SizedBox(height: 10),
-          TextField(controller: next, obscureText: true, decoration: InputDecoration(labelText: context.t('New password (8+ characters)'))),
-        ]),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
-        ],
-      ),
-    );
-    if (ok == true && mounted) {
-      await run(() => Api.instance.post('/auth/change-password', {if (hasPassword) 'current': cur.text, 'next': next.text}), done: context.t('Password updated'));
-    }
   }
 
   Future<void> deleteAccount() async {
@@ -306,9 +245,9 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
         Panel(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
-            _Row(Icons.edit_outlined, context.t('Edit name'), () => editName(name)),
+            _Row(Icons.badge_outlined, context.t('Personal details'), () => context.push('/profile/details')),
             _Row(Icons.notifications_none_rounded, context.t('Notifications'), () => context.push('/notifications')),
-            _Row(Icons.key_outlined, u['hasPassword'] == true ? context.t('Change password') : context.t('Set a password'), () => changePassword(u['hasPassword'] == true)),
+            _Row(Icons.key_outlined, u['hasPassword'] == true ? context.t('Change password') : context.t('Set a password'), () => context.push('/profile/password')),
             if (s.mode == 'trainer') _Row(Icons.badge_outlined, context.t('About me'), () => context.push('/t/about')),
             _Row(Icons.help_outline_rounded, context.t('Help & Support'), () => s.mode == 'member' ? context.go('/help') : context.push('/support')),
             _Row(Icons.delete_outline_rounded, context.t('Delete my account'), deleteAccount, color: C.red, last: true),
@@ -423,6 +362,214 @@ class _NotificationsState extends ConsumerState<NotificationsScreen> {
           },
         ),
       ),
+    );
+  }
+}
+
+
+// ============================================================ personal details
+
+class ProfileDetailsScreen extends ConsumerStatefulWidget {
+  const ProfileDetailsScreen({super.key});
+  @override
+  ConsumerState<ProfileDetailsScreen> createState() => _ProfileDetailsState();
+}
+
+class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
+  late final Map u = ref.read(sessionProvider).user ?? {};
+  late final first = TextEditingController(text: u['firstName'] as String? ?? '');
+  late final middle = TextEditingController(text: u['middleName'] as String? ?? '');
+  late final last = TextEditingController(text: u['lastName'] as String? ?? '');
+  late final address = TextEditingController(text: u['address'] as String? ?? '');
+  late String? dob = u['dob'] as String?;
+  late String? gender = u['gender'] as String?;
+  bool busy = false;
+  String? error;
+
+  Future<void> save() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    final saved = context.t('Saved');
+    try {
+      final r = await Api.instance.patch('/me/profile', {
+        'firstName': first.text.trim(),
+        'middleName': middle.text.trim(),
+        'lastName': last.text.trim(),
+        'dob': dob,
+        'gender': gender,
+        'address': address.text.trim(),
+      });
+      ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(r as Map));
+      if (mounted) {
+        toast(context, saved);
+        context.pop();
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> contact(String field) async {
+    final s = ref.read(sessionProvider);
+    final hasPw = s.user?['hasPassword'] == true;
+    final value = TextEditingController(text: field == 'phone' ? ((s.user?['phone'] as String?) ?? '').replaceFirst('+91', '') : (s.user?['email'] as String?) ?? '');
+    final pw = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(field == 'phone' ? context.t('Change mobile number') : context.t('Change email')),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: value, keyboardType: field == 'phone' ? TextInputType.phone : TextInputType.emailAddress, decoration: InputDecoration(labelText: field == 'phone' ? context.t('New mobile number') : context.t('New email'))),
+          if (hasPw) ...[const SizedBox(height: 10), TextField(controller: pw, obscureText: true, decoration: InputDecoration(labelText: context.t('Current password')))],
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final saved = context.t('Saved');
+    try {
+      final r = await Api.instance.patch('/me/contact', {field: value.text.trim(), if (hasPw) 'password': pw.text});
+      s.patchUser(Map<String, dynamic>.from(r as Map));
+      if (mounted) {
+        toast(context, saved);
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = ref.watch(sessionProvider).user ?? {};
+    Widget field(TextEditingController c, String label, {bool required = false, int lines = 1}) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: TextField(controller: c, maxLines: lines, textCapitalization: TextCapitalization.words, decoration: InputDecoration(labelText: required ? '$label *' : label)),
+        );
+    Widget tap(IconData icon, String label, String value, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTap,
+            child: InputDecorator(
+              decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon), suffixIcon: const Icon(Icons.edit_rounded, size: 18)),
+              child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+          ),
+        );
+    final dobText = dob == null ? context.t('Choose date') : fmtDate(dob);
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Personal details'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+        field(first, context.t('First name'), required: true),
+        field(middle, context.t('Middle name')),
+        field(last, context.t('Last name')),
+        tap(Icons.cake_outlined, context.t('Date of birth'), dobText, () async {
+          final init = DateTime.tryParse(dob ?? '') ?? DateTime(1998, 1, 1);
+          final d = await showDatePicker(context: context, initialDate: init, firstDate: DateTime(1930), lastDate: DateTime.now(), initialEntryMode: DatePickerEntryMode.calendarOnly);
+          if (d != null) setState(() => dob = '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}');
+        }),
+        Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Muted(context.t('Gender'), size: 12.5)),
+        Seg<String?>(
+          value: gender,
+          items: [('male', context.t('Male'), Icons.male_rounded), ('female', context.t('Female'), Icons.female_rounded), ('other', context.t('Other'), null)],
+          onChanged: (v) => setState(() => gender = v),
+        ),
+        const SizedBox(height: 12),
+        field(address, context.t('Address'), lines: 2),
+        const SizedBox(height: 4),
+        SectionTitle(context.t('Login details')),
+        tap(Icons.phone_iphone_rounded, context.t('Mobile number'), (cur['phone'] as String?) ?? '—', () => contact('phone')),
+        tap(Icons.mail_outline_rounded, context.t('Email'), (cur['email'] as String?) ?? '—', () => contact('email')),
+        ErrorText(error),
+        const SizedBox(height: 12),
+        FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save'))),
+      ]),
+    );
+  }
+}
+
+// ============================================================ change password
+
+class ChangePasswordScreen extends ConsumerStatefulWidget {
+  const ChangePasswordScreen({super.key});
+  @override
+  ConsumerState<ChangePasswordScreen> createState() => _ChangePasswordState();
+}
+
+class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
+  final cur = TextEditingController();
+  final next = TextEditingController();
+  final again = TextEditingController();
+  bool hide = true;
+  bool busy = false;
+  String? error;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPw = ref.watch(sessionProvider).user?['hasPassword'] == true;
+    Widget box(TextEditingController c, String label) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: TextField(
+            controller: c,
+            obscureText: hide,
+            decoration: InputDecoration(
+              labelText: label,
+              prefixIcon: const Icon(Icons.lock_outline_rounded),
+              suffixIcon: IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => hide = !hide)),
+            ),
+          ),
+        );
+    return Scaffold(
+      appBar: AppBar(title: Text(hasPw ? context.t('Change password') : context.t('Set a password'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+        if (hasPw) box(cur, context.t('Current password')),
+        box(next, context.t('New password (8+ characters)')),
+        box(again, context.t('New password again')),
+        ErrorText(error),
+        const SizedBox(height: 12),
+        FilledButton(
+          onPressed: busy
+              ? null
+              : () async {
+                  final mismatch = context.t('Passwords do not match');
+                  final short = context.t('Password (at least 8 characters)');
+                  final done = context.t('Password updated');
+                  if (next.text.length < 8) {
+                    setState(() => error = short);
+                    return;
+                  }
+                  if (next.text != again.text) {
+                    setState(() => error = mismatch);
+                    return;
+                  }
+                  setState(() {
+                    busy = true;
+                    error = null;
+                  });
+                  try {
+                    await Api.instance.post('/auth/change-password', {if (hasPw) 'current': cur.text, 'next': next.text});
+                    await ref.read(sessionProvider).refreshUser().catchError((_) {});
+                    if (context.mounted) {
+                      toast(context, done);
+                      context.pop();
+                    }
+                  } catch (e) {
+                    setState(() => error = e.toString());
+                  } finally {
+                    if (mounted) setState(() => busy = false);
+                  }
+                },
+          child: Text(context.t('Save')),
+        ),
+      ]),
     );
   }
 }

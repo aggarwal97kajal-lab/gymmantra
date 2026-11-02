@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'haptics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,7 +12,7 @@ import 'prefs.dart';
 import 'screens/billing.dart';
 import 'screens/help.dart' show TicketScreen;
 import 'screens/home.dart' show openUrl;
-import 'screens/profile.dart' show ProfileScreen, NotificationsScreen;
+import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, ProfileDetailsScreen, ChangePasswordScreen;
 import 'session.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -83,6 +84,8 @@ GoRouter adminRouter(Session session, Listenable splash, Widget splashScreen, bo
         GoRoute(path: '/a/settings', builder: (_, __) => const AdminSettings()),
         GoRoute(path: '/a/profile', builder: (_, __) => const ProfileScreen()),
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
+        GoRoute(path: '/profile/details', builder: (_, __) => const ProfileDetailsScreen()),
+        GoRoute(path: '/profile/password', builder: (_, __) => const ChangePasswordScreen()),
       ],
     );
 
@@ -168,7 +171,10 @@ class AdminShell extends StatelessWidget {
         decoration: BoxDecoration(border: Border(top: BorderSide(color: context.c.line))),
         child: NavigationBar(
           selectedIndex: i < 0 ? 0 : i,
-          onDestinationSelected: (n) => context.go(tabs[n]),
+          onDestinationSelected: (n) {
+            TapHaptics.buzz();
+            context.go(tabs[n]);
+          },
           destinations: [
             NavigationDestination(icon: const Icon(Icons.space_dashboard_outlined), selectedIcon: const Icon(Icons.space_dashboard_rounded), label: context.t('Home')),
             NavigationDestination(icon: const Icon(Icons.storefront_outlined), selectedIcon: const Icon(Icons.storefront_rounded), label: context.t('Gyms')),

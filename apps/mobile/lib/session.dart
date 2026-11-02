@@ -76,6 +76,11 @@ class Session extends ChangeNotifier {
     if (user?['language'] == 'hi') AppSettings.instance.setLang('hi');
     try {
       await refreshUser(); // adds the gyms this person runs or trains at
+      // Apply the role chosen on the first screen to a new account.
+      final pending = pendingRole;
+      if (user?['appRole'] == null && user?['isOwner'] != true && user?['isTrainer'] != true && pending != null) {
+        await chooseRole(pending);
+      }
     } catch (_) {}
     notifyListeners();
   }
@@ -144,6 +149,10 @@ class Session extends ChangeNotifier {
     }
     return null;
   }
+
+  /// Role picked on the first screen (before log-in).
+  String? get pendingRole => Prefs.getString('pendingRole');
+  void notifyRoleChosen() => notifyListeners();
 
   Future<void> chooseRole(String role) async {
     await api.patch('/me/profile', {'appRole': role});

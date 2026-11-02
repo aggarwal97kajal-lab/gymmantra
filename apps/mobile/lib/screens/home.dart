@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../haptics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,7 +26,10 @@ class HomeShell extends StatelessWidget {
         decoration: BoxDecoration(border: Border(top: BorderSide(color: context.c.line))),
         child: NavigationBar(
           selectedIndex: i < 0 ? 0 : i,
-          onDestinationSelected: (n) => context.go(tabs[n]),
+          onDestinationSelected: (n) {
+            TapHaptics.buzz();
+            context.go(tabs[n]);
+          },
           destinations: [
             NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
             NavigationDestination(icon: const Icon(Icons.qr_code_2_rounded), label: context.t('Check-in')),

@@ -154,13 +154,7 @@ class GoogleButton extends StatelessWidget {
   Widget build(BuildContext context) => OutlinedButton(
         onPressed: onPressed,
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Container(
-            width: 22,
-            height: 22,
-            alignment: Alignment.center,
-            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-            child: const Text('G', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: Color(0xFF4285F4), height: 1.1)),
-          ),
+          const SizedBox(width: 22, height: 22, child: CustomPaint(painter: GoogleGPainter())),
           const SizedBox(width: 10),
           Text(label),
         ]),
@@ -216,6 +210,7 @@ class _LoginState extends ConsumerState<LoginScreen> with _Busy {
       title: context.t('Welcome back 👋'),
       subtitle: context.t('Log in to see your membership'),
       children: [
+        const RoleBadge(),
         AutofillGroup(
           child: Column(children: [
             LabeledField(
@@ -283,6 +278,7 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
       title: context.t('Create your account'),
       subtitle: context.t('Takes less than a minute'),
       children: [
+        const RoleBadge(),
         LabeledField(label: context.t('Full name'), controller: name, icon: Icons.person_outline_rounded, caps: TextCapitalization.words, action: TextInputAction.next),
         LabeledField(label: context.t('Email'), controller: email, icon: Icons.mail_outline_rounded, keyboard: TextInputType.emailAddress, action: TextInputAction.next),
         LabeledField(label: context.t('Mobile number'), controller: phone, icon: Icons.phone_iphone_rounded, hint: context.t('10-digit number'), keyboard: TextInputType.phone, action: TextInputAction.next),
@@ -440,6 +436,67 @@ class _ForgotState extends ConsumerState<ForgotScreen> with _Busy {
         const SizedBox(height: 10),
         FilledButton(onPressed: busy ? null : send, child: _spinnerOr(busy, context.t('Send reset link'))),
       ],
+    );
+  }
+}
+
+
+/// The four-colour Google "G" for the sign-in button.
+class GoogleGPainter extends CustomPainter {
+  const GoogleGPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width;
+    final stroke = s * 0.2;
+    final r = (s - stroke) / 2;
+    final c = Offset(s / 2, s / 2);
+    final rect = Rect.fromCircle(center: c, radius: r);
+    double rad(double d) => d * 3.141592653589793 / 180;
+    Paint p(Color col) => Paint()
+      ..color = col
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt;
+    // Angles: 0 = 3 o'clock, clockwise. The opening of the G is at the upper right.
+    canvas.drawArc(rect, rad(205), rad(112), false, p(const Color(0xFFEA4335))); // red, top
+    canvas.drawArc(rect, rad(145), rad(62), false, p(const Color(0xFFFBBC05))); // yellow, left
+    canvas.drawArc(rect, rad(42), rad(105), false, p(const Color(0xFF34A853))); // green, bottom
+    canvas.drawArc(rect, rad(-2), rad(46), false, p(const Color(0xFF4285F4))); // blue, right
+    canvas.drawRect(Rect.fromLTWH(s / 2 - s * 0.01, s / 2 - stroke / 2, r + stroke / 2 + s * 0.01, stroke), Paint()..color = const Color(0xFF4285F4)); // blue bar
+  }
+
+  @override
+  bool shouldRepaint(GoogleGPainter oldDelegate) => false;
+}
+
+
+/// Shows the role picked on the first screen, with a way to change it.
+class RoleBadge extends StatelessWidget {
+  const RoleBadge({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final role = Prefs.getString('pendingRole') ?? 'MEMBER';
+    final (icon, label) = switch (role) {
+      'OWNER' => (Icons.storefront_rounded, context.t('Gym owner')),
+      'TRAINER' => (Icons.sports_rounded, context.t('Trainer')),
+      _ => (Icons.person_rounded, context.t('Member')),
+    };
+    final p = context.c;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(color: p.primary.withAlpha(34), borderRadius: BorderRadius.circular(99)),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: p.primary),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, fontSize: 13)),
+          ]),
+        ),
+        const SizedBox(width: 6),
+        TextButton(onPressed: () => context.go('/start'), child: Text(context.t('Change'))),
+      ]),
     );
   }
 }

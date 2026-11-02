@@ -605,4 +605,23 @@ const hindi = <String, String>{
   'More branches': 'और ब्रांच',
   '1 year': '1 साल',
   '1 month': '1 महीना',
+
+  // profile details
+  'Personal details': 'निजी जानकारी',
+  'Change mobile number': 'मोबाइल नंबर बदलें',
+  'Change email': 'ईमेल बदलें',
+  'New mobile number': 'नया मोबाइल नंबर',
+  'New email': 'नया ईमेल',
+  'Choose date': 'तारीख़ चुनें',
+  'First name': 'पहला नाम',
+  'Middle name': 'बीच का नाम',
+  'Last name': 'आख़िरी नाम',
+  'Date of birth': 'जन्म तिथि',
+  'Gender': 'लिंग',
+  'Male': 'पुरुष',
+  'Female': 'महिला',
+  'Other': 'अन्य',
+  'Login details': 'लॉग इन जानकारी',
+  'New password again': 'नया पासवर्ड दोबारा',
+  'Change': 'बदलें',
 };

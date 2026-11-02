@@ -49,7 +49,7 @@ class _GlowRingState extends State<GlowRing> with SingleTickerProviderStateMixin
     if (cols == null) return widget.child;
     final s = widget.size + 10;
     final name = {'trial': 'TRIAL', 'starter': 'STARTER', 'growth': 'GROWTH', 'pro': 'PRO'}[widget.ring]!;
-    return SizedBox(
+    return RepaintBoundary(child: SizedBox(
       width: s,
       height: s + (widget.label ? 6 : 0),
       child: Stack(clipBehavior: Clip.none, alignment: Alignment.topCenter, children: [
@@ -77,7 +77,7 @@ class _GlowRingState extends State<GlowRing> with SingleTickerProviderStateMixin
             ),
           ),
       ]),
-    );
+    ));
   }
 }
 

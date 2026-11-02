@@ -11,6 +11,16 @@ import 'prefs.dart';
 class TapHaptics {
   TapHaptics._();
   static Offset? _down;
+  static DateTime _last = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Light tap vibration (used directly by the bottom tabs). Ignores repeats within 150 ms.
+  static void buzz() {
+    if (!AppSettings.instance.haptics) return;
+    final now = DateTime.now();
+    if (now.difference(_last).inMilliseconds < 150) return;
+    _last = now;
+    HapticFeedback.lightImpact();
+  }
   static int? _pointer;
 
   static void install() => GestureBinding.instance.pointerRouter.addGlobalRoute(_route);
@@ -27,7 +37,7 @@ class TapHaptics {
       _pointer = null;
       if (!AppSettings.instance.haptics || start == null) return;
       if ((e.position - start).distance > 18) return; // it was a scroll or swipe
-      if (_tappableAt(e.position, e.viewId)) HapticFeedback.lightImpact();
+      if (_tappableAt(e.position, e.viewId)) buzz();
     }
   }
 

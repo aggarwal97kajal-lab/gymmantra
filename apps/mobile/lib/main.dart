@@ -58,10 +58,15 @@ class _AppState extends ConsumerState<GymMantraApp> {
       redirect: (context, state) {
         final loc = state.matchedLocation;
         if (!session.ready || !splashDone.value) return loc == '/splash' ? null : '/splash';
-        const open = ['/login', '/signup', '/forgot'];
-        if (!session.loggedIn) return open.contains(loc) ? null : '/login';
+        const open = ['/login', '/signup', '/forgot', '/start'];
+        if (!session.loggedIn) {
+          // First open: "Who are you?" comes before log-in.
+          if (session.pendingRole == null) return loc == '/start' ? null : '/start';
+          if (loc == '/start') return null;
+          return open.contains(loc) ? null : '/login';
+        }
         // Each kind of person has their own part of the app.
-        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit'];
+        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/'];
         if (shared.any((p) => loc.startsWith(p))) return null;
         final (home, prefix) = switch (session.mode) {
           'owner' => ('/o/home', '/o/'),
@@ -105,6 +110,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/help/ticket/:id', builder: (_, s) => TicketScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
         GoRoute(path: '/support', builder: (_, __) => const HelpScreen()),
+        GoRoute(path: '/profile/details', builder: (_, __) => const ProfileDetailsScreen()),
+        GoRoute(path: '/profile/password', builder: (_, __) => const ChangePasswordScreen()),
         GoRoute(path: '/trainer-detail', builder: (_, s) => TrainerDetailScreen(trainer: (s.extra as Map)['trainer'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/my-pt', builder: (_, s) => MyPtScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/pt-client', builder: (_, s) => PtClientScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String, canMark: (s.extra as Map)['canMark'] == true)),
@@ -122,6 +129,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),
         // ---- choosing a role ----
         GoRoute(path: '/role', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen())),
+        GoRoute(path: '/start', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen(beforeLogin: true))),
         GoRoute(path: '/register-gym', builder: (_, __) => const RegisterGymScreen()),
         GoRoute(path: '/trainer-join', builder: (_, __) => const TrainerJoinScreen()),
         GoRoute(path: '/waiting', builder: (_, __) => const WaitingScreen()),
