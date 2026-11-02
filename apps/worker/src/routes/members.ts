@@ -85,7 +85,7 @@ export function summaries(g: GymCtx, roster: Roster, includeArchived = false) {
         phone: e.phone,
         memberCode: e.memberCode,
         branchId: e.branchId,
-        photoUrl: null as string | null,
+        photoUrl: e.userId && e.photoV ? `/api/v1/photos/${e.userId}?v=${e.photoV}` : null,
         hasApp: !!e.userId,
         archived: e.archived,
         status: st.status,
@@ -117,7 +117,7 @@ export async function addMember(
   t: Tx,
   g: GymCtx,
   actorId: string,
-  input: { name: string; phone: string; email?: string | null; gender?: string | null; branchId?: string | null; joinedOn?: string; notes?: string | null; userId?: string | null },
+  input: { name: string; phone: string; email?: string | null; gender?: string | null; branchId?: string | null; joinedOn?: string; notes?: string | null; userId?: string | null; photoV?: number | null },
 ) {
   const tenant = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
   const roster = await readRoster(t, g.tenantId);
@@ -140,7 +140,7 @@ export async function addMember(
     archived: false,
     createdAt: nowIso(),
   };
-  roster.members[id] = rosterEntry(m);
+  roster.members[id] = { ...rosterEntry(m), photoV: input.photoV ?? null };
   t.set(P.tenant(g.tenantId), { ...tenant, nextMemberNumber: tenant.nextMemberNumber + 1, memberCount: activeCount + 1 });
   t.set(P.member(g.tenantId, id), m);
   t.set(P.roster(g.tenantId), roster);
@@ -522,11 +522,11 @@ export function memberRoutes(app: App) {
         const [mid, e] = existing;
         if (e.userId && e.userId !== jr.userId) throw conflict('This mobile number belongs to another member');
         m = { ...(await t.get<MemberDoc>(P.member(g.tenantId, mid)))!, userId: jr.userId };
-        roster.members[mid] = { ...e, userId: jr.userId };
+        roster.members[mid] = { ...e, userId: jr.userId, photoV: ju.photoV ?? null };
         t.set(P.member(g.tenantId, mid), m);
         t.set(P.roster(g.tenantId), roster);
       } else {
-        m = (await addMember(t, g, u.id, { name: ju.name, phone: ju.phone, email: ju.email, branchId, userId: jr.userId })).m;
+        m = (await addMember(t, g, u.id, { name: ju.name, phone: ju.phone, email: ju.email, branchId, userId: jr.userId, photoV: ju.photoV ?? null })).m;
       }
       await linkUser(t, jr.userId, g.tenantId, m.id);
       t.set(P.join(g.tenantId, id), { ...jr, status: 'APPROVED', decidedById: u.id, decidedAt: nowIso() });

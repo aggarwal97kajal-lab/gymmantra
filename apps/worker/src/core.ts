@@ -128,6 +128,7 @@ export interface RosterEntry {
   branchId: string | null;
   userId: string | null;
   archived: boolean;
+  photoV?: number | null; // the linked app user's photo version, so lists can show photos
   subs: RosterSub[];
 }
 export type RosterSub = SubLike & { planId: string | null; planName: string; months: number };
@@ -361,6 +362,16 @@ export function toRosterSub(s: SubDoc): RosterSub {
 
 export async function readRoster(r: Reader, tenantId: string): Promise<Roster> {
   return (await r.get<Roster>(P.roster(tenantId))) ?? { members: {} };
+}
+
+/** Copies a user's photo version into every gym roster where they are a member. */
+export async function syncRosterPhoto(t: Tx, u: Pick<UserDoc, 'memberships'>, photoV: number | null) {
+  for (const [tid, mid] of Object.entries(u.memberships ?? {})) {
+    const r = await t.get<Roster>(P.roster(tid));
+    if (!r?.members[mid]) continue;
+    r.members[mid] = { ...r.members[mid], photoV };
+    t.set(P.roster(tid), r);
+  }
 }
 
 /** Puts a membership into the roster. A correction removes the entry it replaces; very old entries are dropped. */

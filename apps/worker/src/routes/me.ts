@@ -1,4 +1,4 @@
-import { App, authenticate, C, isDeskStaff, isTrainer, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { App, authenticate, C, isDeskStaff, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { freezeDaysLeft } from '../lib/status';
@@ -219,6 +219,7 @@ export function meRoutes(app: App) {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       t.set(P.photo(u.id), { mime, b64 });
       t.set(P.user(u.id), { ...cur, photoV: v });
+      await syncRosterPhoto(t, cur, v);
     });
     return c.json({ photoUrl: `/api/v1/photos/${u.id}?v=${v}` }, 201);
   });
@@ -229,6 +230,7 @@ export function meRoutes(app: App) {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       t.delete(P.photo(u.id));
       t.set(P.user(u.id), { ...cur, photoV: null });
+      await syncRosterPhoto(t, cur, null);
     });
     return c.json({ ok: true });
   });
@@ -240,8 +242,11 @@ export function meRoutes(app: App) {
     if (target !== u.id && !u.isSuperAdmin) {
       const t = await store.get<UserDoc>(P.user(target));
       const myGyms = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active).map(([id]) => id);
-      const theirGyms = t ? [...Object.keys(t.memberships ?? {}), ...Object.keys(t.requested ?? {}), ...Object.keys(t.staffOf ?? {})] : [];
-      if (!myGyms.some((g) => theirGyms.includes(g))) throw forbidden('Not allowed');
+      const theirGyms = t ? [...Object.keys(t.memberships ?? {}), ...Object.keys(t.requested ?? {}), ...Object.keys(t.trainerRequested ?? {}), ...Object.keys(t.staffOf ?? {})] : [];
+      // Members may see the photos of their gym's trainers.
+      const theirTrainerGyms = t ? Object.entries(t.staffOf ?? {}).filter(([, s]) => s.active && s.role === 'TRAINER').map(([id]) => id) : [];
+      const memberOk = Object.keys(u.memberships ?? {}).some((g) => theirTrainerGyms.includes(g));
+      if (!memberOk && !myGyms.some((g) => theirGyms.includes(g))) throw forbidden('Not allowed');
     }
     const p = await store.get<{ mime: string; b64: string }>(P.photo(target));
     if (!p) throw notFound('No photo');
