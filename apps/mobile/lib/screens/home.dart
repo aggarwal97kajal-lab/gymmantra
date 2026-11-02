@@ -7,13 +7,14 @@ import '../photo.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
+import 'pt.dart' show MyTrainerCard, myPtProvider;
 
 /// Bottom navigation shell.
 class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.child, required this.location});
   final Widget child;
   final String location;
-  static const tabs = ['/home', '/qr', '/workouts', '/help', '/profile'];
+  static const tabs = ['/home', '/qr', '/trainers', '/workouts', '/profile'];
   @override
   Widget build(BuildContext context) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
@@ -27,8 +28,8 @@ class HomeShell extends StatelessWidget {
           destinations: [
             NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
             NavigationDestination(icon: const Icon(Icons.qr_code_2_rounded), label: context.t('Check-in')),
+            NavigationDestination(icon: const Icon(Icons.sports_outlined), selectedIcon: const Icon(Icons.sports_rounded), label: context.t('Trainers')),
             NavigationDestination(icon: const Icon(Icons.fitness_center_rounded), label: context.t('Workouts')),
-            NavigationDestination(icon: const Icon(Icons.help_outline_rounded), selectedIcon: const Icon(Icons.help_rounded), label: context.t('Help')),
             NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: context.t('Profile')),
           ],
         ),
@@ -91,6 +92,8 @@ class HomeScreen extends ConsumerWidget {
                     for (final o in ((m['offers'] as List?) ?? const []).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?),
                   for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],
+                  for (final p in ((ref.watch(myPtProvider).valueOrNull as List?) ?? const []).cast<Map>().where((p) => p['state'] == 'ACTIVE'))
+                    Padding(padding: const EdgeInsets.only(bottom: 12), child: MyTrainerCard(pt: p, tenantId: (p['gym'] as Map)['id'] as String)),
                   for (final p in pending) ...[
                     Panel(
                       child: Row(children: [

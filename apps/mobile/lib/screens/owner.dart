@@ -9,6 +9,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
+import 'pt.dart';
 
 // ============================================================ shell
 
@@ -20,7 +21,8 @@ class OwnerShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
-    final pending = (ref.watch(dashboardProvider).valueOrNull?['joinPending'] as int?) ?? 0;
+    final dash = ref.watch(dashboardProvider).valueOrNull;
+    final pending = ((dash?['joinPending'] as int?) ?? 0) + ((dash?['ptPending'] as int?) ?? 0);
     return Scaffold(
       body: child,
       bottomNavigationBar: DecoratedBox(
@@ -101,7 +103,7 @@ class OwnerHomeScreen extends ConsumerWidget {
               builder: (data) {
                 final t = data['totals'] as Map;
                 final today = data['today'] as Map;
-                final pending = data['joinPending'] as int? ?? 0;
+                final pending = (data['joinPending'] as int? ?? 0) + (data['ptPending'] as int? ?? 0);
                 final due = (data['renewalsDue'] as List).cast<Map>();
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   Row(children: [
@@ -642,12 +644,36 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
     }
   }
 
+  bool ptTab = false;
+
   @override
   Widget build(BuildContext context) {
     final v = ref.watch(joinRequestsProvider);
+    final dash = ref.watch(dashboardProvider).valueOrNull;
+    final joinN = (dash?['joinPending'] as int?) ?? 0;
+    final ptN = (dash?['ptPending'] as int?) ?? 0;
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Requests'))),
-      body: RefreshIndicator(
+      appBar: AppBar(
+        title: Text(context.t('Requests')),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(58),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Seg<bool>(
+              value: ptTab,
+              items: [(false, '${context.t('Join')} ($joinN)', Icons.how_to_reg_rounded), (true, 'PT ($ptN)', Icons.sports_rounded)],
+              onChanged: (v) => setState(() => ptTab = v),
+            ),
+          ),
+        ),
+      ),
+      body: ptTab
+          ? RefreshIndicator(
+              color: context.c.primary,
+              onRefresh: () async => ref.invalidate(ownerPtProvider('PENDING')),
+              child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: const [OwnerPtRequests()]),
+            )
+          : RefreshIndicator(
         color: context.c.primary,
         onRefresh: () async => ref.invalidate(joinRequestsProvider),
         child: AsyncBody(
@@ -972,6 +998,8 @@ class OwnerMoreScreen extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
             row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices')),
+            row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer')),
+            if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets')),
             row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers')),
             row(Icons.receipt_long_rounded, context.t('Membership plans'), () => openUrl('${Api.instance.base}/plans/'), sub: context.t('On the website')),
             row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => openUrl('${Api.instance.base}/settings/'), sub: context.t('On the website')),

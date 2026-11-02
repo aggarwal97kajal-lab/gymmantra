@@ -8,6 +8,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl;
+import 'pt.dart';
 
 class TrainerShell extends StatelessWidget {
   const TrainerShell({super.key, required this.child, required this.location});
@@ -48,7 +49,11 @@ class TrainerHomeScreen extends ConsumerWidget {
         bottom: false,
         child: RefreshIndicator(
           color: context.c.primary,
-          onRefresh: () async => ref.invalidate(trainerHomeProvider),
+          onRefresh: () async {
+            ref.invalidate(trainerHomeProvider);
+            ref.invalidate(trainerClientsProvider);
+            ref.invalidate(trainerPayoutsProvider);
+          },
           child: ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
             Row(children: [
               Expanded(
@@ -73,15 +78,54 @@ class TrainerHomeScreen extends ConsumerWidget {
               builder: (d) {
                 final gyms = (d['gyms'] as List).cast<Map>();
                 if (gyms.isEmpty) return Muted(context.t('You are not a trainer at any gym right now.'));
+                final clients = ((ref.watch(trainerClientsProvider).valueOrNull?['clients'] as List?) ?? const []).cast<Map>();
+                final active = clients.where((c) => c['state'] == 'ACTIVE').toList();
+                final pendingPt = clients.where((c) => c['state'] == 'PENDING').toList();
+                final today = todayYmd();
+                final todays = active.where((c) => (c['log'] as Map?)?[today] != null).toList();
+                final soon = active.where((c) => c['endingSoon'] == true).length;
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   for (final g in gyms) ...[
                     for (final o in (g['offers'] as List).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?),
                     Row(children: [
-                      Expanded(child: StatTile(icon: Icons.groups_rounded, value: '0', label: context.t('PT clients'))),
-                      const SizedBox(width: 10),
-                      Expanded(child: StatTile(icon: Icons.event_available_rounded, value: '0', label: context.t('Sessions today'), color: C.ok)),
+                      Expanded(child: StatTile(icon: Icons.groups_rounded, value: '${active.length}', label: context.t('PT clients'))),
+                      const SizedBox(width: 9),
+                      Expanded(child: StatTile(icon: Icons.event_available_rounded, value: '${todays.length}', label: context.t('Sessions today'), color: C.ok)),
+                      const SizedBox(width: 9),
+                      Expanded(child: StatTile(icon: Icons.schedule_rounded, value: '$soon', label: context.t('Ending soon'), color: C.warn)),
                     ]),
+                    for (final p in pendingPt) ...[
+                      const SizedBox(height: 10),
+                      Material(
+                        color: context.c.surf,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: const BorderSide(color: C.warn, width: 1.5)),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Row(children: [
+                            const IconTile(Icons.notifications_active_rounded, color: C.warn),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(context.t('{name} asked for PT', {'name': p['memberName']}), style: const TextStyle(fontWeight: FontWeight.w800)),
+                                Muted(context.t('Waiting for owner approval'), size: 12),
+                              ]),
+                            ),
+                          ]),
+                        ),
+                      ),
+                    ],
+                    if (active.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      SectionTitle(context.t('My clients'), trailing: TextButton(onPressed: () => context.go('/t/clients'), child: Text(context.t('See all')))),
+                      for (final c in (todays.isNotEmpty ? todays : active).take(4))
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: PtClientRow(pt: c, onTap: () => context.push('/pt-client', extra: {'pt': c, 'tenantId': g['id'], 'canMark': true})),
+                        ),
+                    ],
+                    const SizedBox(height: 4),
+                    const TrainerPayoutsCard(),
                     const SizedBox(height: 12),
                     _GymCard(g: g),
                     const SizedBox(height: 12),
