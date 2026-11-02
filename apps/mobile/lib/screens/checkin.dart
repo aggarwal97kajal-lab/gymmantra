@@ -398,15 +398,56 @@ class ScanCheckinScreen extends ConsumerStatefulWidget {
   ConsumerState<ScanCheckinScreen> createState() => _ScanState();
 }
 
-class _ScanState extends ConsumerState<ScanCheckinScreen> {
-  MobileScannerController? cam = MobileScannerController(detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
+class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObserver {
+  // Started by hand (not autoStart) so it can be restarted after the camera permission
+  // is given, or when the person comes back from phone settings.
+  MobileScannerController? cam = MobileScannerController(autoStart: false, detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
   bool working = false;
   Map? result;
   String? error;
   bool torch = false;
+  MobileScannerErrorCode? camError;
+  bool starting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => startCam());
+  }
+
+  Future<void> startCam() async {
+    if (starting || cam == null || result != null) return;
+    starting = true;
+    try {
+      await cam!.start();
+      if (mounted) setState(() => camError = null);
+    } on MobileScannerException catch (e) {
+      if (e.errorCode == MobileScannerErrorCode.controllerAlreadyInitialized) {
+        if (mounted) setState(() => camError = null);
+      } else if (mounted) {
+        setState(() => camError = e.errorCode);
+      }
+    } catch (_) {
+      if (mounted) setState(() => camError = MobileScannerErrorCode.genericError);
+    } finally {
+      starting = false;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (cam == null) return;
+    if (state == AppLifecycleState.resumed) {
+      if (result == null) startCam();
+    } else if (state == AppLifecycleState.paused) {
+      cam!.stop();
+    }
+  }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     cam?.dispose();
     super.dispose();
   }
@@ -444,7 +485,7 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
       result = null;
       error = null;
     });
-    cam?.start();
+    startCam();
   }
 
   @override
@@ -456,7 +497,7 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
-        title: Text(context.t('Scan gym QR'), style: const TextStyle(color: Colors.white)),
+        title: Text(context.t('Scan check-in QR'), style: const TextStyle(color: Colors.white)),
         automaticallyImplyLeading: widget.standalone,
       ),
       body: Stack(children: [
@@ -467,15 +508,12 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
               final v = cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
               if (v != null) onCode(v);
             },
-            errorBuilder: (context, e, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Text(context.t('Camera is not available. Allow camera for GymMantra in phone settings.'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white)),
-              ),
-            ),
+            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, onRetry: startCam),
           ),
         ),
+        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, onRetry: startCam)),
         // Frame
+        if (camError == null)
         Center(
           child: Container(
             width: 250,
@@ -515,13 +553,58 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
                   setState(() => torch = !torch);
                 },
               ),
-              if (!widget.standalone) ...[
-                const SizedBox(width: 28),
-                _RoundBtn(icon: Icons.qr_code_2_rounded, label: context.t('My QR'), onTap: () => context.push('/my-qr')),
-              ],
             ]),
           ]),
         ),
+      ]),
+    );
+  }
+}
+
+/// Camera could not start: ask for permission (or open settings if it was refused for good).
+class _CamProblem extends StatelessWidget {
+  const _CamProblem({required this.code, required this.onRetry});
+  final MobileScannerErrorCode code;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) {
+    final perm = code == MobileScannerErrorCode.permissionDenied;
+    return Container(
+      color: const Color(0xFF0B0D10),
+      padding: const EdgeInsets.all(28),
+      alignment: Alignment.center,
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          width: 84,
+          height: 84,
+          decoration: BoxDecoration(color: C.orange.withAlpha(46), shape: BoxShape.circle),
+          child: const Icon(Icons.photo_camera_rounded, color: C.orange, size: 38),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          perm ? context.t('Camera permission needed') : context.t('Camera did not start'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          perm ? context.t('Allow GymMantra to use the camera to scan the QR') : context.t('Close other apps using the camera and try again'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 13),
+        ),
+        const SizedBox(height: 20),
+        FilledButton(
+          style: FilledButton.styleFrom(minimumSize: const Size(220, 48)),
+          onPressed: onRetry,
+          child: Text(perm ? context.t('Allow camera') : context.t('Try again')),
+        ),
+        if (perm) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => Geolocator.openAppSettings(),
+            child: Text(context.t('Open phone settings'), style: const TextStyle(color: Color(0xCCFFFFFF))),
+          ),
+        ],
       ]),
     );
   }

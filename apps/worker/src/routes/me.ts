@@ -293,6 +293,7 @@ export function meRoutes(app: App) {
     if ((mime === 'image/jpeg' && !isJpeg) || (mime === 'image/png' && !isPng)) throw bad('This file is not a JPEG or PNG image');
     const v = Date.now();
     await c.var.deps.store.tx(async (t) => {
+      await t.getMany([P.user(u.id), ...Object.keys(u.memberships ?? {}).map(P.roster)]); // one round trip
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       t.set(P.photo(u.id), { mime, b64 });
       t.set(P.user(u.id), { ...cur, photoV: v });
@@ -304,6 +305,7 @@ export function meRoutes(app: App) {
   app.delete('/api/v1/me/photo', async (c) => {
     const u = await authenticate(c);
     await c.var.deps.store.tx(async (t) => {
+      await t.getMany([P.user(u.id), ...Object.keys(u.memberships ?? {}).map(P.roster)]);
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       t.delete(P.photo(u.id));
       t.set(P.user(u.id), { ...cur, photoV: null });

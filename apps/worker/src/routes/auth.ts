@@ -193,13 +193,17 @@ export function authRoutes(app: App) {
       if (res.locked) throw tooMany(res.locked);
       throw unauthorized(`Wrong password. ${res.left} attempt${res.left === 1 ? '' : 's'} left`);
     }
-    const fresh = await store.tx(async (t) => {
-      const u = (await t.get<UserDoc>(P.user(uid!)))!;
-      const promote = !u.isSuperAdmin && !!u.email && u.email === c.var.deps.superAdminEmail;
-      const next = { ...u, failed: 0, lockedUntil: null, isSuperAdmin: u.isSuperAdmin || promote };
-      t.set(P.user(uid!), next);
-      return next;
-    });
+    // Only write when something changes (saves two database round trips on a normal log-in).
+    const needsWrite = (user.failed ?? 0) > 0 || !!user.lockedUntil || (!user.isSuperAdmin && !!user.email && user.email === c.var.deps.superAdminEmail);
+    const fresh = !needsWrite
+      ? user
+      : await store.tx(async (t) => {
+          const u = (await t.get<UserDoc>(P.user(uid!)))!;
+          const promote = !u.isSuperAdmin && !!u.email && u.email === c.var.deps.superAdminEmail;
+          const next = { ...u, failed: 0, lockedUntil: null, isSuperAdmin: u.isSuperAdmin || promote };
+          t.set(P.user(uid!), next);
+          return next;
+        });
     if (isMobile(c) && isWebOnly(fresh)) throw forbidden(WEB_ONLY_MESSAGE);
     if (isAdminApp(c) && !fresh.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
     const checked = await enforceRole(c, uid, fresh, chosenRole(c, b));

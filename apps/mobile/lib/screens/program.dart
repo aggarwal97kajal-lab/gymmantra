@@ -268,7 +268,7 @@ class _ProgramEditState extends ConsumerState<ProgramEditScreen> {
       busy = true;
       error = null;
     });
-    final saved = context.t('Saved and sent to {name}', {'name': widget.memberName});
+    final saved = context.t('Saved · {name} can see it now', {'name': widget.memberName});
     try {
       final body = widget.workout
           ? {

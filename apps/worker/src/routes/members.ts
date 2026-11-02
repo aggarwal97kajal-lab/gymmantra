@@ -373,17 +373,24 @@ export function memberRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const { store } = c.var.deps;
-    const m = await memberFor(store, g, c.req.param('id'));
-    const [roster, subsRows, att, user] = await Promise.all([
+    const id = c.req.param('id');
+    if (!isUuid(id)) throw notFound('Member not found');
+    // Everything that does not depend on the member document is read at the same time.
+    const [m0, roster, subsRows, att] = await Promise.all([
+      store.get<MemberDoc>(P.member(g.tenantId, id)),
       readRoster(store, g.tenantId),
-      store.query<SubDoc>(P.subs(g.tenantId), [['memberId', m.id]]),
-      store.get<ScanLog>(P.lastScan(g.tenantId, m.id)),
-      m.userId ? store.get<UserDoc>(P.user(m.userId)) : Promise.resolve(null),
+      store.query<SubDoc>(P.subs(g.tenantId), [['memberId', id]]),
+      store.get<ScanLog>(P.lastScan(g.tenantId, id)),
     ]);
+    if (!m0 || !canSeeBranch(g, m0.branchId)) throw notFound('Member not found');
+    const m = m0;
     const entry = roster.members[m.id] ?? rosterEntry(m);
     const state = stateOf(entry);
     const subs = subsRows.map((r) => r.data);
-    const names = await userNames(store, subs.flatMap((s) => [s.createdById, ...s.payments.map((p) => p.receivedById)]));
+    const [user, names] = await Promise.all([
+      m.userId ? store.get<UserDoc>(P.user(m.userId)) : Promise.resolve(null),
+      userNames(store, subs.flatMap((s) => [s.createdById, ...s.payments.map((p) => p.receivedById)])),
+    ]);
     const replaced = new Set(subs.map((s) => s.replacesId).filter(Boolean));
     const month = todayIST().slice(0, 7);
     return c.json({
@@ -632,6 +639,7 @@ export function memberRoutes(app: App) {
     const note = optStr(b, 'note', { max: 300 }) ?? null;
     const id = c.req.param('id');
     const out = await c.var.deps.store.tx(async (t) => {
+      if (isUuid(id)) await t.getMany([P.sub(g.tenantId, id), P.roster(g.tenantId), P.daily(g.tenantId, todayIST())]);
       const s = isUuid(id) ? await t.get<SubDoc>(P.sub(g.tenantId, id)) : null;
       if (!s) throw notFound('Membership not found');
       await memberFor(t, g, s.memberId);
@@ -727,6 +735,15 @@ async function saveMembership(c: C, g: GymCtx, actorId: string, memberId: string
   const today = todayIST();
 
   const result = await c.var.deps.store.tx(async (t) => {
+    // One batched read for everything this needs (the later reads come from it).
+    await t.getMany([
+      ...(isUuid(memberId) ? [P.member(g.tenantId, memberId)] : []),
+      ...(isUuid(planId) ? [P.plan(g.tenantId, planId)] : []),
+      P.tenant(g.tenantId),
+      P.roster(g.tenantId),
+      P.daily(g.tenantId, today),
+      ...(replacesId && isUuid(replacesId) ? [P.sub(g.tenantId, replacesId)] : []),
+    ]);
     const m = await memberFor(t, g, memberId);
     const plan = isUuid(planId) ? await t.get<PlanDoc>(P.plan(g.tenantId, planId)) : null;
     if (!plan) throw notFound('Plan not found');

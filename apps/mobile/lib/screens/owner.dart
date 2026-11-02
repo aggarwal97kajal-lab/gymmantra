@@ -310,6 +310,9 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
           onRetry: () => ref.invalidate(ownerMembersProvider),
           builder: (d) {
             final all = (d['rows'] as List).cast<Map>();
+            // Load photos and the first members' pages in the background, so tapping opens at once.
+            PhotoCache.warm(all.map((m) => m['photoUrl'] as String?));
+            Api.instance.prefetchSome([for (final m in all.take(30)) '/members/${m['id']}']);
             final needle = q.trim().toLowerCase();
             final rows = all.where((m) => inTab(m) && (needle.isEmpty || '${m['name']} ${m['phone']} ${m['memberCode']}'.toLowerCase().contains(needle))).toList();
             int count(String t) => all.where((m) {

@@ -45,6 +45,7 @@ class DueCard extends ConsumerWidget {
     if (d == null || (d['count'] as int? ?? 0) == 0) return const SizedBox.shrink();
     final list = (d['members'] as List).cast<Map>();
     PhotoCache.warm(list.map((m) => m['photoUrl'] as String?));
+    Api.instance.prefetchSome([for (final m in list.take(20)) '/members/${m['id']}']);
     final sentToday = _isToday(d['remindedAt'] as String?);
     final oldest = list.isEmpty ? 0 : list.map((m) => m['daysLate'] as int? ?? 0).reduce((a, b) => a > b ? a : b);
     return Padding(

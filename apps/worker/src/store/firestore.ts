@@ -38,6 +38,29 @@ function decFields(f: Record<string, Value>): Doc {
 
 export class FirestoreStore implements Store {
   private base: string;
+  /**
+   * Short memory cache (per Worker instance) for the documents read on almost every
+   * request: the user, the gym and the gym's roster. It saves 1–3 round trips to
+   * Firestore (~0.3 s each). Writes from this instance update it at once; writes
+   * from other instances show up within CACHE_MS.
+   */
+  private cache = new Map<string, { v: unknown; until: number }>();
+  static CACHE_MS = 8000;
+  private static cacheable = /^(users\/[^/]+|tenants\/[^/]+|tenants\/[^/]+\/roster\/main|settings\/platform)$/;
+  private cached(path: string): { hit: boolean; v: unknown } {
+    const e = this.cache.get(path);
+    if (e && e.until > Date.now()) return { hit: true, v: structuredClone(e.v) };
+    if (e) this.cache.delete(path);
+    return { hit: false, v: null };
+  }
+  private remember(path: string, v: unknown) {
+    if (!FirestoreStore.cacheable.test(path)) return;
+    if (this.cache.size > 500) this.cache.clear();
+    this.cache.set(path, { v: structuredClone(v), until: Date.now() + FirestoreStore.CACHE_MS });
+  }
+  private forget(path: string) {
+    this.cache.delete(path);
+  }
   constructor(
     private projectId: string,
     private token: () => Promise<string>,
@@ -107,19 +130,40 @@ export class FirestoreStore implements Store {
       .map((r) => ({ id: (r.document.name as string).split('/').pop()!, data: decFields(r.document.fields ?? {}) as T }));
   }
 
-  get<T>(path: string) {
-    return this.getIn<T>(path);
+  async get<T>(path: string) {
+    const c = this.cached(path);
+    if (c.hit) return c.v as T | null;
+    const v = await this.getIn<T>(path);
+    this.remember(path, v);
+    return v;
   }
-  getMany<T>(paths: string[]) {
-    return this.getManyIn<T>(paths);
+  async getMany<T>(paths: string[]) {
+    const out: (T | null)[] = new Array(paths.length);
+    const need: number[] = [];
+    paths.forEach((p, i) => {
+      const c = this.cached(p);
+      if (c.hit) out[i] = c.v as T | null;
+      else need.push(i);
+    });
+    if (need.length) {
+      const got = await this.getManyIn<T>(need.map((i) => paths[i]));
+      need.forEach((i, k) => {
+        out[i] = got[k];
+        this.remember(paths[i], got[k]);
+      });
+    }
+    return out;
   }
   query<T>(collection: string, where?: Where) {
     return this.queryIn<T>(collection, where);
   }
   async set(path: string, data: Doc) {
+    this.forget(path);
     await this.call('POST', `${this.base}:commit`, { writes: [{ update: { name: this.name(path), fields: encFields(data) } }] });
+    this.remember(path, data);
   }
   async delete(path: string) {
+    this.forget(path);
     await this.call('POST', `${this.base}:commit`, { writes: [{ delete: this.name(path) }] });
   }
 
@@ -135,9 +179,13 @@ export class FirestoreStore implements Store {
       const versions = new Map<string, string | null>(); // doc name -> updateTime (null = missing)
       const creates = new Set<string>();
       const writes = new Map<string, any>();
+      const plain = new Map<string, Doc | null>(); // path -> new value (null = deleted), for the cache
+      const seen = new Map<string, unknown>(); // documents already read in this attempt (read once, reuse)
       const readMany = async <T,>(paths: string[]) => {
         if (!paths.length) return [] as (T | null)[];
-        const res: any[] = await this.call('POST', `${this.base}:batchGet`, { documents: paths.map((p) => this.name(p)) });
+        const todo = [...new Set(paths.filter((p) => !seen.has(this.name(p))))];
+        if (!todo.length) return paths.map((p) => structuredClone(seen.get(this.name(p)) ?? null) as T | null);
+        const res: any[] = await this.call('POST', `${this.base}:batchGet`, { documents: todo.map((p) => this.name(p)) });
         const byName = new Map<string, T | null>();
         for (const r of res) {
           if (r.found) {
@@ -148,18 +196,26 @@ export class FirestoreStore implements Store {
             if (!versions.has(r.missing)) versions.set(r.missing, null);
           }
         }
-        return paths.map((p) => byName.get(this.name(p)) ?? null);
+        for (const [n, v] of byName) seen.set(n, v);
+        return paths.map((p) => structuredClone(seen.get(this.name(p)) ?? null) as T | null);
       };
       const t: Tx = {
         get: async (p) => (await readMany<any>([p]))[0],
         getMany: (ps) => readMany(ps),
         query: (c, w) => this.queryIn(c, w),
-        set: (p, d) => void writes.set(this.name(p), { update: { name: this.name(p), fields: encFields(d) } }),
+        set: (p, d) => {
+          plain.set(p, d);
+          writes.set(this.name(p), { update: { name: this.name(p), fields: encFields(d) } });
+        },
         create: (p, d) => {
+          plain.set(p, d);
           creates.add(this.name(p));
           writes.set(this.name(p), { update: { name: this.name(p), fields: encFields(d) } });
         },
-        delete: (p) => void writes.set(this.name(p), { delete: this.name(p) }),
+        delete: (p) => {
+          plain.set(p, null);
+          writes.set(this.name(p), { delete: this.name(p) });
+        },
       };
       const r = await fn(t);
       if (!writes.size) return r;
@@ -169,8 +225,10 @@ export class FirestoreStore implements Store {
         const v = versions.get(name);
         return { ...w, currentDocument: v ? { updateTime: v } : { exists: false } };
       });
+      for (const p of plain.keys()) this.forget(p);
       try {
         await this.call('POST', `${this.base}:commit`, { writes: list });
+        for (const [p, d] of plain) this.remember(p, d);
         return r;
       } catch (e: any) {
         const clash = e instanceof AlreadyExists || e?.fsStatus === 'FAILED_PRECONDITION' || e?.fsStatus === 'ABORTED' || e?.fsStatus === 'NOT_FOUND';

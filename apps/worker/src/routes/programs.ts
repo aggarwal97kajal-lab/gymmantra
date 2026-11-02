@@ -134,14 +134,13 @@ export function programRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const tenantId = str(b, 'tenantId', { label: 'the gym' });
     const memberId = c.req.param('memberId');
-    await canWrite(c, tenantId, memberId);
     const { store } = c.var.deps;
-    const gymDoc = await store.get<TenantDoc>(P.tenant(tenantId));
+    const [, gymDoc] = await Promise.all([canWrite(c, tenantId, memberId), store.get<TenantDoc>(P.tenant(tenantId))]);
     if (gymDoc) await requireFeature(store, gymDoc, 'pt');
     const out = await store.tx(async (t) => {
-      const m = await t.get<MemberDoc>(P.member(tenantId, memberId));
+      const [m, prog] = await t.getMany<MemberDoc | ProgramDoc>([P.member(tenantId, memberId), P.program(tenantId, memberId)]) as [MemberDoc | null, ProgramDoc | null];
       if (!m) throw notFound('Member not found');
-      const cur = (await t.get<ProgramDoc>(P.program(tenantId, memberId))) ?? { memberId, diet: null, workout: null };
+      const cur = prog ?? { memberId, diet: null, workout: null };
       const next: ProgramDoc = {
         ...cur,
         diet: b.diet !== undefined ? readDiet(b.diet, u.name) : cur.diet,
@@ -173,9 +172,9 @@ export function programRoutes(app: App) {
     if (gymDoc) await requireFeature(store, gymDoc, 'pt');
     const meta: PdfMeta = { id: uuid(), name, size, parts: Math.ceil(b64.length / PART_CHARS), uploadedAt: nowIso(), uploadedBy: u.name };
     const out = await store.tx(async (t) => {
-      const m = await t.get<MemberDoc>(P.member(tenantId, memberId));
+      const [m, prog] = await t.getMany<MemberDoc | ProgramDoc>([P.member(tenantId, memberId), P.program(tenantId, memberId)]) as [MemberDoc | null, ProgramDoc | null];
       if (!m) throw notFound('Member not found');
-      const cur = (await t.get<ProgramDoc>(P.program(tenantId, memberId))) ?? { memberId, diet: null, workout: null };
+      const cur = prog ?? { memberId, diet: null, workout: null };
       const old = cur[pdfKey(kind)];
       if (old) {
         for (let i = 0; i < old.parts; i++) t.delete(P.filePart(tenantId, old.id, i));

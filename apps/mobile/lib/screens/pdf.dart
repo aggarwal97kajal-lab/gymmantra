@@ -139,9 +139,12 @@ class PdfUploadBox extends StatefulWidget {
 
 class _PdfUploadBoxState extends State<PdfUploadBox> {
   bool busy = false;
+  double? progress; // 0..1 while uploading
+  String? uploadingName;
+  int uploadingSize = 0;
 
   Future<void> pick() async {
-    final sent = context.t('PDF sent to {name}', {'name': widget.memberName});
+    final sent = context.t('Uploaded successfully');
     final tooBig = context.t('PDF is too big. Upload a PDF up to 2 MB');
     try {
       final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['pdf'], withData: true);
@@ -151,14 +154,30 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
         if (mounted) toast(context, tooBig);
         return;
       }
-      setState(() => busy = true);
-      final p = await Api.instance.put('/programs/${widget.memberId}/pdf/${widget.kind}', {'tenantId': widget.tenantId, 'name': f.name, 'base64': base64Encode(f.bytes!)});
+      setState(() {
+        busy = true;
+        progress = 0;
+        uploadingName = f.name;
+        uploadingSize = f.bytes!.length;
+      });
+      final p = await Api.instance.put(
+        '/programs/${widget.memberId}/pdf/${widget.kind}',
+        {'tenantId': widget.tenantId, 'name': f.name, 'base64': base64Encode(f.bytes!)},
+        onSendProgress: (a, b) {
+          if (b > 0 && mounted) setState(() => progress = (a / b).clamp(0, 1).toDouble());
+        },
+      );
       widget.onChanged((p as Map)[widget.kind == 'diet' ? 'dietPdf' : 'workoutPdf'] as Map?);
       if (mounted) toast(context, sent);
     } catch (e) {
       if (mounted) toast(context, e.toString());
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          progress = null;
+        });
+      }
     }
   }
 
@@ -185,7 +204,33 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
           const SizedBox(width: 10),
           Expanded(child: Text(context.t(widget.kind == 'diet' ? 'Diet chart PDF' : 'Workout PDF'), style: const TextStyle(fontWeight: FontWeight.w800))),
         ]),
-        if (m != null) ...[
+        if (progress != null) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: p.surf2, borderRadius: BorderRadius.circular(12)),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                const PdfBadge(),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(uploadingName ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    Muted(progress! >= 1 ? context.t('Saving…') : context.t('Uploading…'), size: 11.5),
+                  ]),
+                ),
+                Text('${(progress! * 100).round()}%', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, fontSize: 16)),
+              ]),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: p.line, valueColor: AlwaysStoppedAnimation(p.primary)),
+              ),
+              const SizedBox(height: 6),
+              Muted('${_size(uploadingSize * progress!)} ${context.t('of')} ${_size(uploadingSize)}', size: 11),
+            ]),
+          ),
+        ] else if (m != null) ...[
           const SizedBox(height: 12),
           InkWell(
             borderRadius: BorderRadius.circular(12),

@@ -50,7 +50,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     final doneMsg = context.t('Photo updated');
     final XFile? file;
     try {
-      file = await ImagePicker().pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 92, preferredCameraDevice: CameraDevice.front);
+      file = await ImagePicker().pickImage(source: source, maxWidth: 1280, maxHeight: 1280, imageQuality: 88, preferredCameraDevice: CameraDevice.front);
     } catch (e) {
       if (mounted) toast(context, e.toString());
       return;
@@ -58,9 +58,9 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     if (file == null) return;
     final cropped = await ImageCropper().cropImage(
       sourcePath: file.path,
-      maxWidth: 720,
-      maxHeight: 720,
-      compressQuality: 82,
+      maxWidth: 560,
+      maxHeight: 560,
+      compressQuality: 78,
       compressFormat: ImageCompressFormat.jpg,
       uiSettings: [
         AndroidUiSettings(
