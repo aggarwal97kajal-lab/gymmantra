@@ -4,6 +4,9 @@ import { makeQrToken } from '../lib/qr';
 import { freezeDaysLeft } from '../lib/status';
 import { todayIST } from '../lib/dates';
 import { body, oneOf, optInt, optStr, str } from '../lib/validate';
+import { isYmd } from '../lib/dates';
+import { normalizeEmail, normalizePhone } from '../lib/phone';
+import { publicUser } from './auth';
 import type { PlanDoc } from './members';
 import type { ScanLog } from './attendance';
 import { offersFor } from './trainers';
@@ -183,7 +186,22 @@ export function meRoutes(app: App) {
   app.patch('/api/v1/me/profile', async (c) => {
     const u = await authenticate(c);
     const b = body(await c.req.json().catch(() => null));
-    const name = b.name !== undefined ? str(b, 'name', { min: 2, max: 80, label: 'your name' }) : undefined;
+    let name = b.name !== undefined ? str(b, 'name', { min: 2, max: 80, label: 'your name' }) : undefined;
+    const parts: Partial<UserDoc> = {};
+    if (b.firstName !== undefined) {
+      parts.firstName = str(b, 'firstName', { min: 1, max: 40, label: 'your first name' });
+      parts.middleName = optStr(b, 'middleName', { max: 40 }) ?? null;
+      parts.lastName = optStr(b, 'lastName', { max: 40 }) ?? null;
+      name = [parts.firstName, parts.middleName, parts.lastName].filter(Boolean).join(' ');
+      if (name.length < 2) throw bad('Enter your name');
+    }
+    if (b.dob !== undefined) {
+      const d = optStr(b, 'dob') ?? null;
+      if (d && (!isYmd(d) || d > todayIST() || d < '1900-01-01')) throw bad('Date of birth is not valid');
+      parts.dob = d;
+    }
+    if (b.gender !== undefined) parts.gender = oneOf(b, 'gender', ['male', 'female', 'other'] as const, true) ?? null;
+    if (b.address !== undefined) parts.address = optStr(b, 'address', { max: 300 }) ?? null;
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
     const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'NONE'] as const, true);
     const appRole = roleIn === 'NONE' ? null : roleIn;
@@ -191,11 +209,45 @@ export function meRoutes(app: App) {
     if (appRole === 'TRAINER' && isDeskStaff(u)) throw bad('A gym owner cannot be a trainer');
     const next = await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
-      const n = { ...cur, name: name ?? cur.name, language: language ?? cur.language, appRole: roleIn === undefined ? cur.appRole ?? null : appRole };
+      const n = { ...cur, ...parts, name: name ?? cur.name, language: language ?? cur.language, appRole: roleIn === undefined ? cur.appRole ?? null : appRole };
       t.set(P.user(u.id), n);
       return n;
     });
-    return c.json({ id: u.id, name: next.name, language: next.language, photoUrl: next.photoV ? `/api/v1/photos/${u.id}?v=${next.photoV}` : null });
+    return c.json(publicUser(u.id, next));
+  });
+
+  /** Change mobile number or email. Needs the current password (if the account has one). */
+  app.patch('/api/v1/me/contact', async (c) => {
+    const u = await authenticate(c);
+    const { store, identity } = c.var.deps;
+    const b = body(await c.req.json().catch(() => null));
+    if (u.authEmail) {
+      const pw = str(b, 'password', { label: 'your current password' });
+      await identity.signIn(u.authEmail, pw).catch(() => {
+        throw bad('Current password is wrong');
+      });
+    }
+    const emailIn = optStr(b, 'email');
+    const email = emailIn !== undefined ? normalizeEmail(emailIn) : undefined;
+    if (emailIn && !email) throw bad('Enter a valid email address');
+    const phoneIn = optStr(b, 'phone');
+    const phone = phoneIn !== undefined ? normalizePhone(phoneIn) : undefined;
+    if (phoneIn && !phone) throw bad('Enter a valid 10-digit mobile number');
+    if (email && email !== u.email && (await store.query<UserDoc>('users', [['email', email]])).some((r) => r.id !== u.id && !r.data.deleted)) throw conflict('This email ID already exists');
+    const out = await store.tx(async (t) => {
+      const cur = (await t.get<UserDoc>(P.user(u.id)))!;
+      const next = { ...cur };
+      if (email && email !== cur.email) next.email = email;
+      if (phone && phone !== cur.phone) {
+        if (await t.get(P.phone(phone))) throw conflict('This mobile number already exists');
+        t.create(P.phone(phone), { uid: u.id });
+        if (cur.phone) t.delete(P.phone(cur.phone));
+        next.phone = phone;
+      }
+      t.set(P.user(u.id), next);
+      return next;
+    });
+    return c.json(publicUser(u.id, out));
   });
 
   // ---------- Profile photo (kept small; visible to the member and their gyms' staff) ----------

@@ -20,6 +20,12 @@ export function publicUser(id: string, u: UserDoc) {
     hasPassword: !!u.authEmail,
     hasGoogle: !!u.googleSub,
     appRole: u.appRole ?? null,
+    firstName: u.firstName ?? u.name.split(' ')[0] ?? null,
+    middleName: u.middleName ?? null,
+    lastName: u.lastName ?? (u.firstName ? null : u.name.split(' ').slice(1).join(' ') || null),
+    dob: u.dob ?? null,
+    gender: u.gender ?? null,
+    address: u.address ?? null,
     isOwner: isDeskStaff(u),
     isTrainer: isTrainer(u),
     trainerPending: Object.keys(u.trainerRequested ?? {}).length > 0,
@@ -132,7 +138,11 @@ export function authRoutes(app: App) {
     // Find the GymMantra account first, so the lockout applies before Firebase is asked.
     let uid: string | null = null;
     if (phone) uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid ?? null;
-    else if (email) uid = (await store.query<UserDoc>('users', [['authEmail', email]]))[0]?.id ?? null;
+    else if (email) {
+      uid = (await store.query<UserDoc>('users', [['authEmail', email]]))[0]?.id ?? null;
+      // Someone who changed their email in Profile still signs in to Firebase with the old one.
+      if (!uid) uid = (await store.query<UserDoc>('users', [['email', email]])).find((r) => !r.data.deleted && r.data.authEmail)?.id ?? null;
+    }
     const user = uid ? await store.get<UserDoc>(P.user(uid)) : null;
     if (!uid && email && (await store.query<UserDoc>('users', [['email', email]])).some((r) => !r.data.authEmail && !r.data.deleted)) {
       throw bad('This account was created with Google. Use "Continue with Google" to log in');

@@ -31,6 +31,12 @@ export interface UserDoc {
   requested: Record<string, boolean>; // tenantIds with join requests (as a member)
   trainerRequested?: Record<string, boolean>; // tenantIds with join requests as a trainer
   appRole?: 'MEMBER' | 'OWNER' | 'TRAINER' | null; // what the person chose in the app
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+  dob?: string | null; // YYYY-MM-DD
+  gender?: 'male' | 'female' | 'other' | null;
+  address?: string | null;
   staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean }>;
 }
 

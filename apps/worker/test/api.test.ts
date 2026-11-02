@@ -580,3 +580,25 @@ describe('ads', () => {
     expect(ok.status).toBe(200);
   });
 });
+
+describe('profile details', () => {
+  it('saves name parts, DOB, gender, address; changes phone/email with the password', async () => {
+    const u = await h.signup('Rahul Sharma');
+    const r = await h.api.patch('/me/profile', { firstName: 'Rahul', middleName: 'Kumar', lastName: 'Sharma', dob: '1997-05-20', gender: 'male', address: 'Dwarka, Delhi' }, u.token);
+    expect(r.status).toBe(200);
+    expect(r.body.name).toBe('Rahul Kumar Sharma');
+    expect(r.body.dob).toBe('1997-05-20');
+    expect((await h.api.patch('/me/profile', { dob: '2999-01-01' }, u.token)).status).toBe(400);
+    expect((await h.api.patch('/me/contact', { phone: h.nextPhone(), password: 'wrong-one' }, u.token)).status).toBe(400);
+    const newPhone = h.nextPhone();
+    const c = await h.api.patch('/me/contact', { phone: newPhone, email: 'rahul.new@test.in', password: 'secret123' }, u.token);
+    expect(c.status).toBe(200);
+    expect(c.body.email).toBe('rahul.new@test.in');
+    // logs in with the new mobile and the new email
+    expect((await h.api.post('/auth/login', { identifier: newPhone, password: 'secret123' })).status).toBe(200);
+    expect((await h.api.post('/auth/login', { identifier: 'rahul.new@test.in', password: 'secret123' })).status).toBe(200);
+    // old number is free again
+    const other = await h.api.post('/auth/signup', { name: 'Other', email: 'o@test.in', phone: u.phone, password: 'secret123' });
+    expect(other.status).toBe(201);
+  });
+});
