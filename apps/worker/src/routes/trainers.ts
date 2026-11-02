@@ -1,4 +1,4 @@
-import { App, audit, authenticate, gymOf, P, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc } from '../core';
 import { noticesFor } from './notices';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -17,6 +17,7 @@ export interface PtPackage {
 }
 
 export interface TrainerDoc {
+  branchId?: string | null; // branch the trainer works at (old trainers: first branch)
   userId: string;
   name: string;
   speciality: string | null;
@@ -60,6 +61,7 @@ export async function listTrainers(r: Reader, tenantId: string, onlyVisible: boo
 
 export interface OfferDoc {
   id: string;
+  branchIds?: string[] | null; // branches that see it (null = every branch)
   imageV?: number | null; // banner picture version
   title: string;
   details: string | null;
@@ -76,9 +78,11 @@ export const offerImageUrl = (tenantId: string, o: Pick<OfferDoc, 'id' | 'imageV
 const MAX_BANNER = 400 * 1024;
 
 /** Live offers of a gym for a member (with their membership status) or a trainer. */
-export async function offersFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', memberStatus?: string) {
+export async function offersFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', memberStatus?: string, branchId?: string | null) {
   const today = todayIST();
-  const rows = (await r.query<OfferDoc>(P.offers(tenantId), [['active', true]])).map((x) => x.data).filter((o) => o.validTill >= today);
+  const rows = (await r.query<OfferDoc>(P.offers(tenantId), [['active', true]]))
+    .map((x) => x.data)
+    .filter((o) => o.validTill >= today && (!o.branchIds?.length || !branchId || o.branchIds.includes(branchId)));
   return rows
     .filter((o) => {
       if (who === 'TRAINER') return o.forTrainers;
@@ -118,7 +122,9 @@ export function trainerRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const { store } = c.var.deps;
-    const list = await listTrainers(store, g.tenantId, false);
+    const all = await store.query<TrainerDoc>(P.trainers(g.tenantId), [['active', true]]);
+    const here = new Set(all.filter((r) => inBranch(g, r.data.branchId)).map((r) => r.data.userId));
+    const list = (await listTrainers(store, g.tenantId, false)).filter((t) => here.has(t.id));
     // Trainer attendance from the gym check-in QR.
     const days = await store.getMany<{ month: string; visits: number; lastAt: string | null; days: string[] }>(list.map((t) => P.trainerDays(g.tenantId, t.id)));
     const month = todayIST().slice(0, 7);
@@ -178,9 +184,11 @@ export function trainerRoutes(app: App) {
       store.getMany<TrainerDoc>(gyms.map((t) => P.trainer(t, u.id))),
       store.getMany<TenantDoc>(pending.map(P.tenant)),
     ]);
+    // Each trainer sees their own branch's offers and notices.
+    const myBranch = gyms.map((t, i) => (tenants[i] ? branchOf(tenants[i]!, profiles[i]?.branchId ?? u.staffOf?.[t]?.branchIds?.[0]) : null));
     const [offers, notices] = await Promise.all([
-      Promise.all(gyms.map((t) => offersFor(store, t, 'TRAINER'))),
-      Promise.all(gyms.map((t) => noticesFor(store, t, 'TRAINER'))),
+      Promise.all(gyms.map((t, i) => offersFor(store, t, 'TRAINER', undefined, myBranch[i]))),
+      Promise.all(gyms.map((t, i) => noticesFor(store, t, 'TRAINER', undefined, 0, 0, myBranch[i]))),
     ]);
     return c.json({
       gyms: gyms
@@ -212,7 +220,7 @@ export function trainerRoutes(app: App) {
   app.get('/api/v1/offers', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    const rows = (await c.var.deps.store.query<OfferDoc>(P.offers(g.tenantId))).map((x) => x.data);
+    const rows = (await c.var.deps.store.query<OfferDoc>(P.offers(g.tenantId))).map((x) => x.data).filter((o) => !o.branchIds?.length || o.branchIds.includes(g.branchId));
     const today = todayIST();
     return c.json(rows.map((o) => ({ ...o, imageUrl: offerImageUrl(g.tenantId, o), live: o.active && o.validTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
   });
@@ -228,13 +236,23 @@ export function trainerRoutes(app: App) {
     const memberFilter = oneOf(b, 'memberFilter', ['ALL', 'ACTIVE', 'EXPIRING', 'EXPIRED'] as const, true) ?? cur?.memberFilter ?? 'ALL';
     return { title, details, validTill, forMembers, forTrainers, memberFilter };
   };
+  /** Branches from the request: a list of ids, "ALL", or (default) the branch the app is looking at. */
+  const readBranches = (b: Record<string, unknown>, g: { tenant: TenantDoc; branchId: string }, cur?: { branchIds?: string[] | null }) => {
+    if (b.branchIds === 'ALL') return null;
+    if (Array.isArray(b.branchIds)) {
+      const ids = (b.branchIds as unknown[]).filter((x): x is string => typeof x === 'string' && g.tenant.branches.some((br) => br.id === x));
+      if (!ids.length) throw bad('Choose at least one branch');
+      return ids.length === g.tenant.branches.length ? null : ids;
+    }
+    return cur ? cur.branchIds ?? null : [g.branchId];
+  };
 
   app.post('/api/v1/offers', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     await requireFeature(c.var.deps.store, g.tenant, 'offers');
     const b = body(await c.req.json().catch(() => null));
-    const o: OfferDoc = { id: uuid(), ...readOffer(b), active: true, createdById: u.id, createdAt: nowIso() };
+    const o: OfferDoc = { id: uuid(), ...readOffer(b), branchIds: readBranches(b, g), active: true, createdById: u.id, createdAt: nowIso() };
     if (o.validTill < todayIST()) throw bad('The last date has already passed');
     await c.var.deps.store.tx(async (t) => {
       t.set(P.offer(g.tenantId, o.id), o);
@@ -251,7 +269,7 @@ export function trainerRoutes(app: App) {
     const out = await c.var.deps.store.tx(async (t) => {
       const before = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;
       if (!before) throw notFound('Offer not found');
-      const after: OfferDoc = { ...before, ...readOffer(b, before), active: optBool(b, 'active') ?? before.active };
+      const after: OfferDoc = { ...before, ...readOffer(b, before), branchIds: readBranches(b, g, before), active: optBool(b, 'active') ?? before.active };
       t.set(P.offer(g.tenantId, id), after);
       audit(t, g.tenantId, u.id, 'offer.update', 'offer', id, before, after);
       return after;

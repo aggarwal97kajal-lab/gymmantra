@@ -8,6 +8,7 @@ class Session extends ChangeNotifier {
   Session() {
     Api.instance.onLoggedOut = () {
       user = null;
+      Api.instance.branchId = null;
       Prefs.clearUserData();
       Api.instance.forget();
       notifyListeners();
@@ -73,6 +74,7 @@ class Session extends ChangeNotifier {
   Future<void> _done(dynamic r) async {
     await Prefs.clearUserData();
     api.forget();
+    api.branchId = null;
     await api.setToken(r['token'] as String);
     _setUser(Map<String, dynamic>.from(r['user']));
     if (user?['language'] == 'hi') AppSettings.instance.setLang('hi');
@@ -129,6 +131,18 @@ class Session extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Owner / staff switches the branch the app shows. Every branch screen reloads.
+  void setBranch(String? id) {
+    api.branchId = id;
+    if (id == null) {
+      Prefs.remove('u:branch');
+    } else {
+      Prefs.setString('u:branch', id);
+    }
+    notifyListeners();
+    warmUp();
+  }
+
   /// Fetches the main screens of this person's part of the app in the background,
   /// so tapping a tab or menu shows data at once instead of waiting for the server.
   void warmUp() {
@@ -149,6 +163,8 @@ class Session extends ChangeNotifier {
           '/pt?status=ACTIVE',
           '/ads?role=OWNER',
           '/me/notifications',
+          '/gym/checkin-qr',
+          '/transfers',
         ],
       'trainer' || 'waiting' || 'trainerJoin' => ['/trainer/home', '/trainer/clients', '/trainer/payouts', '/ads?role=TRAINER', '/me/notifications'],
       'member' => ['/me/gyms', '/me/pt', '/me/program', '/me/notifications', '/me/tickets', '/exercises', '/ads?role=MEMBER'],
@@ -215,6 +231,7 @@ class Session extends ChangeNotifier {
       await api.post('/auth/logout');
     } catch (_) {}
     await api.setToken(null);
+    api.branchId = null;
     await Prefs.clearUserData();
     api.forget();
     user = null;
@@ -224,6 +241,37 @@ class Session extends ChangeNotifier {
 
 final sessionProvider = ChangeNotifierProvider<Session>((ref) => Session());
 
+/// The branch the owner app shows. Screens that depend on it reload when it changes.
+final branchProvider = Provider<String?>((ref) {
+  ref.watch(sessionProvider.select((s) => s.api.branchId));
+  return Api.instance.branchId;
+});
+
+/// The gym as the owner app shows it: code and name of the branch being looked at.
+Map<String, dynamic> withBranch(Map g) {
+  final out = Map<String, dynamic>.from(g);
+  final branches = ((g['branches'] as List?) ?? const []).whereType<Map>().toList();
+  if (branches.length < 2) return out;
+  final cur = branches.firstWhere((b) => b['id'] == g['currentBranchId'], orElse: () => branches.first);
+  out['gymCode'] = cur['code'] ?? g['gymCode'];
+  out['branchName'] = cur['name'];
+  out['name'] = '${g['name']} – ${cur['name']}';
+  if (cur['address'] != null && '${cur['address']}'.isNotEmpty) {
+    out['addressLine'] = cur['address'];
+    out['city'] = null;
+  }
+  return out;
+}
+
+/// cachedGet that reloads when the owner switches branch.
+Stream<dynamic> branchGet(Ref ref, String path) {
+  ref.watch(branchProvider);
+  return Api.instance.cachedGet(path);
+}
+
+final transfersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/transfers'));
+final myTransferProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, tid) => Api.instance.cachedGet('/me/gyms/$tid/transfer'));
+
 /// Data providers. Each shows the saved copy first, then the fresh one.
 /// Screens call ref.invalidate(...) to refresh.
 final gymsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/gyms'));
@@ -232,15 +280,15 @@ final plansProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, t
 final ticketsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/tickets'));
 final superTicketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/super/tickets/$id'));
 final ticketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/me/tickets/$id'));
-final notificationsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/notifications'));
+final notificationsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/me/notifications'));
 final exercisesProvider = StreamProvider<dynamic>((ref) => Api.instance.cachedGet('/exercises'));
 
 // ---- owner / trainer data ----
-final dashboardProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/dashboard'));
-final ownerMembersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/members?tab=all'));
-final ownerMemberProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/members/$id'));
-final joinRequestsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/join-requests'));
-final offersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/offers'));
-final trainersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainers'));
-final gymProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/gym'));
+final dashboardProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/dashboard'));
+final ownerMembersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/members?tab=all'));
+final ownerMemberProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => branchGet(ref, '/members/$id'));
+final joinRequestsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/join-requests'));
+final offersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/offers'));
+final trainersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/trainers'));
+final gymProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym'));
 final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/home'));

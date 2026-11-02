@@ -16,7 +16,7 @@ final myPtProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.c
 final gymTrainersProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, tid) => Api.instance.cachedGet('/me/gyms/$tid/trainers'));
 final trainerClientsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/clients'));
 final trainerPayoutsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/payouts'));
-final ownerPtProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, status) => Api.instance.cachedGet('/pt?status=$status'));
+final ownerPtProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, status) => branchGet(ref, '/pt?status=$status'));
 final ptAccountsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/pt-accounts'));
 
 String ymdOf(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';

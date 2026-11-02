@@ -388,6 +388,27 @@ class _MembershipCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text('ID ${m['memberCode']}', style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 12)),
+                      if (m['multiBranch'] == true && m['branch'] is Map)
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => context.push('/transfer/${m['gym']['id']}'),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.place_rounded, size: 15, color: Colors.white),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text('${m['branch']['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(color: Colors.white.withAlpha(50), borderRadius: BorderRadius.circular(8)),
+                                child: Text(context.t('Change'), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                              ),
+                            ]),
+                          ),
+                        ),
                     ]),
                   ),
                   if (live) DaysRing(days: daysLeft, fraction: fraction, label: context.t('days left')),

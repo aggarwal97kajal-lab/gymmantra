@@ -14,7 +14,7 @@ import 'home.dart' show openUrl, waLink;
 // Money due: the dashboard card, the list with one-tap reminders, taking a payment,
 // and the member's own profile details for the gym.
 
-final duesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/dues'));
+final duesProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/dues'));
 
 /// "Paid ₹5,000 of ₹12,500" with a thin progress bar.
 class PaidBar extends StatelessWidget {
@@ -439,7 +439,7 @@ class MemberProfileScreen extends StatelessWidget {
 
 // ============================================================ plan "Interested" requests
 
-final leadsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/leads'));
+final leadsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/leads'));
 
 class LeadsList extends ConsumerWidget {
   const LeadsList({super.key});

@@ -17,6 +17,7 @@ import { memberRoutes } from './routes/members';
 import { meRoutes } from './routes/me';
 import { ensureBaseData, superRoutes } from './routes/super';
 import { ticketRoutes } from './routes/tickets';
+import { transferRoutes } from './routes/transfers';
 import { AlreadyExists } from './store/store';
 
 /** Builds the GymMantra API. The same app runs on Cloudflare, in tests and in the local preview. */
@@ -64,6 +65,7 @@ export function createApp(getDeps: () => Deps) {
   adRoutes(app);
   reportRoutes(app);
   noticeRoutes(app);
+  transferRoutes(app);
   checkinRoutes(app);
   dueRoutes(app);
 

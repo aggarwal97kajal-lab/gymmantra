@@ -5,6 +5,9 @@ import {
   bumpDaily,
   C,
   canSeeBranch,
+  inBranch,
+  branchOf,
+  dailyFor,
   Freeze,
   GymCtx,
   gymOf,
@@ -77,7 +80,7 @@ function inTab(tab: Tab, status: MembershipStatus, due: number) {
 export function summaries(g: GymCtx, roster: Roster, includeArchived = false) {
   const today = todayIST();
   return Object.entries(roster.members)
-    .filter(([, e]) => (includeArchived || !e.archived) && canSeeBranch(g, e.branchId))
+    .filter(([, e]) => (includeArchived || !e.archived) && canSeeBranch(g, e.branchId) && inBranch(g, e.branchId))
     .map(([id, e]) => {
       const st = stateOf(e, today);
       return {
@@ -276,9 +279,9 @@ export function memberRoutes(app: App) {
         dueAmount: all.reduce((n, m) => n + m.due, 0),
         dueMembers: all.filter((m) => m.due > 0).length,
       },
-      today: { collected: daily?.collected ?? 0, payments: daily?.payments ?? 0, checkins: daily?.checkins ?? 0 },
-      joinPending: joins.length,
-      ptPending: pts.length,
+      today: (({ collected, payments, checkins }) => ({ collected, payments, checkins }))(dailyFor(g, daily)),
+      joinPending: joins.filter((j: any) => inBranch(g, j.data.branchId)).length,
+      ptPending: pts.filter((p: any) => inBranch(g, roster.members[p.data.memberId]?.branchId)).length,
       openTickets: tickets.length,
       renewalsDue: all
         .filter((m) => m.status === 'ENDING_SOON' || (m.status === 'EXPIRED' && (m.daysLeft ?? -999) >= -30))
@@ -521,7 +524,7 @@ export function memberRoutes(app: App) {
     const g = await gymOf(c);
     const status = ['PENDING', 'APPROVED', 'DECLINED'].includes(c.req.query('status') ?? '') ? c.req.query('status')! : 'PENDING';
     const { store } = c.var.deps;
-    const rows = await store.query<{ userId: string; createdAt: string; branchId: string | null }>(P.joins(g.tenantId), [['status', status]]);
+    const rows = (await store.query<{ userId: string; createdAt: string; branchId: string | null }>(P.joins(g.tenantId), [['status', status]])).filter((r) => inBranch(g, r.data.branchId));
     const users = await store.getMany<UserDoc>(rows.map((r) => P.user(r.data.userId)));
     return c.json(
       rows
@@ -550,19 +553,20 @@ export function memberRoutes(app: App) {
         await requireFeature(t, g.tenant, 'pt');
         if (isDeskStaff(ju)) throw bad('This person runs a gym and cannot be a trainer');
         const now = nowIso();
-        t.set(P.staff(g.tenantId, jr.userId), { userId: jr.userId, role: 'TRAINER', branchIds: [], active: true, createdAt: now });
-        const tr = (await t.get(P.trainer(g.tenantId, jr.userId))) ?? newTrainer(jr.userId, ju.name, jr.speciality ?? null, jr.experienceYears ?? null);
+        const tb = branchOf(g.tenant, jr.branchId);
+        t.set(P.staff(g.tenantId, jr.userId), { userId: jr.userId, role: 'TRAINER', branchIds: tb ? [tb] : [], active: true, createdAt: now });
+        const tr = (await t.get(P.trainer(g.tenantId, jr.userId))) ?? { ...newTrainer(jr.userId, ju.name, jr.speciality ?? null, jr.experienceYears ?? null), branchId: tb };
         t.set(P.trainer(g.tenantId, jr.userId), { ...tr, active: true });
         const trq = { ...(ju.trainerRequested ?? {}) };
         delete trq[g.tenantId];
-        t.set(P.user(jr.userId), { ...ju, appRole: 'TRAINER', trainerRequested: trq, staffOf: { ...ju.staffOf, [g.tenantId]: { role: 'TRAINER', branchIds: [], active: true } } });
+        t.set(P.user(jr.userId), { ...ju, appRole: 'TRAINER', trainerRequested: trq, staffOf: { ...ju.staffOf, [g.tenantId]: { role: 'TRAINER', branchIds: tb ? [tb] : [], active: true } } });
         t.set(P.join(g.tenantId, id), { ...jr, status: 'APPROVED', decidedById: u.id, decidedAt: now });
         audit(t, g.tenantId, u.id, 'trainer.approve', 'join_request', id, null, { trainerId: jr.userId });
         await notify(t, jr.userId, g.tenantId, 'Welcome!', `${g.tenant.name} approved you as a trainer.`);
         return { trainerId: jr.userId };
       }
       if (!ju.phone) throw bad('This person has no mobile number on their account');
-      const branchId = optStr(b, 'branchId') ?? jr.branchId ?? null;
+      const branchId = optStr(b, 'branchId') ?? jr.branchId ?? g.branchId;
       checkBranch(g, branchId);
       const roster = await readRoster(t, g.tenantId);
       // If the gym already added this person by hand, link that record.
@@ -669,7 +673,7 @@ export function memberRoutes(app: App) {
       rosterPutSub(roster, s.memberId, next);
       t.set(P.sub(g.tenantId, id), next);
       t.set(P.roster(g.tenantId), roster);
-      await bumpDaily(t, g.tenantId, { collected: amount, payments: 1 });
+      await bumpDaily(t, g.tenantId, { collected: amount, payments: 1 }, branchOf(g.tenant, roster.members[s.memberId]?.branchId));
       audit(t, g.tenantId, u.id, 'payment.create', 'payment', p.id, null, p);
       return { payment: p, due: due - amount };
     });
@@ -822,7 +826,7 @@ async function saveMembership(c: C, g: GymCtx, actorId: string, memberId: string
     rosterPutSub(roster, m.id, s);
     t.create(P.sub(g.tenantId, id), s);
     t.set(P.roster(g.tenantId), roster);
-    if (received > 0) await bumpDaily(t, g.tenantId, { collected: received, payments: 1 });
+    if (received > 0) await bumpDaily(t, g.tenantId, { collected: received, payments: 1 }, branchOf(g.tenant, m.branchId));
     audit(t, g.tenantId, actorId, old ? 'membership.correct' : 'membership.create', 'subscription', id, old, { ...s, received });
     await notify(t, m.userId, g.tenantId, old ? 'Membership updated' : 'Membership added', `${tenant.name} ${old ? 'updated' : 'added'} your ${plan.name} membership: ${prettyDate(startDate)} to ${prettyDate(endDate)}.`);
     return { s, m, tenant, received, due };

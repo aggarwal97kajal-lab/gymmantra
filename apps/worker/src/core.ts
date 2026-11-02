@@ -42,6 +42,7 @@ export interface UserDoc {
 
 export interface Branch {
   id: string;
+  code?: string; // join code of this branch (the first branch uses the gym code)
   name: string;
   address: string | null;
   hours: string | null;
@@ -76,6 +77,7 @@ export interface TenantDoc {
   // GymMantra subscription
   planCycle?: 'MONTHLY' | 'ANNUAL' | null;
   planEndsAt?: string | null;
+  allowTransfer?: boolean; // members may ask to move their membership to another branch
   dueRemindedAt?: string | null; // last time the owner sent due reminders
 }
 
@@ -184,6 +186,8 @@ export const P = {
   leads: (t: string) => `tenants/${t}/leads`,
   lead: (t: string, id: string) => `tenants/${t}/leads/${id}`,
   checkin: (t: string) => `tenants/${t}/private/checkin`,
+  transfers: (t: string) => `tenants/${t}/transfers`,
+  transfer: (t: string, id: string) => `tenants/${t}/transfers/${id}`,
   trainerDays: (t: string, uid: string) => `tenants/${t}/trainerDays/${uid}`,
   file: (t: string, id: string) => `tenants/${t}/files/${id}`,
   filePart: (t: string, id: string, n: number) => `tenants/${t}/files/${id}/parts/${n}`,
@@ -343,7 +347,15 @@ export interface GymCtx {
   role: Role;
   branchIds: string[];
   tenant: TenantDoc;
+  /** The branch the staff app is looking at (x-branch-id); lists, dashboards and new offers follow it. */
+  branchId: string;
 }
+
+/** Branch a record belongs to; old records without one belong to the first branch. */
+export const branchOf = (t: Pick<TenantDoc, 'branches'>, id: string | null | undefined) => id ?? t.branches[0]?.id ?? null;
+export const branchCode = (t: Pick<TenantDoc, 'branches' | 'gymCode'>, b: Branch) => b.code ?? (b.id === t.branches[0]?.id ? t.gymCode : null);
+/** Is this record part of the branch the staff app is looking at? */
+export const inBranch = (g: GymCtx, id: string | null | undefined) => branchOf(g.tenant, id) === g.branchId;
 
 /**
  * The gym this staff user is working in. The client may name one of its gyms
@@ -362,7 +374,10 @@ export async function gymOf(c: C, ...roles: Role[]): Promise<GymCtx> {
   if (!tenant) throw forbidden('Gym not found');
   if (tenant.status === 'SUSPENDED') throw forbidden('This gym is suspended. Contact GymMantra support');
   if (roles.length && !roles.includes(s.role)) throw forbidden('Only the gym owner can do this');
-  return { tenantId, role: s.role, branchIds: s.branchIds ?? [], tenant };
+  const allowed = s.role === 'OWNER' || !(s.branchIds ?? []).length ? tenant.branches.map((b) => b.id) : tenant.branches.map((b) => b.id).filter((id) => s.branchIds.includes(id));
+  const askedBranch = c.req.header('x-branch-id');
+  const branchId = askedBranch && allowed.includes(askedBranch) ? askedBranch : allowed[0] ?? tenant.branches[0]?.id ?? '';
+  return { tenantId, role: s.role, branchIds: s.branchIds ?? [], tenant, branchId };
 }
 
 export function canSeeBranch(g: GymCtx, branchId: string | null) {
@@ -381,6 +396,7 @@ export function audit(t: Tx, tenantId: string | null, actorId: string, action: s
 export interface NoteItem {
   id: string;
   tenantId: string | null;
+  branchId?: string | null; // for gym staff: which branch it is about
   title: string;
   body: string;
   createdAt: string;
@@ -388,10 +404,10 @@ export interface NoteItem {
 }
 
 /** In-app notification (kept as the last 50 per user in one document). */
-export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string) {
+export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string, branchId: string | null = null) {
   if (!userId) return;
   const doc = (await t.get<{ items: NoteItem[] }>(P.notes(userId))) ?? { items: [] };
-  t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
+  t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, branchId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
 }
 
 // ---------- Roster ----------
@@ -454,11 +470,23 @@ export function stateOf(e: RosterEntry, today = todayIST()): MemberState<RosterS
 }
 
 /** Today's counters for the dashboard. */
-export async function bumpDaily(t: Tx, tenantId: string, patch: Partial<Record<'collected' | 'payments' | 'checkins' | 'blocked', number>>) {
+export async function bumpDaily(t: Tx, tenantId: string, patch: Partial<Record<'collected' | 'payments' | 'checkins' | 'blocked', number>>, branchId?: string | null) {
   const day = todayIST();
   const cur = (await t.get<Record<string, number>>(P.daily(tenantId, day))) ?? { collected: 0, payments: 0, checkins: 0, blocked: 0 };
-  for (const [k, v] of Object.entries(patch)) cur[k] = (cur[k] ?? 0) + (v ?? 0);
+  for (const [k, v] of Object.entries(patch)) {
+    cur[k] = (cur[k] ?? 0) + (v ?? 0);
+    // Each branch also has its own counters ("b.<branchId>.checkins").
+    if (branchId) cur[`b.${branchId}.${k}`] = (cur[`b.${branchId}.${k}`] ?? 0) + (v ?? 0);
+  }
   t.set(P.daily(tenantId, day), cur);
+}
+
+/** One branch's numbers from a daily counter document. Days before branch counters existed count for the first branch. */
+export function dailyFor(g: GymCtx, d: Record<string, number> | null | undefined) {
+  const has = d && Object.keys(d).some((k) => k.startsWith('b.'));
+  const first = g.branchId === g.tenant.branches[0]?.id;
+  const v = (k: string) => (!d ? 0 : has ? d[`b.${g.branchId}.${k}`] ?? 0 : first ? d[k] ?? 0 : 0);
+  return { collected: v('collected'), payments: v('payments'), checkins: v('checkins'), blocked: v('blocked') };
 }
 
 export async function userNames(r: Reader, ids: string[]): Promise<Map<string, string>> {

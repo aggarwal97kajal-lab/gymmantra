@@ -1,4 +1,4 @@
-import { App, authenticate, bumpDaily, C, gymOf, MemberDoc, P, readRoster, rosterEntry, stateOf } from '../core';
+import { App, authenticate, branchOf, bumpDaily, C, gymOf, inBranch, MemberDoc, TenantDoc, P, readRoster, rosterEntry, stateOf } from '../core';
 import type { Tx } from '../store/store';
 import { todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -51,7 +51,9 @@ export async function recordMemberCheckIn(
   }
   const id = uuid();
   const at = nowIso();
-  const ev = { memberId: m.id, memberName: m.name, memberCode: m.memberCode, branchId: opts.branchId ?? m.branchId, day: today, at, result: decision.result, reason: decision.reason, method: opts.method, scannedById: opts.byId };
+  const tn = await t.get<TenantDoc>(P.tenant(tenantId));
+  const branchId = tn ? branchOf(tn, opts.branchId ?? m.branchId) : opts.branchId ?? m.branchId;
+  const ev = { memberId: m.id, memberName: m.name, memberCode: m.memberCode, branchId, day: today, at, result: decision.result, reason: decision.reason, method: opts.method, scannedById: opts.byId };
   t.set(P.attendanceEv(tenantId, id), ev);
   const allowed = decision.result !== 'BLOCKED';
   t.set(P.lastScan(tenantId, m.id), {
@@ -61,7 +63,7 @@ export async function recordMemberCheckIn(
     visits: visitsNow + (allowed ? 1 : 0),
     recent: [{ id, at, result: decision.result, reason: decision.reason }, ...log.recent].slice(0, 30),
   });
-  await bumpDaily(t, tenantId, allowed ? { checkins: 1 } : { blocked: 1 });
+  await bumpDaily(t, tenantId, allowed ? { checkins: 1 } : { blocked: 1 }, branchId);
   return { ...view, result: decision.result, reason: decision.reason, duplicate: false, eventId: id, visitsThisMonth: visitsNow + (allowed ? 1 : 0), at };
 }
 
@@ -73,7 +75,7 @@ async function checkIn(c: C, memberId: string, method: 'QR' | 'MANUAL', branchId
     const m = isUuid(memberId) ? await t.get<MemberDoc>(P.member(g.tenantId, memberId)) : null;
     // A QR from another gym (or another branch for front desk) is not accepted here.
     if (!m || (g.role === 'FRONT_DESK' && g.branchIds.length && m.branchId && !g.branchIds.includes(m.branchId))) throw notFound('This member is not part of your gym');
-    return recordMemberCheckIn(t, g.tenantId, m, { method, byId: u.id, branchId: branchIdIn ?? null });
+    return recordMemberCheckIn(t, g.tenantId, m, { method, byId: u.id, branchId: branchIdIn ?? g.branchId });
   });
 }
 
@@ -95,8 +97,9 @@ export function attendanceRoutes(app: App) {
   app.get('/api/v1/attendance/today', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    const rows = await c.var.deps.store.query<{ memberId: string; memberName: string; memberCode: string; at: string; result: string; reason: string | null; method: string }>(P.attendance(g.tenantId), [['day', todayIST()]]);
+    const rows = await c.var.deps.store.query<{ memberId: string; memberName: string; memberCode: string; at: string; result: string; reason: string | null; method: string; branchId?: string | null }>(P.attendance(g.tenantId), [['day', todayIST()]]);
     const events = rows
+      .filter((r) => inBranch(g, r.data.branchId))
       .map((r) => ({ id: r.id, scannedAt: r.data.at, result: r.data.result, reason: r.data.reason, method: r.data.method, memberId: r.data.memberId, member: { id: r.data.memberId, name: r.data.memberName, memberCode: r.data.memberCode } }))
       .sort((a, b) => (a.scannedAt < b.scannedAt ? 1 : -1));
     const twoHoursAgo = Date.now() - 2 * 3600_000;

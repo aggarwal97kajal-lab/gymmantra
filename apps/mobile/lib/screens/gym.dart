@@ -8,6 +8,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show PhoneField;
+import 'branch.dart' show showAlreadyMember;
 
 class JoinScreen extends ConsumerStatefulWidget {
   const JoinScreen({super.key});
@@ -39,7 +40,6 @@ class _JoinState extends ConsumerState<JoinScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final branches = (gym?['branches'] as List?)?.cast<Map>() ?? [];
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Join a gym'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
@@ -58,8 +58,7 @@ class _JoinState extends ConsumerState<JoinScreen> {
                   final g = await Api.instance.get('/me/gym-lookup?code=${Uri.encodeQueryComponent(code.text.trim())}');
                   setState(() {
                     gym = g as Map;
-                    final bs = (g['branches'] as List);
-                    branchId = bs.length == 1 ? bs.first['id'] as String : null;
+                    branchId = (g['branch'] as Map?)?['id'] as String?;
                   });
                 }),
             child: Text(context.t('Find gym')),
@@ -68,21 +67,55 @@ class _JoinState extends ConsumerState<JoinScreen> {
           Panel(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(gym!['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              if (gym!['multiBranch'] == true && gym!['branch'] is Map)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(children: [
+                    Icon(Icons.place_rounded, size: 16, color: context.c.primary),
+                    const SizedBox(width: 4),
+                    Expanded(child: Text(context.t('Branch: {b}', {'b': (gym!['branch'] as Map)['name']}), style: TextStyle(color: context.c.primary, fontWeight: FontWeight.w700))),
+                  ]),
+                ),
               if (gym!['address'] != null) Muted(gym!['address']),
+              if (gym!['multiBranch'] == true)
+                Padding(padding: const EdgeInsets.only(top: 6), child: Muted(context.t('Each branch has its own code. Check this is your branch.'), size: 11.5)),
             ]),
           ),
-          if (branches.length > 1) ...[
+          if (gym!['already'] is Map) ...[
             const SizedBox(height: 12),
-            Muted(context.t('Choose your branch')),
-            for (final b in branches)
-              RadioListTile<String>(
-                value: b['id'] as String,
-                groupValue: branchId,
-                onChanged: (v) => setState(() => branchId = v),
-                title: Text(b['name']),
-                activeColor: context.c.primary,
-                contentPadding: EdgeInsets.zero,
-              ),
+            Builder(builder: (context) {
+              final a = gym!['already'] as Map;
+              final same = a['sameBranch'] == true;
+              final allow = a['allowTransfer'] == true;
+              final to = (gym!['branch'] as Map?)?['name'] ?? '';
+              return Panel(
+                color: C.warn.withAlpha(30),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Icon(Icons.info_outline_rounded, color: C.warn),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        same
+                            ? context.t('You are already a member of this branch.')
+                            : allow
+                                ? context.t('You are a member of {from}. A member can be in one branch at a time — ask for a transfer to {to}.', {'from': a['branchName'] ?? '', 'to': to})
+                                : context.t('You are a member of {from}. A member can be in one branch at a time. Your gym owner has not enabled transfer of your membership. Ask at the front desk or the gym owner.', {'from': a['branchName'] ?? ''}),
+                        style: const TextStyle(fontWeight: FontWeight.w600, height: 1.35),
+                      ),
+                    ),
+                  ]),
+                  if (!same && allow) ...[
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: () => context.push('/transfer/${gym!['id']}?to=${(gym!['branch'] as Map?)?['id'] ?? ''}'),
+                      icon: const Icon(Icons.swap_horiz_rounded),
+                      label: Text(context.t('Request transfer to {b}', {'b': to})),
+                    ),
+                  ],
+                ]),
+              );
+            }),
           ],
           if (ref.watch(sessionProvider).user?['phone'] == null) ...[
             const SizedBox(height: 12),
@@ -90,7 +123,7 @@ class _JoinState extends ConsumerState<JoinScreen> {
           ],
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: busy || (branches.length > 1 && branchId == null)
+            onPressed: busy || gym!['already'] is Map
                 ? null
                 : () => run(() async {
                       final s = ref.read(sessionProvider);
@@ -99,7 +132,15 @@ class _JoinState extends ConsumerState<JoinScreen> {
                         final u = await Api.instance.patch('/me/contact', {'phone': phone.text.trim()});
                         s.patchUser({'phone': (u as Map)['phone']});
                       }
-                      await Api.instance.post('/me/join', {'gymCode': code.text.trim(), if (branchId != null) 'branchId': branchId});
+                      try {
+                        await Api.instance.post('/me/join', {'gymCode': code.text.trim()});
+                      } on ApiException catch (e) {
+                        if (e.data?['code'] == 'ALREADY_MEMBER' && e.data?['sameBranch'] != true && mounted) {
+                          await showAlreadyMember(context, e);
+                          return;
+                        }
+                        rethrow;
+                      }
                       ref.invalidate(gymsProvider);
                       if (mounted) {
                         toast(context, context.t('Request sent to {gym}', {'gym': gym!['name']}));

@@ -15,15 +15,16 @@ import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
+import 'branch.dart';
 
 // Owner tools that used to be on the website only: reports, membership plans and gym settings.
 
-final reportsProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => Api.instance.cachedGet('/reports?days=$days'));
+final reportsProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => branchGet(ref, '/reports?days=$days'));
 final ownerPlansProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/plans'));
 
 // ============================================================ reports
 
-final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => Api.instance.cachedGet('/reports/entries?days=$days'));
+final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => branchGet(ref, '/reports/entries?days=$days'));
 
 class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
@@ -663,6 +664,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
   final wa = TextEditingController();
   final prefix = TextEditingController();
   bool allowDue = false;
+  bool allowTransfer = false;
   bool filled = false;
   bool busy = false;
   String? error;
@@ -683,6 +685,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
         'whatsappNumber': wa.text.trim(),
         'memberCodePrefix': prefix.text.trim().toUpperCase(),
         'allowEntryWhenDue': allowDue,
+        'allowTransfer': allowTransfer,
       });
       ref.invalidate(gymProvider);
       await ref.read(sessionProvider).refreshUser();
@@ -717,10 +720,12 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
             wa.text = local(g['whatsappNumber']);
             prefix.text = (g['memberCodePrefix'] as String?) ?? '';
             allowDue = g['allowEntryWhenDue'] == true;
+            allowTransfer = g['allowTransfer'] == true;
           }
           final branches = ((g['branches'] as List?) ?? const []).cast<Map>();
           final limits = (g['limits'] as Map?) ?? {};
-          final code = g['gymCode'] as String;
+          final cur = branches.firstWhere((b) => b['id'] == g['currentBranchId'], orElse: () => branches.isEmpty ? const {} : branches.first);
+          final code = (cur['code'] as String?) ?? (g['gymCode'] as String);
           return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
             if (!owner) Padding(padding: const EdgeInsets.only(bottom: 12), child: Muted(context.t('Only the gym owner can change these settings.'))),
             SectionTitle(context.t('Gym profile')),
@@ -748,6 +753,16 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                     style: TextStyle(color: context.c.mut, fontSize: 12),
                   ),
                 ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: allowTransfer,
+                  onChanged: owner ? (x) => setState(() => allowTransfer = x) : null,
+                  title: Text(context.t('Members can ask to move to another branch'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Text(
+                    context.t('ON: members see “Request transfer” and you approve it in Requests. OFF: only you can move a member (open the member → Branch).'),
+                    style: TextStyle(color: context.c.mut, fontSize: 12),
+                  ),
+                ),
                 ErrorText(error),
                 const SizedBox(height: 10),
                 SizedBox(width: double.infinity, child: FilledButton(onPressed: busy || !owner ? null : save, child: Text(context.t(busy ? 'Saving…' : 'Save changes')))),
@@ -765,7 +780,10 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                   ListTile(
                     leading: const IconTile(Icons.place_rounded, size: 36),
                     title: Text(b['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700)),
-                    subtitle: Text([b['address'], b['hours']].where((x) => x != null && '$x'.isNotEmpty).join(' · ').ifEmpty('—')),
+                    subtitle: Text(
+                      ['${context.t('Code')}: ${b['code'] ?? '—'}', b['address'], b['hours']].where((x) => x != null && '$x'.isNotEmpty).join(' · '),
+                    ),
+                    onTap: () => showBranchQr(context, ref, b),
                     trailing: owner && branches.length > 1
                         ? IconButton(
                             tooltip: context.t('Delete'),
@@ -797,6 +815,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
               color: Colors.white,
               child: Column(children: [
                 Text(g['name'] as String, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF0F1110), fontWeight: FontWeight.w900, fontSize: 22)),
+                if (branches.length > 1) Text(cur['name'] as String? ?? '', style: const TextStyle(color: Color(0xFF555555), fontWeight: FontWeight.w700)),
                 const SizedBox(height: 2),
                 Text(context.t('Join us on the GymMantra app'), style: const TextStyle(color: Color(0xFF0F1110), fontWeight: FontWeight.w600)),
                 const SizedBox(height: 12),
@@ -904,7 +923,7 @@ class _BranchSheetState extends State<_BranchSheet> {
 
 // ============================================================ notices
 
-final noticeAudienceProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, f) => Api.instance.cachedGet('/notices/audience?filter=$f'));
+final noticeAudienceProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, f) => branchGet(ref, '/notices/audience?filter=$f'));
 
 /// Who will get the notice — the list appears by itself (e.g. memberships ending in 7 days).
 class _Audience extends ConsumerStatefulWidget {
@@ -957,7 +976,7 @@ class _AudienceState extends ConsumerState<_Audience> {
   }
 }
 
-final noticesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/notices'));
+final noticesProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/notices'));
 
 String _noticeAudience(BuildContext context, Map n) {
   final parts = <String>[];
@@ -1084,6 +1103,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
   final message = TextEditingController();
   bool members = true;
   bool trainers = false;
+  bool allBranches = false;
   String filter = 'ALL';
   int showDays = 2; // today + 2 more days
   DateTime? custom;
@@ -1126,6 +1146,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
         'forTrainers': trainers,
         'memberFilter': filter,
         'showTill': ymd(till),
+        if (allBranches) 'branchIds': 'ALL',
       });
       ref.invalidate(noticesProvider);
       if (mounted) {
@@ -1216,6 +1237,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
         const SizedBox(height: 10),
         Text(context.t('Send to'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
         const SizedBox(height: 8),
+        BranchTarget(all: allBranches, onChanged: (v) => setState(() => allBranches = v)),
         Row(children: [
           _who(Icons.groups_rounded, context.t('Members'), context.t('On their app dashboard'), members, () => setState(() => members = !members)),
           const SizedBox(width: 10),

@@ -1,4 +1,4 @@
-import { App, audit, authenticate, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, optBool, str } from '../lib/validate';
@@ -13,6 +13,7 @@ import { summaries } from './members';
  */
 export interface NoticeDoc {
   id: string;
+  branchIds?: string[] | null; // null = every branch
   title: string;
   message: string;
   forMembers: boolean;
@@ -50,12 +51,12 @@ export function audienceOf(list: ReturnType<typeof summaries>, filter: NoticeDoc
 const view = (n: NoticeDoc) => ({ id: n.id, title: n.title, message: n.message, showTill: n.showTill, createdAt: n.createdAt, from: n.createdByName });
 
 /** Notices of a gym for one person. `days` > 0 also returns ones that ended in the last N days (for the inbox). */
-export async function noticesFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', status?: string, days = 0, due = 0) {
+export async function noticesFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', status?: string, days = 0, due = 0, branchId?: string | null) {
   const today = todayIST();
   const since = addDays(today, -days);
   return (await r.query<NoticeDoc>(P.notices(tenantId), [['active', true]]))
     .map((x) => x.data)
-    .filter((n) => n.showTill >= since && matches(n, who, status, due))
+    .filter((n) => n.showTill >= since && matches(n, who, status, due) && (!n.branchIds?.length || !branchId || n.branchIds.includes(branchId)))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .map(view);
 }
@@ -71,10 +72,14 @@ export async function noticeNotes(r: Reader, u: UserDoc, readUpTo: string | null
   ]);
   const lists = await Promise.all([
     ...memberGyms.map(([t, m], i) => {
-      const st = rosters[i].members[m] ? stateOf(rosters[i].members[m]) : null;
-      return noticesFor(r, t, 'MEMBER', st?.status ?? 'NO_PLAN', 30, st?.due ?? 0);
+      const e = rosters[i].members[m];
+      const st = e ? stateOf(e) : null;
+      return noticesFor(r, t, 'MEMBER', st?.status ?? 'NO_PLAN', 30, st?.due ?? 0, tenants[i] ? branchOf(tenants[i]!, e?.branchId) : null);
     }),
-    ...trainerGyms.map((t) => noticesFor(r, t, 'TRAINER', undefined, 30)),
+    ...trainerGyms.map((t, k) => {
+      const tn = tenants[memberGyms.length + k];
+      return noticesFor(r, t, 'TRAINER', undefined, 30, 0, tn ? branchOf(tn, u.staffOf?.[t]?.branchIds?.[0]) : null);
+    }),
   ]);
   const ids = [...memberGyms.map(([t]) => t), ...trainerGyms];
   const seen = new Set<string>();
@@ -102,7 +107,7 @@ export function noticeRoutes(app: App) {
   app.get('/api/v1/notices', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    const rows = (await c.var.deps.store.query<NoticeDoc>(P.notices(g.tenantId), [['active', true]])).map((x) => x.data);
+    const rows = (await c.var.deps.store.query<NoticeDoc>(P.notices(g.tenantId), [['active', true]])).map((x) => x.data).filter((n) => !n.branchIds?.length || n.branchIds.includes(g.branchId));
     const today = todayIST();
     return c.json(rows.map((n) => ({ ...n, live: n.showTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 50));
   });
@@ -137,7 +142,14 @@ export function noticeRoutes(app: App) {
     const showTill = typeof b.showTill === 'string' && b.showTill ? b.showTill : addDays(today, 2);
     if (!isYmd(showTill) || showTill < today) throw bad('Choose a valid last date');
     if (showTill > addDays(today, 90)) throw bad('A notice can show for at most 90 days');
-    const n: NoticeDoc = { id: uuid(), title, message, forMembers, forTrainers, memberFilter, showTill, active: true, createdById: u.id, createdByName: u.name, createdAt: nowIso() };
+    let branchIds: string[] | null = [g.branchId];
+    if (b.branchIds === 'ALL') branchIds = null;
+    else if (Array.isArray(b.branchIds)) {
+      const ids = (b.branchIds as unknown[]).filter((x): x is string => typeof x === 'string' && g.tenant.branches.some((br) => br.id === x));
+      if (!ids.length) throw bad('Choose at least one branch');
+      branchIds = ids.length === g.tenant.branches.length ? null : ids;
+    }
+    const n: NoticeDoc = { id: uuid(), branchIds, title, message, forMembers, forTrainers, memberFilter, showTill, active: true, createdById: u.id, createdByName: u.name, createdAt: nowIso() };
     await c.var.deps.store.tx(async (t) => {
       t.set(P.notice(g.tenantId, n.id), n);
       audit(t, g.tenantId, u.id, 'notice.create', 'notice', n.id, null, n);

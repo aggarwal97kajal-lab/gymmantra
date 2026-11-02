@@ -10,9 +10,11 @@ import 'theme.dart' show adminApp;
 const String defaultApiBase = String.fromEnvironment('API_BASE', defaultValue: 'https://gymmantra.aggarwal97kajal.workers.dev');
 
 class ApiException implements Exception {
-  ApiException(this.status, this.message);
+  ApiException(this.status, this.message, [this.data]);
   final int status;
   final String message;
+  /// The full answer from the server (extra fields like "code").
+  final Map? data;
   @override
   String toString() => message;
 }
@@ -24,6 +26,11 @@ class Api {
   final storage = const FlutterSecureStorage();
   String base = defaultApiBase;
   String? token;
+
+  /// Branch the gym owner / staff is looking at (sent as x-branch-id). Lists, dashboard,
+  /// offers, notices, QR codes and notifications follow it.
+  String? branchId;
+  String _k(String path) => branchId == null ? path : '$path#$branchId';
 
   late final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 20),
@@ -37,6 +44,7 @@ class Api {
     // Old test builds pointed at a server that no longer exists.
     base = (saved == null || saved.contains('onrender.com')) ? defaultApiBase : saved;
     token = await storage.read(key: 'token');
+    branchId = Prefs.getString('u:branch');
   }
 
   Future<void> setBase(String url) async {
@@ -73,7 +81,7 @@ class Api {
         onSendProgress: onSendProgress,
         options: Options(
           method: method,
-          headers: {...authHeaders, if (raw != null) Headers.contentLengthHeader: raw.length},
+          headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!, if (raw != null) Headers.contentLengthHeader: raw.length},
           contentType: body == null ? null : 'application/json',
         ),
       );
@@ -91,7 +99,7 @@ class Api {
       await setToken(null);
       onLoggedOut?.call();
     }
-    throw ApiException(code, msg);
+    throw ApiException(code, msg, d is Map ? d : null);
   }
 
   void Function()? onLoggedOut;
@@ -107,7 +115,7 @@ class Api {
   /// Last answer for each path, kept in memory and on the phone.
   final Map<String, dynamic> _mem = {};
 
-  dynamic cached(String path) => _mem[path] ?? Prefs.getJson('c:$path');
+  dynamic cached(String path) => _mem[_k(path)] ?? Prefs.getJson('c:${_k(path)}');
 
   void forget() => _mem.clear();
 
@@ -116,8 +124,8 @@ class Api {
     await Future.wait(paths.map((p) async {
       try {
         final fresh = await get(p);
-        _mem[p] = fresh;
-        Prefs.setJson('c:$p', fresh);
+        _mem[_k(p)] = fresh;
+        Prefs.setJson('c:${_k(p)}', fresh);
       } catch (_) {}
     }));
   }
@@ -138,9 +146,10 @@ class Api {
     final old = cached(path);
     if (old != null) yield old;
     try {
+      final key = _k(path);
       final fresh = await get(path);
-      _mem[path] = fresh;
-      Prefs.setJson('c:$path', fresh);
+      _mem[key] = fresh;
+      Prefs.setJson('c:$key', fresh);
       yield fresh;
     } catch (e) {
       if (old == null) rethrow;

@@ -22,6 +22,7 @@ import 'screens/qr.dart';
 import 'screens/role.dart';
 import 'screens/trainer.dart';
 import 'screens/workouts.dart';
+import 'screens/branch.dart';
 import 'photo.dart';
 import 'session.dart';
 import 'theme.dart';
@@ -136,6 +137,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
+        GoRoute(path: '/transfer/:tid', builder: (_, s) => MemberTransferScreen(tenantId: s.pathParameters['tid']!, toBranchId: s.uri.queryParameters['to']?.isEmpty == true ? null : s.uri.queryParameters['to'])),
         GoRoute(path: '/o/gym-qr', builder: (_, s) => GymQrScreen(share: s.uri.queryParameters['share'] == '1')),
         GoRoute(path: '/o/notices', builder: (_, __) => const NoticesScreen()),
         GoRoute(path: '/o/notices/new', builder: (_, __) => const NewNoticeScreen()),

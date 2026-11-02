@@ -1,4 +1,4 @@
-import { accountRole, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { accountRole, branchOf, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -46,8 +46,12 @@ export function meRoutes(app: App) {
     const month = todayIST().slice(0, 7);
     const states = entries.map(([tid, mid], i) => (rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).status : 'NO_PLAN'));
     const [offers, notices] = await Promise.all([
-      Promise.all(entries.map(([tid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i]) : []))),
-      Promise.all(entries.map(([tid, mid], i) => (tenants[i] ? noticesFor(store, tid, 'MEMBER', states[i], 0, rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).due : 0) : []))),
+      Promise.all(entries.map(([tid, mid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i], branchOf(tenants[i]!, rosters[i].members[mid]?.branchId)) : []))),
+      Promise.all(
+        entries.map(([tid, mid], i) =>
+          tenants[i] ? noticesFor(store, tid, 'MEMBER', states[i], 0, rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).due : 0, branchOf(tenants[i]!, rosters[i].members[mid]?.branchId)) : [],
+        ),
+      ),
     ]);
     const memberships = entries
       .map(([tid, mid], i) => {
@@ -59,6 +63,11 @@ export function meRoutes(app: App) {
           memberId: mid,
           memberCode: e.memberCode,
           gym: { id: tid, name: tn.name, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: tn.address },
+          ...(() => {
+            const bid = branchOf(tn, e.branchId);
+            const br = tn.branches.find((x) => x.id === bid);
+            return { branch: br ? { id: br.id, name: br.name, address: br.address } : null, multiBranch: tn.branches.length > 1, allowTransfer: tn.allowTransfer ?? false };
+          })(),
           status: st.status,
           planName: st.current?.planName ?? st.upcoming?.planName ?? null,
           daysLeft: st.daysLeft,
@@ -83,13 +92,32 @@ export function meRoutes(app: App) {
   });
 
   app.get('/api/v1/me/gym-lookup', async (c) => {
-    await authenticate(c);
+    const u = await authenticate(c);
     const { store } = c.var.deps;
     const code = (c.req.query('code') ?? '').trim().toUpperCase();
-    const ref = code ? await store.get<{ tenantId: string }>(P.gymCode(code)) : null;
+    const ref = code ? await store.get<{ tenantId: string; branchId?: string }>(P.gymCode(code)) : null;
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
     if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
-    return c.json({ id: ref.tenantId, name: t.name, logoUrl: t.logoUrl, address: t.address, branches: t.branches.map((b) => ({ id: b.id, name: b.name, address: b.address })) });
+    const bid = branchOf(t, ref.branchId);
+    const br = t.branches.find((b) => b.id === bid) ?? null;
+    // Already in another branch of this gym? The app offers a transfer instead of a join.
+    const mid = u.memberships?.[ref.tenantId];
+    let already: Record<string, unknown> | null = null;
+    if (mid) {
+      const m = await store.get<MemberDoc>(P.member(ref.tenantId, mid));
+      const cur = m ? branchOf(t, m.branchId) : null;
+      already = { memberId: mid, branchId: cur, branchName: t.branches.find((b) => b.id === cur)?.name ?? null, sameBranch: cur === bid, allowTransfer: t.allowTransfer ?? false };
+    }
+    return c.json({
+      id: ref.tenantId,
+      name: t.name,
+      logoUrl: t.logoUrl,
+      address: br?.address ?? t.address,
+      branch: br ? { id: br.id, name: br.name, address: br.address } : null,
+      multiBranch: t.branches.length > 1,
+      already,
+      branches: t.branches.map((b) => ({ id: b.id, name: b.name, address: b.address })),
+    });
   });
 
   app.post('/api/v1/me/join', async (c) => {
@@ -97,17 +125,33 @@ export function meRoutes(app: App) {
     const { store } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const code = str(b, 'gymCode', { max: 20, label: 'the gym code' }).toUpperCase();
-    const ref = await store.get<{ tenantId: string }>(P.gymCode(code));
+    const ref = await store.get<{ tenantId: string; branchId?: string }>(P.gymCode(code));
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
     if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
     const tid = ref.tenantId;
     const as = oneOf(b, 'as', ['MEMBER', 'TRAINER'] as const, true) ?? 'MEMBER';
-    const branchId = optStr(b, 'branchId') ?? null;
-    if (branchId && !t.branches.some((x) => x.id === branchId)) throw bad('Unknown branch');
+    // The code decides the branch (each branch has its own code); old codes mean the first branch.
+    const asked = optStr(b, 'branchId') ?? null;
+    if (asked && !t.branches.some((x) => x.id === asked)) throw bad('Unknown branch');
+    const branchId = ref.branchId && t.branches.some((x) => x.id === ref.branchId) ? ref.branchId : asked ?? branchOf(t, null);
     if (as === 'TRAINER') {
       if (isDeskStaff(u)) throw bad('A gym owner cannot join a gym as a trainer');
       if (u.staffOf?.[tid]?.active) throw conflict('You are already a trainer at this gym');
-    } else if (u.memberships?.[tid]) throw conflict('You are already a member of this gym');
+    } else if (u.memberships?.[tid]) {
+      // One branch at a time inside the same gym (other gyms are fine).
+      const m = await store.get<MemberDoc>(P.member(tid, u.memberships[tid]));
+      const cur = m ? branchOf(t, m.branchId) : null;
+      const curName = t.branches.find((x) => x.id === cur)?.name ?? t.name;
+      const toName = t.branches.find((x) => x.id === branchId)?.name ?? t.name;
+      if (cur === branchId) throw new HttpError(409, `You are already a member of ${t.name} (${curName})`, { code: 'ALREADY_MEMBER', sameBranch: true });
+      throw new HttpError(
+        409,
+        t.allowTransfer
+          ? `You are a member of ${t.name} (${curName}). A member can be in one branch at a time. Ask for a transfer to ${toName}`
+          : `You are a member of ${t.name} (${curName}). A member can be in one branch at a time. Your gym owner has not enabled transfer of your membership. Ask at the front desk or the gym owner`,
+        { code: 'ALREADY_MEMBER', sameBranch: false, tenantId: tid, memberId: m?.id ?? null, fromBranchId: cur, toBranchId: branchId, toBranch: toName, allowTransfer: t.allowTransfer ?? false },
+      );
+    }
     if (!u.phone) throw bad('Add your mobile number in Profile first, so the gym can find you');
     const existing = (await store.query<any>(P.joins(tid), [['userId', u.id], ['status', 'PENDING']])).find((r) => (r.data.kind ?? 'MEMBER') === as);
     if (existing) return c.json({ id: existing.id, ...existing.data }, 201);
@@ -397,7 +441,10 @@ export function meRoutes(app: App) {
     const { store } = c.var.deps;
     const doc = await store.get<{ items: NoteItem[]; noticesReadAt?: string }>(P.notes(u.id));
     const notices = await noticeNotes(store, u, doc?.noticesReadAt ?? null);
-    return c.json([...(doc?.items ?? []), ...notices].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
+    // Gym owners and staff see the notes of the branch they picked in the app (x-branch-id).
+    const branch = c.req.header('x-branch-id');
+    const items = (doc?.items ?? []).filter((n) => !branch || !n.branchId || !u.staffOf?.[n.tenantId ?? '']?.active || n.branchId === branch);
+    return c.json([...items, ...notices].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
   });
 
   app.post('/api/v1/me/notifications/read', async (c) => {

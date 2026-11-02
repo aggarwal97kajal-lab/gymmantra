@@ -14,6 +14,7 @@ import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
 import 'pt.dart';
+import 'branch.dart';
 import 'billing.dart';
 import 'auth.dart' show PhoneField;
 import 'dues.dart';
@@ -30,7 +31,10 @@ class OwnerShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
     final dash = ref.watch(dashboardProvider).valueOrNull;
-    final pending = ((dash?['joinPending'] as int?) ?? 0) + ((dash?['ptPending'] as int?) ?? 0) + ((ref.watch(leadsProvider).valueOrNull as List?)?.length ?? 0);
+    final pending = ((dash?['joinPending'] as int?) ?? 0) +
+        ((dash?['ptPending'] as int?) ?? 0) +
+        ((ref.watch(leadsProvider).valueOrNull as List?)?.length ?? 0) +
+        ((((ref.watch(transfersProvider).valueOrNull as Map?)?['items']) as List?)?.length ?? 0);
     return ShellBack(
       location: location,
       home: '/o/home',
@@ -89,9 +93,8 @@ class OwnerHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(sessionProvider);
-    final gym = s.myGym ?? {};
+    final gym = withBranch({...?s.myGym, ...?ref.watch(gymProvider).valueOrNull as Map?, 'role': s.myGym?['role']});
     final d = ref.watch(dashboardProvider);
-    final u = s.user ?? {};
     return Scaffold(
       body: SafeArea(
         bottom: false,
@@ -107,13 +110,14 @@ class OwnerHomeScreen extends ConsumerWidget {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text((gym['name'] as String?) ?? 'GymMantra', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  Text((s.myGym?['name'] as String?) ?? 'GymMantra', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
                   Muted('${context.t(gym['role'] == 'FRONT_DESK' ? 'Front desk' : 'Owner')} · ${gym['gymCode'] ?? ''}', size: 12.5),
                 ]),
               ),
               _RoundIcon(icon: Icons.notifications_none_rounded, onTap: () => context.push('/notifications')),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
+            const BranchChip(),
             const _PlanStrip(),
             const AdsStrip(role: 'OWNER'),
             AsyncBody(
@@ -473,13 +477,24 @@ class OwnerMemberScreen extends ConsumerWidget {
               const SizedBox(height: 8),
               Center(child: StatusChip(status)),
               const SizedBox(height: 10),
-              Center(
-                child: TextButton.icon(
-                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MemberProfileScreen(data: d as Map))),
-                  icon: const Icon(Icons.badge_outlined, size: 18),
-                  label: Text(context.t('Full profile')),
-                ),
-              ),
+              Builder(builder: (context) {
+                final bs = branchesOf(ref.watch(gymProvider).valueOrNull as Map?);
+                final bid = (m['branchId'] as String?) ?? (bs.isEmpty ? null : bs.first['id'] as String?);
+                final bname = bs.firstWhere((b) => b['id'] == bid, orElse: () => const {})['name'];
+                return Wrap(alignment: WrapAlignment.center, spacing: 4, children: [
+                  TextButton.icon(
+                    onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => MemberProfileScreen(data: d as Map))),
+                    icon: const Icon(Icons.badge_outlined, size: 18),
+                    label: Text(context.t('Full profile')),
+                  ),
+                  if (bs.length > 1)
+                    TextButton.icon(
+                      onPressed: ref.read(sessionProvider).myGym?['role'] == 'OWNER' ? () => moveMemberSheet(context, ref, id, bid) : null,
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                      label: Text('${bname ?? context.t('Branch')} · ${context.t('Move')}'),
+                    ),
+                ]);
+              }),
               const SizedBox(height: 16),
               Panel(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -701,6 +716,7 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
     final dash = ref.watch(dashboardProvider).valueOrNull;
     final joinN = (dash?['joinPending'] as int?) ?? 0;
     final ptN = (dash?['ptPending'] as int?) ?? 0;
+    final multiBranch = branchesOf(ref.watch(gymProvider).valueOrNull as Map?).length > 1;
     return Scaffold(
       appBar: AppBar(
         title: Text(context.t('Requests')),
@@ -714,13 +730,20 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
                 (0, '${context.t('Join')} ($joinN)', null),
                 (1, 'PT ($ptN)', null),
                 (2, '${context.t('Plans')} (${((ref.watch(leadsProvider).valueOrNull as List?) ?? const []).length})', null),
+                if (multiBranch) (3, '${context.t('Move')} (${(((ref.watch(transfersProvider).valueOrNull as Map?)?['items'] as List?) ?? const []).length})', null),
               ],
               onChanged: (v) => setState(() => tab = v),
             ),
           ),
         ),
       ),
-      body: tab == 2
+      body: tab == 3
+          ? RefreshIndicator(
+              color: context.c.primary,
+              onRefresh: () async => ref.invalidate(transfersProvider),
+              child: const TransferRequests(),
+            )
+          : tab == 2
           ? RefreshIndicator(
               color: context.c.primary,
               onRefresh: () async => ref.invalidate(leadsProvider),
@@ -982,6 +1005,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
   bool forMembers = true;
   bool forTrainers = false;
   String filter = 'ALL';
+  bool allBranches = false;
   bool busy = false;
   String? error;
   Uint8List? bannerBytes;
@@ -1041,7 +1065,9 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
             pick(context.t('Expired members'), filter == 'EXPIRED', () => setState(() => filter = 'EXPIRED')),
           ]),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
+        BranchTarget(all: allBranches, onChanged: (v) => setState(() => allBranches = v)),
+        const SizedBox(height: 8),
         Text(context.t('Banner picture (optional)'), style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 4),
         Muted(context.t('A wide picture (2:1) looks best. You see the live preview below.'), size: 12),
@@ -1086,6 +1112,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
                       'forMembers': forMembers,
                       'forTrainers': forTrainers,
                       'memberFilter': filter,
+                      if (allBranches) 'branchIds': 'ALL',
                     });
                     if (bannerBytes != null) {
                       await Api.instance.post('/offers/${o['id']}/image', {'mime': 'image/jpeg', 'base64': base64Encode(bannerBytes!)});

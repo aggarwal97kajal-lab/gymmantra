@@ -25,7 +25,7 @@ import 'home.dart' show openUrl, waLink;
 //  * Join QR (orange, with the gym code) is shared on WhatsApp; scanning it only sends a join request.
 //  * Check-in QR (green, no gym code) hangs in the gym; members and trainers scan it to check in.
 
-final gymQrProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/gym/checkin-qr'));
+final gymQrProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/checkin-qr'));
 
 // ============================================================ posters
 
@@ -168,7 +168,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
   bool busy = false;
   bool autoShared = false;
 
-  Map get gym => {...?ref.read(gymProvider).valueOrNull as Map?, ...?ref.read(sessionProvider).myGym};
+  Map get gym => withBranch({...?ref.read(sessionProvider).myGym, ...?ref.read(gymProvider).valueOrNull as Map?});
 
   Future<void> shareJoin() async {
     setState(() => busy = true);
@@ -263,7 +263,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
   @override
   Widget build(BuildContext context) {
     final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
-    final g = {...?ref.watch(gymProvider).valueOrNull as Map?, ...?ref.watch(sessionProvider).myGym};
+    final g = withBranch({...?ref.watch(sessionProvider).myGym, ...?ref.watch(gymProvider).valueOrNull as Map?});
     final qr = ref.watch(gymQrProvider);
     final name = (g['name'] as String?) ?? '';
     final code = (g['gymCode'] as String?) ?? '';
@@ -297,7 +297,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
           ],
         ]);
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Gym QR'))),
+      appBar: AppBar(title: Text(g['branchName'] == null ? context.t('Gym QR') : '${context.t('Gym QR')} · ${g['branchName']}')),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
         Seg<int>(
           value: tab,
@@ -675,7 +675,7 @@ class _ResultView extends StatelessWidget {
           style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 4),
-        Muted('${gym['name'] ?? ''}${time.isEmpty ? '' : ' · $time'}', align: TextAlign.center),
+        Muted('${gym['name'] ?? ''}${gym['branchName'] == null ? '' : ' – ${gym['branchName']}'}${time.isEmpty ? '' : ' · $time'}', align: TextAlign.center),
         if (blocked && r['reason'] != null) ...[
           const SizedBox(height: 6),
           Text(context.t(r['reason'] as String), textAlign: TextAlign.center, style: const TextStyle(color: C.red, fontWeight: FontWeight.w700)),

@@ -1,4 +1,4 @@
-import { App, audit, authenticate, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, inBranch, MemberDoc, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
 import { diffDays, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { validSubs } from '../lib/status';
@@ -40,6 +40,7 @@ export function dueList(g: Parameters<typeof summaries>[0], roster: Awaited<Retu
 
 export interface LeadDoc {
   id: string;
+  branchId?: string | null;
   userId: string;
   memberId: string | null;
   name: string;
@@ -99,14 +100,17 @@ export function dueRoutes(app: App) {
     if (!plan || !plan.active) throw notFound('Plan not found');
     const open = (await store.query<LeadDoc>(P.leads(tid), [['userId', u.id], ['status', 'OPEN']])).map((r) => r.data);
     if (open.some((l) => l.planId === planId)) throw conflict('You already told the gym about this plan');
-    const lead: LeadDoc = { id: uuid(), userId: u.id, memberId: u.memberships?.[tid] ?? null, name: u.name, phone: u.phone, photoV: u.photoV, planId, planName: plan.name, status: 'OPEN', createdAt: nowIso() };
+    const mid = u.memberships?.[tid];
+    const [mem, tn] = await Promise.all([mid ? store.get<MemberDoc>(P.member(tid, mid)) : null, store.get<TenantDoc>(P.tenant(tid))]);
+    const branchId = tn ? branchOf(tn, mem?.branchId) : null;
+    const lead: LeadDoc = { id: uuid(), branchId, userId: u.id, memberId: u.memberships?.[tid] ?? null, name: u.name, phone: u.phone, photoV: u.photoV, planId, planName: plan.name, status: 'OPEN', createdAt: nowIso() };
     await store.tx(async (t) => {
       t.set(P.lead(tid, lead.id), lead);
       const owners = await ownerIds(t, tid);
       const docs = await t.getMany<{ items: NoteItem[] }>(owners.map(P.notes));
       owners.forEach((oid, i) => {
         const doc = docs[i] ?? { items: [] };
-        t.set(P.notes(oid), { ...doc, items: [{ id: uuid(), tenantId: tid, title: 'Interested in a plan', body: `${u.name} is interested in ${plan.name}. Open Requests → Plans.`, createdAt: lead.createdAt, readAt: null }, ...(doc.items ?? [])].slice(0, 50) });
+        t.set(P.notes(oid), { ...doc, items: [{ id: uuid(), tenantId: tid, branchId, title: 'Interested in a plan', body: `${u.name} is interested in ${plan.name}. Open Requests → Plans.`, createdAt: lead.createdAt, readAt: null }, ...(doc.items ?? [])].slice(0, 50) });
       });
     });
     return c.json(lead, 201);
@@ -115,7 +119,7 @@ export function dueRoutes(app: App) {
   app.get('/api/v1/leads', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    const rows = (await c.var.deps.store.query<LeadDoc>(P.leads(g.tenantId), [['status', 'OPEN']])).map((r) => r.data);
+    const rows = (await c.var.deps.store.query<LeadDoc>(P.leads(g.tenantId), [['status', 'OPEN']])).map((r) => r.data).filter((l) => inBranch(g, l.branchId));
     return c.json(
       rows
         .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))

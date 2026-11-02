@@ -6,7 +6,7 @@ Read this first, then `docs/MVP_SPEC.md` (features and business rules). The owne
 
 | Part | Folder | Stack | Status |
 | --- | --- | --- | --- |
-| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 46 tests |
+| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 57 tests |
 | Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the Worker | Done |
 | App (members, trainers, gym owners) + GM Admin app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v3), both APKs built by CI |
 
@@ -39,6 +39,7 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 - **Notices:** owner or front desk sends a notice (`tenants/{t}/notices`) to members (all / active / expired) and/or trainers, with a last day. Not copied per person: `/me/gyms`, `/trainer/home` and `/me/notifications` read the gym's live notices (`routes/notices.ts`); read state is `notifications/{uid}.noticesReadAt`.
 - **Support tickets:** every ticket goes to GymMantra support (super admin only), with a unique number (`GM-1001…`, counter `settings/ticketSeq`). The person cannot write again on a ticket until support replies (`waiting`). FAQ is per role; Terms & Privacy are in the app (`screens/legal.dart`) and on the website (`/terms`, `/privacy`); signup needs the "I agree" tick.
 - **Check-in QR:** separate from the join QR; members/trainers scan it (`POST /me/checkin`). Gym location radius 20 m (+ GPS accuracy up to 30 m). Owner can delete offers (with banner pictures), unused plans, empty branches; super admin can delete ads.
+- **Branches:** each branch has its own join code (`gymCodes/{code}` → `{tenantId, branchId}`; the old gym code is the first branch's), its own check-in QR and location (`CheckinDoc.branches`), and its own numbers. The owner app sends `x-branch-id`; `gymOf()` sets `g.branchId` and lists, dashboard (`dailyFor`), reports, attendance, offers/notices (`branchIds`, default the current branch, `"ALL"` for every branch), leads and owner notifications follow it. No "all branches" view. A member is in one branch per gym (other gyms are fine): joining another branch of the same gym gives 409 `ALREADY_MEMBER`; the owner moves members (`PATCH /members/:id {branchId}`) or approves member requests (`/transfers`, only when `tenants.allowTransfer` is on).
 - **Speed:** `FirestoreStore` keeps users, gyms, rosters and platform settings in memory for 8 s per Worker instance and reuses documents read inside a transaction; batch reads with `t.getMany` at the start of transactions.
 - **Forgot password:** `POST /auth/forgot` sends the Firebase reset email (not for Google-only accounts).
 - **Pricing:** first 3 months free; Starter ₹399/₹3,990, Growth ₹799/₹7,990, Pro ₹1,399/₹13,990. Seed data only; the super admin edits plans in the panel.

@@ -1,4 +1,4 @@
-import { App, audit, authenticate, Branch, gymOf, isTrainer, P, Role, Roster, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Branch, branchCode, gymOf, isTrainer, P, Role, Roster, TenantDoc, UserDoc } from '../core';
 import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
@@ -128,7 +128,8 @@ export function gymRoutes(app: App) {
   app.get('/api/v1/gym', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    return c.json({ id: g.tenantId, ...g.tenant, myRole: g.role, myBranchIds: g.branchIds, limits: await gymLimits(c.var.deps.store, g.tenant) });
+    const branches = g.tenant.branches.map((b) => ({ ...b, code: branchCode(g.tenant, b) }));
+    return c.json({ id: g.tenantId, ...g.tenant, branches, allowTransfer: g.tenant.allowTransfer ?? false, myRole: g.role, myBranchIds: g.branchIds, currentBranchId: g.branchId, limits: await gymLimits(c.var.deps.store, g.tenant) });
   });
 
   app.patch('/api/v1/gym', async (c) => {
@@ -147,6 +148,8 @@ export function gymRoutes(app: App) {
     if (wa !== undefined) patch.whatsappNumber = wa;
     const allow = optBool(b, 'allowEntryWhenDue');
     if (allow !== undefined) patch.allowEntryWhenDue = allow;
+    const transfer = optBool(b, 'allowTransfer');
+    if (transfer !== undefined) patch.allowTransfer = transfer;
     if (b.memberCodePrefix !== undefined) {
       const p = str(b, 'memberCodePrefix', { max: 5 });
       if (!/^[A-Z]{1,5}$/.test(p)) throw bad('Member code prefix must be 1-5 capital letters');
@@ -166,15 +169,19 @@ export function gymRoutes(app: App) {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     const b = body(await c.req.json().catch(() => null));
-    const branch: Branch = { id: uuid(), name: str(b, 'name', { min: 2, max: 60, label: 'the branch name' }), address: optStr(b, 'address', { max: 300 }) ?? null, hours: optStr(b, 'hours', { max: 120 }) ?? null, createdAt: nowIso() };
+    const name = str(b, 'name', { min: 2, max: 60, label: 'the branch name' });
+    // Every branch has its own join code (the first branch keeps the gym's old code).
+    const code = await uniqueGymCode(c.var.deps.store, `${g.tenant.name} ${name}`);
+    const branch: Branch = { id: uuid(), name, address: optStr(b, 'address', { max: 300 }) ?? null, hours: optStr(b, 'hours', { max: 120 }) ?? null, code, createdAt: nowIso() };
     const limits = await gymLimits(c.var.deps.store, g.tenant);
     await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
       if (cur.branches.length >= limits.branchLimit) throw forbidden(`Your ${limits.planName} plan allows ${limits.branchLimit} branch${limits.branchLimit === 1 ? '' : 'es'}`);
+      t.create(P.gymCode(code), { tenantId: g.tenantId, branchId: branch.id });
       t.set(P.tenant(g.tenantId), { ...cur, branches: [...cur.branches, branch] });
       audit(t, g.tenantId, u.id, 'branch.create', 'branch', branch.id, null, branch);
     });
-    return c.json(branch, 201);
+    return c.json({ ...branch, code }, 201);
   });
 
   /** Delete a branch that has no members. */
@@ -189,6 +196,7 @@ export function gymRoutes(app: App) {
       if (cur.branches.length <= 1) throw bad('A gym needs at least one branch');
       if (Object.values(roster?.members ?? {}).some((e) => e.branchId === id && !e.archived)) throw bad('Move the members of this branch first, then delete it');
       t.set(P.tenant(g.tenantId), { ...cur, branches: cur.branches.filter((b) => b.id !== id) });
+      if (br.code && br.code !== cur.gymCode) t.delete(P.gymCode(br.code));
       audit(t, g.tenantId, u.id, 'branch.delete', 'branch', id, br, null);
     });
     return c.json({ ok: true });

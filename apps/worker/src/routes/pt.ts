@@ -1,4 +1,4 @@
-import { App, audit, authenticate, C, gymOf, MemberDoc, notify, P, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, C, gymOf, MemberDoc, notify, P, TenantDoc, UserDoc } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, int, oneOf, optInt, optStr, str } from '../lib/validate';
@@ -130,11 +130,14 @@ export function ptRoutes(app: App) {
     const tid = c.req.param('tenantId');
     const m = await myMemberAt(c, tid);
     const { store } = c.var.deps;
-    const [rows, mine] = await Promise.all([
+    const [rows, mine, tenant] = await Promise.all([
       store.query<TrainerDoc>(P.trainers(tid), [['active', true]]),
       store.query<PtDoc>(P.pts(tid), [['memberId', m.id]]),
+      store.get<TenantDoc>(P.tenant(tid)),
     ]);
-    const visible = rows.map((r) => r.data).filter((t) => t.visible);
+    // Trainers of the member's own branch.
+    const myBranch = tenant ? branchOf(tenant, m.branchId) : null;
+    const visible = rows.map((r) => r.data).filter((t) => t.visible && (!tenant || branchOf(tenant, t.branchId) === myBranch));
     const users = await store.getMany<UserDoc>(visible.map((t) => P.user(t.userId)));
     const myPts = await withPhotos(store, mine.map((r) => r.data).filter((p) => p.status === 'PENDING' || p.status === 'ACTIVE'));
     return c.json({
@@ -206,7 +209,7 @@ export function ptRoutes(app: App) {
       t.set(P.pt(tid, p.id), p);
       const msg = `${m.name} wants PT with ${tr.name}: ${pkg.sessions} sessions for ₹${pkg.price}.`;
       await notify(t, trainerId, tid, 'New PT request', `${msg} The owner will approve it.`);
-      for (const oid of await ownerIds(t, tid)) await notify(t, oid, tid, 'PT request to approve', msg);
+      for (const oid of await ownerIds(t, tid)) await notify(t, oid, tid, 'PT request to approve', msg, tenant ? branchOf(tenant, m.branchId) : null);
       audit(t, tid, u.id, 'pt.request', 'pt', p.id, null, p);
       return { ...p, gymName: tenant?.name };
     });

@@ -816,3 +816,66 @@ describe('profile details', () => {
     expect(other.status).toBe(201);
   });
 });
+
+describe('branches', () => {
+  it('each branch has its own code and check-in QR; one branch per gym; transfers', async () => {
+    const A = await h.ownerWithGym('Branch Gym');
+    const plan = (await h.api.post('/plans', { name: 'Monthly', months: 1, price: 1000 }, A.token)).body;
+    const br = await h.api.post('/gym/branches', { name: 'Dwarka' }, A.token);
+    expect(br.status).toBe(201);
+    expect(br.body.code).toBeTruthy();
+    expect(br.body.code).not.toBe(A.gym.gymCode);
+    const B = { 'x-branch-id': br.body.id };
+    const gym = await h.api.get('/gym', A.token);
+    expect(gym.body.branches[0].code).toBe(A.gym.gymCode);
+    // a member joins branch 2 with its code
+    const mem = await h.signup('Branch Member');
+    const look = await h.api.get(`/me/gym-lookup?code=${br.body.code}`, mem.token);
+    expect(look.body.branch.name).toBe('Dwarka');
+    expect((await h.api.post('/me/join', { gymCode: br.body.code }, mem.token)).status).toBe(201);
+    // the request shows in branch 2, not branch 1
+    expect((await h.api.get('/join-requests', A.token)).body).toHaveLength(0);
+    const reqs = await h.api.get('/join-requests', A.token, B);
+    expect(reqs.body).toHaveLength(1);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, A.token, B);
+    expect((await h.api.get('/members', A.token)).body.rows).toHaveLength(0);
+    const rows = (await h.api.get('/members', A.token, B)).body.rows;
+    expect(rows).toHaveLength(1);
+    await h.api.post(`/members/${rows[0].id}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, A.token, B);
+    // joining branch 1 of the same gym is refused; transfer is off
+    const again = await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem.token);
+    expect(again.status).toBe(409);
+    expect(again.body).toMatchObject({ code: 'ALREADY_MEMBER', sameBranch: false, allowTransfer: false });
+    const off = await h.api.post(`/me/gyms/${A.gym.id}/transfer`, { branchId: gym.body.branches[0].id }, mem.token);
+    expect(off.status).toBe(403);
+    expect(off.body.message).toContain('not enabled transfer');
+    // check-in QR of branch 2 counts for branch 2
+    const qr2 = await h.api.get('/gym/checkin-qr', A.token, B);
+    const qr1 = await h.api.get('/gym/checkin-qr', A.token);
+    expect(qr2.body.text).not.toBe(qr1.body.text);
+    expect(qr2.body.joinText).toBe(`gymmantra-join:${br.body.code}`);
+    const ci = await h.api.post('/me/checkin', { code: qr2.body.text }, mem.token);
+    expect(ci.status).toBe(201);
+    expect(ci.body.gym.branchName).toBe('Dwarka');
+    expect((await h.api.get('/attendance/today', A.token, B)).body.checkins).toBe(1);
+    expect((await h.api.get('/attendance/today', A.token)).body.checkins).toBe(0);
+    // offers follow the branch
+    await h.api.post('/offers', { title: 'Dwarka Diwali offer', details: '20% off on yearly', validTill: '2099-01-01', forMembers: true }, A.token, B);
+    await h.api.post('/offers', { title: 'Main branch offer', details: 'Free t-shirt on joining', validTill: '2099-01-01', forMembers: true }, A.token);
+    const mine = (await h.api.get('/me/gyms', mem.token)).body.memberships[0];
+    expect(mine.branch.name).toBe('Dwarka');
+    expect(mine.offers.map((o: any) => o.title)).toEqual(['Dwarka Diwali offer']);
+    // owner turns transfer on; member asks; owner approves
+    await h.api.patch('/gym', { allowTransfer: true }, A.token);
+    const ask = await h.api.post(`/me/gyms/${A.gym.id}/transfer`, { branchId: gym.body.branches[0].id }, mem.token);
+    expect(ask.status).toBe(201);
+    const list = await h.api.get('/transfers', A.token);
+    expect(list.body.items).toHaveLength(1);
+    expect((await h.api.post(`/transfers/${list.body.items[0].id}/approve`, {}, A.token)).status).toBe(200);
+    expect((await h.api.get('/members', A.token)).body.rows).toHaveLength(1);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].branch.id).toBe(gym.body.branches[0].id);
+    // a different gym is still fine
+    const other = await h.ownerWithGym('Other Gym');
+    expect((await h.api.post('/me/join', { gymCode: other.gym.gymCode }, mem.token)).status).toBe(201);
+  });
+});

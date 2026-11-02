@@ -1,4 +1,4 @@
-import { App, authenticate, gymOf, P, readRoster } from '../core';
+import { App, authenticate, dailyFor, gymOf, P, readRoster } from '../core';
 import { addDays, todayIST } from '../lib/dates';
 import { validSubs } from '../lib/status';
 import { requireFeature } from './billing';
@@ -105,12 +105,10 @@ export function reportRoutes(app: App) {
       store.getMany<Record<string, number>>(dates.map((d) => P.daily(g.tenantId, d))),
       readRoster(store, g.tenantId),
     ]);
-    const series = dates.map((date, i) => ({
-      date,
-      collected: daily[i]?.collected ?? 0,
-      payments: daily[i]?.payments ?? 0,
-      checkins: daily[i]?.checkins ?? 0,
-    }));
+    const series = dates.map((date, i) => {
+      const d = dailyFor(g, daily[i]); // only the branch being looked at
+      return { date, collected: d.collected, payments: d.payments, checkins: d.checkins };
+    });
     const sum = (k: 'collected' | 'payments' | 'checkins') => series.reduce((n, d) => n + d[k], 0);
 
     const all = summaries(g, roster);
