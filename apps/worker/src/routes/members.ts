@@ -8,6 +8,7 @@ import {
   Freeze,
   GymCtx,
   gymOf,
+  isDeskStaff,
   MemberDoc,
   notify,
   P,
@@ -30,6 +31,7 @@ import { activeFreeze, effectiveEnd, entryDecision, freezeDaysLeft, MembershipSt
 import { body, int, oneOf, optBool, optInt, optStr, str, strList } from '../lib/validate';
 import type { Tx } from '../store/store';
 import { gymLimits } from './gym';
+import { newTrainer } from './trainers';
 import type { ScanLog } from './attendance';
 
 export interface PlanDoc {
@@ -489,11 +491,26 @@ export function memberRoutes(app: App) {
     const b = body((await c.req.json().catch(() => ({}))) ?? {});
     const id = c.req.param('id');
     const member = await c.var.deps.store.tx(async (t) => {
-      const jr = isUuid(id) ? await t.get<{ userId: string; status: string; branchId: string | null }>(P.join(g.tenantId, id)) : null;
+      const jr = isUuid(id) ? await t.get<{ userId: string; status: string; branchId: string | null; kind?: string; speciality?: string | null; experienceYears?: number | null }>(P.join(g.tenantId, id)) : null;
       if (!jr) throw notFound('Request not found');
       if (jr.status !== 'PENDING') throw bad('This request was already handled');
       const ju = await t.get<UserDoc>(P.user(jr.userId));
       if (!ju || ju.deleted) throw bad('This account no longer exists');
+      if (jr.kind === 'TRAINER') {
+        if (g.role !== 'OWNER') throw forbidden('Only the gym owner can approve trainers');
+        if (isDeskStaff(ju)) throw bad('This person runs a gym and cannot be a trainer');
+        const now = nowIso();
+        t.set(P.staff(g.tenantId, jr.userId), { userId: jr.userId, role: 'TRAINER', branchIds: [], active: true, createdAt: now });
+        const tr = (await t.get(P.trainer(g.tenantId, jr.userId))) ?? newTrainer(jr.userId, ju.name, jr.speciality ?? null, jr.experienceYears ?? null);
+        t.set(P.trainer(g.tenantId, jr.userId), { ...tr, active: true });
+        const trq = { ...(ju.trainerRequested ?? {}) };
+        delete trq[g.tenantId];
+        t.set(P.user(jr.userId), { ...ju, appRole: 'TRAINER', trainerRequested: trq, staffOf: { ...ju.staffOf, [g.tenantId]: { role: 'TRAINER', branchIds: [], active: true } } });
+        t.set(P.join(g.tenantId, id), { ...jr, status: 'APPROVED', decidedById: u.id, decidedAt: now });
+        audit(t, g.tenantId, u.id, 'trainer.approve', 'join_request', id, null, { trainerId: jr.userId });
+        await notify(t, jr.userId, g.tenantId, 'Welcome!', `${g.tenant.name} approved you as a trainer.`);
+        return { trainerId: jr.userId };
+      }
       if (!ju.phone) throw bad('This person has no mobile number on their account');
       const branchId = optStr(b, 'branchId') ?? jr.branchId ?? null;
       checkBranch(g, branchId);
@@ -532,9 +549,12 @@ export function memberRoutes(app: App) {
       const ju = await t.get<UserDoc>(P.user(jr.userId));
       if (ju) {
         const requested = { ...(ju.requested ?? {}) };
-        delete requested[g.tenantId];
-        t.set(P.user(jr.userId), { ...ju, requested });
+        const trainerRequested = { ...(ju.trainerRequested ?? {}) };
+        if ((jr as { kind?: string }).kind === 'TRAINER') delete trainerRequested[g.tenantId];
+        else delete requested[g.tenantId];
+        t.set(P.user(jr.userId), { ...ju, requested, trainerRequested });
       }
+      await notify(t, jr.userId, g.tenantId, 'Request declined', `${g.tenant.name} did not approve your request. Contact the gym if this is a mistake.`);
       audit(t, g.tenantId, u.id, 'join.decline', 'join_request', id);
     });
     return c.json({ ok: true }, 201);

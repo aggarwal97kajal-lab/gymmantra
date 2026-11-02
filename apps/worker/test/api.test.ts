@@ -113,17 +113,18 @@ describe('auth', () => {
     expect((await h.api.post('/gyms', { name: 'Cookie Gym' }, undefined, { ...cookie, 'x-gm-client': 'admin' })).status).toBe(201);
   });
 
-  it('staff and super admin cannot use the member app; members can', async () => {
-    const owner = await h.ownerWithGym('Web Only Gym');
+  it('gym owners can use the app; the super admin cannot', async () => {
+    const owner = await h.ownerWithGym('App Gym');
     const mobile = { 'x-gm-client': 'mobile' };
     const r = await h.api.post('/auth/login', { identifier: owner.email, password: 'secret123' }, undefined, mobile);
-    expect(r.status).toBe(403);
-    expect(r.body.message).toMatch(/website/);
-    expect((await h.api.get('/me/gyms', owner.token, mobile)).status).toBe(401);
-    expect((await h.api.get('/gym', owner.token)).status).toBe(200);
-    const mem = await h.signup('Plain Member');
-    expect((await h.api.post('/auth/login', { identifier: mem.email, password: 'secret123' }, undefined, mobile)).status).toBe(200);
-    expect((await h.api.get('/me/gyms', mem.token, mobile)).status).toBe(200);
+    expect(r.status).toBe(200);
+    expect(r.body.user.isOwner).toBe(true);
+    expect(r.body.user.appRole).toBe('OWNER');
+    expect((await h.api.get('/dashboard', owner.token, mobile)).status).toBe(200);
+    await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const s = await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' }, undefined, mobile);
+    expect(s.status).toBe(403);
+    expect(s.body.message).toMatch(/website/);
   });
 
   it('the super admin email becomes super admin', async () => {
@@ -349,5 +350,64 @@ describe('super admin', () => {
     expect(gyms.body.map((x: any) => x.name)).toContain('Trial Gym');
     expect((await h.api.patch(`/super/gyms/${g.gym.id}`, { status: 'SUSPENDED' }, boss)).status).toBe(200);
     expect((await h.api.get('/members', g.token)).status).toBe(403);
+  });
+});
+
+describe('trainers and offers', () => {
+  it('a trainer joins with the gym code and the owner approves', async () => {
+    const A = await h.ownerWithGym('Trainer Gym');
+    const tr = await h.signup('Vikram Trainer');
+    const j = await h.api.post('/me/join', { gymCode: A.gym.gymCode, as: 'TRAINER', speciality: 'Weight loss', experienceYears: 6 }, tr.token);
+    expect(j.status).toBe(201);
+    expect(j.body.kind).toBe('TRAINER');
+    // Not a trainer yet: no access to trainer screens, request shows as pending.
+    let home = await h.api.get('/trainer/home', tr.token);
+    expect(home.body.gyms).toHaveLength(0);
+    expect(home.body.pending[0].name).toBe('Trainer Gym');
+    expect((await h.api.get('/auth/me', tr.token)).body.user.trainerPending).toBe(true);
+    // A trainer cannot register a gym.
+    expect((await h.api.post('/gyms', { name: 'My Own Gym' }, tr.token)).status).toBe(400);
+    const reqs = await h.api.get('/join-requests', A.token);
+    const r = reqs.body.find((x: any) => x.kind === 'TRAINER');
+    expect(r.user.name).toBe('Vikram Trainer');
+    expect((await h.api.post(`/join-requests/${r.id}/approve`, {}, A.token)).status).toBe(201);
+    home = await h.api.get('/trainer/home', tr.token);
+    expect(home.body.gyms[0].profile.speciality).toBe('Weight loss');
+    expect(home.body.pending).toHaveLength(0);
+    // Trainers cannot use desk screens.
+    expect((await h.api.get('/members', tr.token)).status).toBe(403);
+    expect((await h.api.get('/dashboard', tr.token)).status).toBe(403);
+    // Owner sets PT packages.
+    const list = await h.api.get('/trainers', A.token);
+    expect(list.body).toHaveLength(1);
+    const up = await h.api.patch(`/trainers/${list.body[0].id}`, { packages: [{ sessions: 12, days: 30, perWeek: 3, price: 6000 }], sharePercent: 40 }, A.token);
+    expect(up.status).toBe(200);
+    expect(up.body.packages[0].price).toBe(6000);
+    // An owner cannot join another gym as a trainer.
+    const B = await h.ownerWithGym('Other Gym');
+    expect((await h.api.post('/me/join', { gymCode: A.gym.gymCode, as: 'TRAINER' }, B.token)).status).toBe(400);
+    // The owner can remove the trainer.
+    expect((await h.api.post(`/trainers/${list.body[0].id}/remove`, {}, A.token)).status).toBe(200);
+    expect((await h.api.get('/trainer/home', tr.token)).body.gyms).toHaveLength(0);
+  });
+
+  it('offers reach the chosen people', async () => {
+    const A = await h.ownerWithGym('Offer Gym');
+    const mem = await h.signup('Offer Member');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem.token);
+    const jr = (await h.api.get('/join-requests', A.token)).body[0];
+    await h.api.post(`/join-requests/${jr.id}/approve`, {}, A.token);
+    const far = addDays(todayIST(), 10);
+    expect((await h.api.post('/offers', { title: 'Diwali 20% off', validTill: far, forMembers: true, memberFilter: 'ALL' }, A.token)).status).toBe(201);
+    expect((await h.api.post('/offers', { title: 'Only expired people', validTill: far, forMembers: true, memberFilter: 'ACTIVE' }, A.token)).status).toBe(201);
+    const t = await h.api.post('/offers', { title: 'Trainer bonus', validTill: far, forMembers: false, forTrainers: true }, A.token);
+    expect(t.status).toBe(201);
+    const g = await h.api.get('/me/gyms', mem.token);
+    expect(g.body.memberships[0].offers.map((o: any) => o.title)).toEqual(['Diwali 20% off']);
+    // Owner turns an offer off.
+    await h.api.patch(`/offers/${t.body.id}`, { active: false }, A.token);
+    const all = await h.api.get('/offers', A.token);
+    expect(all.body.find((o: any) => o.id === t.body.id).live).toBe(false);
+    expect((await h.api.post('/offers', { title: 'Nobody', validTill: far, forMembers: false, forTrainers: false }, A.token)).status).toBe(400);
   });
 });

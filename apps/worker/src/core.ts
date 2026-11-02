@@ -9,7 +9,9 @@ import type { Doc, Reader, Store, Tx } from './store/store';
 
 // ---------- Data shapes (Firestore documents) ----------
 
-export type Role = 'OWNER' | 'FRONT_DESK';
+export type Role = 'OWNER' | 'FRONT_DESK' | 'TRAINER';
+/** Staff who run the gym desk (trainers are staff too, but see only their own PT clients). */
+export const DESK_ROLES: Role[] = ['OWNER', 'FRONT_DESK'];
 
 export interface UserDoc {
   name: string;
@@ -26,7 +28,9 @@ export interface UserDoc {
   deleted?: boolean;
   createdAt: string;
   memberships: Record<string, string>; // tenantId -> memberId
-  requested: Record<string, boolean>; // tenantIds with join requests
+  requested: Record<string, boolean>; // tenantIds with join requests (as a member)
+  trainerRequested?: Record<string, boolean>; // tenantIds with join requests as a trainer
+  appRole?: 'MEMBER' | 'OWNER' | 'TRAINER' | null; // what the person chose in the app
   staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean }>;
 }
 
@@ -148,6 +152,10 @@ export const P = {
   staffCol: (t: string) => `tenants/${t}/staff`,
   staff: (t: string, uid: string) => `tenants/${t}/staff/${uid}`,
   joins: (t: string) => `tenants/${t}/joinRequests`,
+  trainers: (t: string) => `tenants/${t}/trainers`,
+  trainer: (t: string, uid: string) => `tenants/${t}/trainers/${uid}`,
+  offers: (t: string) => `tenants/${t}/offers`,
+  offer: (t: string, id: string) => `tenants/${t}/offers/${id}`,
   join: (t: string, j: string) => `tenants/${t}/joinRequests/${j}`,
   attendance: (t: string) => `tenants/${t}/attendance`,
   attendanceEv: (t: string, e: string) => `tenants/${t}/attendance/${e}`,
@@ -252,15 +260,20 @@ export async function authenticate(c: C): Promise<AuthUser> {
   const u = await c.var.deps.store.get<UserDoc>(P.user(uid));
   if (!u || u.deleted) throw unauthorized();
   const user = { ...u, id: uid };
-  // Owner decision: GymMantra admins and gym staff use the website, not the member app.
+  // Owner decision: the GymMantra admin uses the website (and later the admin app), not the gym app.
   if (isMobile(c) && isWebOnly(user)) throw unauthorized(WEB_ONLY_MESSAGE);
   c.set('user', user);
   return user;
 }
 
-export const WEB_ONLY_MESSAGE = 'This account is for gym staff or GymMantra admin. Please use the GymMantra website to log in.';
+export const WEB_ONLY_MESSAGE = 'This is the GymMantra super admin account. Please use the GymMantra website to log in.';
 export const isMobile = (c: C) => c.req.header('x-gm-client') === 'mobile';
-export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isSuperAdmin || Object.values(u.staffOf ?? {}).some((s) => s.active);
+export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isSuperAdmin;
+
+/** True if the person runs a gym (owner or front desk) anywhere. */
+export const isDeskStaff = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && DESK_ROLES.includes(s.role));
+/** True if the person is a trainer at any gym. */
+export const isTrainer = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && s.role === 'TRAINER');
 
 export function requireSuper(c: C) {
   if (!c.var.user.isSuperAdmin) throw forbidden('Super admin only');
@@ -279,7 +292,8 @@ export interface GymCtx {
  */
 export async function gymOf(c: C, ...roles: Role[]): Promise<GymCtx> {
   const u = c.var.user;
-  const active = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active);
+  // Trainers reach only endpoints that ask for 'TRAINER' explicitly.
+  const active = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active && (s.role !== 'TRAINER' || roles.includes('TRAINER')));
   if (!active.length) throw forbidden('You are not staff of this gym');
   const wanted = c.req.header('x-gym-id');
   const pick = wanted ? active.find(([t]) => t === wanted) : active[0];

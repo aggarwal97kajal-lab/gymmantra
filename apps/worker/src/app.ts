@@ -1,3 +1,4 @@
+import { trainerRoutes } from './routes/trainers';
 import { Hono } from 'hono';
 import { Deps, Env, loadSecrets } from './core';
 import { HttpError } from './lib/http';
@@ -48,6 +49,7 @@ export function createApp(getDeps: () => Deps) {
   ticketRoutes(app);
   meRoutes(app);
   superRoutes(app);
+  trainerRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

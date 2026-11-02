@@ -3,6 +3,7 @@ import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } f
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
+import { isDeskStaff, isTrainer } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
 export const LOCK_MINUTES = 15;
@@ -18,6 +19,10 @@ export function publicUser(id: string, u: UserDoc) {
     language: u.language ?? 'en',
     hasPassword: !!u.authEmail,
     hasGoogle: !!u.googleSub,
+    appRole: u.appRole ?? null,
+    isOwner: isDeskStaff(u),
+    isTrainer: isTrainer(u),
+    trainerPending: Object.keys(u.trainerRequested ?? {}).length > 0,
   };
 }
 

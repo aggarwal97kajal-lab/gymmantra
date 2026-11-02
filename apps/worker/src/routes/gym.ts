@@ -1,4 +1,4 @@
-import { App, audit, authenticate, Branch, gymOf, P, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Branch, gymOf, isTrainer, P, Role, TenantDoc, UserDoc } from '../core';
 import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
@@ -61,6 +61,7 @@ export function gymRoutes(app: App) {
   /** Any signed-in user can register their gym. It starts on the free trial. */
   app.post('/api/v1/gyms', async (c) => {
     const u = await authenticate(c);
+    if (isTrainer(u) || Object.keys(u.trainerRequested ?? {}).length) throw bad('A trainer cannot register a gym');
     const { store } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const name = str(b, 'name', { min: 2, max: 80, label: 'the gym name' });
@@ -96,7 +97,7 @@ export function gymRoutes(app: App) {
       t.create(P.tenant(id), tenant);
       t.set(P.roster(id), { members: {} });
       t.set(P.staff(id, u.id), { userId: u.id, role: 'OWNER', branchIds: [branch.id], active: true, createdAt: nowIso() });
-      t.set(P.user(u.id), { ...cur, staffOf: { ...cur.staffOf, [id]: { role: 'OWNER', branchIds: [branch.id], active: true } } });
+      t.set(P.user(u.id), { ...cur, appRole: 'OWNER', staffOf: { ...cur.staffOf, [id]: { role: 'OWNER', branchIds: [branch.id], active: true } } });
       audit(t, id, u.id, 'gym.create', 'tenant', id, null, tenant);
     });
     return c.json({ id, ...tenant }, 201);
@@ -202,7 +203,7 @@ export function gymRoutes(app: App) {
     const role = oneOf(b, 'role', ['OWNER', 'FRONT_DESK'] as const)!;
     const branchIds = checkBranches(g.tenant, strList(b, 'branchIds', 20) ?? []);
     const limits = await gymLimits(store, g.tenant);
-    const count = (await store.query(P.staffCol(g.tenantId), [['active', true]])).length;
+    const count = (await store.query<{ role: Role }>(P.staffCol(g.tenantId), [['active', true]])).filter((r) => r.data.role !== 'TRAINER').length;
     if (count >= limits.staffLimit) throw forbidden(`Your ${limits.planName} plan allows ${limits.staffLimit} staff accounts`);
 
     let uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid ?? null;
@@ -216,6 +217,7 @@ export function gymRoutes(app: App) {
     await store.tx(async (t) => {
       if (await t.get(P.staff(g.tenantId, staffUid))) throw conflict('This person is already staff at your gym');
       const target = (await t.get<UserDoc>(P.user(staffUid)))!;
+      if (isTrainer(target)) throw bad('This person is a trainer. A trainer cannot be gym staff');
       const s = { userId: staffUid, role, branchIds, active: true, createdAt: nowIso() };
       t.set(P.staff(g.tenantId, staffUid), s);
       t.set(P.user(staffUid), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { role, branchIds, active: true } } });
@@ -236,6 +238,7 @@ export function gymRoutes(app: App) {
     const out = await store.tx(async (t) => {
       const before = await t.get<{ userId: string; role: Role; branchIds: string[]; active: boolean; createdAt: string }>(P.staff(g.tenantId, id));
       if (!before) throw notFound('Staff not found');
+      if (before.role === 'TRAINER' && role) throw bad('Use the Trainers page to manage trainers');
       if (before.role === 'OWNER' && (role === 'FRONT_DESK' || active === false)) {
         const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(g.tenantId), [['role', 'OWNER']])).filter((r) => r.data.active);
         if (owners.length <= 1) throw forbidden('A gym needs at least one owner');

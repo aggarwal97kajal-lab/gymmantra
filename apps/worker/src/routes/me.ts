@@ -1,11 +1,12 @@
-import { App, authenticate, C, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { App, authenticate, C, isDeskStaff, isTrainer, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { freezeDaysLeft } from '../lib/status';
 import { todayIST } from '../lib/dates';
-import { body, oneOf, optStr, str } from '../lib/validate';
+import { body, oneOf, optInt, optStr, str } from '../lib/validate';
 import type { PlanDoc } from './members';
 import type { ScanLog } from './attendance';
+import { offersFor } from './trainers';
 import { replyTicket, TICKET_TOPICS, Ticket, getTicket } from './tickets';
 
 const MAX_PHOTO_BYTES = 400 * 1024;
@@ -39,6 +40,8 @@ export function meRoutes(app: App) {
       store.getMany<ScanLog>(entries.map(([t, m]) => P.lastScan(t, m))),
     ]);
     const month = todayIST().slice(0, 7);
+    const states = entries.map(([tid, mid], i) => (rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).status : 'NO_PLAN'));
+    const offers = await Promise.all(entries.map(([tid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i]) : [])));
     const memberships = entries
       .map(([tid, mid], i) => {
         const tn = tenants[i];
@@ -56,6 +59,7 @@ export function meRoutes(app: App) {
           startsOn: st.current?.startDate ?? st.upcoming?.startDate ?? null,
           visitsThisMonth: logs[i]?.month === month ? logs[i]!.visits : 0,
           lastVisitAt: logs[i]?.lastAllowedAt ?? null,
+          offers: offers[i],
         };
       })
       .filter(Boolean);
@@ -83,18 +87,27 @@ export function meRoutes(app: App) {
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
     if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
     const tid = ref.tenantId;
+    const as = oneOf(b, 'as', ['MEMBER', 'TRAINER'] as const, true) ?? 'MEMBER';
     const branchId = optStr(b, 'branchId') ?? null;
     if (branchId && !t.branches.some((x) => x.id === branchId)) throw bad('Unknown branch');
-    if (u.memberships?.[tid]) throw conflict('You are already a member of this gym');
+    if (as === 'TRAINER') {
+      if (isDeskStaff(u)) throw bad('A gym owner cannot join a gym as a trainer');
+      if (u.staffOf?.[tid]?.active) throw conflict('You are already a trainer at this gym');
+    } else if (u.memberships?.[tid]) throw conflict('You are already a member of this gym');
     if (!u.phone) throw bad('Add your mobile number in Profile first, so the gym can find you');
-    const existing = (await store.query<any>(P.joins(tid), [['userId', u.id], ['status', 'PENDING']]))[0];
+    const existing = (await store.query<any>(P.joins(tid), [['userId', u.id], ['status', 'PENDING']])).find((r) => (r.data.kind ?? 'MEMBER') === as);
     if (existing) return c.json({ id: existing.id, ...existing.data }, 201);
     const id = uuid();
-    const jr = { userId: u.id, branchId, status: 'PENDING', createdAt: nowIso(), decidedById: null, decidedAt: null };
+    const trainerInfo =
+      as === 'TRAINER'
+        ? { speciality: optStr(b, 'speciality', { max: 80 }) ?? null, experienceYears: optInt(b, 'experienceYears', { min: 0, max: 60 }) ?? null }
+        : {};
+    const jr = { userId: u.id, kind: as, branchId, status: 'PENDING', createdAt: nowIso(), decidedById: null, decidedAt: null, ...trainerInfo };
     await store.tx(async (tx) => {
       const cur = (await tx.get<UserDoc>(P.user(u.id)))!;
       tx.set(P.join(tid, id), jr);
-      tx.set(P.user(u.id), { ...cur, requested: { ...(cur.requested ?? {}), [tid]: true } });
+      if (as === 'TRAINER') tx.set(P.user(u.id), { ...cur, appRole: 'TRAINER', trainerRequested: { ...(cur.trainerRequested ?? {}), [tid]: true } });
+      else tx.set(P.user(u.id), { ...cur, requested: { ...(cur.requested ?? {}), [tid]: true } });
     });
     return c.json({ id, ...jr }, 201);
   });
@@ -172,9 +185,12 @@ export function meRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const name = b.name !== undefined ? str(b, 'name', { min: 2, max: 80, label: 'your name' }) : undefined;
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
+    const appRole = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER'] as const, true);
+    if (appRole === 'OWNER' && isTrainer(u)) throw bad('A trainer cannot be a gym owner');
+    if (appRole === 'TRAINER' && isDeskStaff(u)) throw bad('A gym owner cannot be a trainer');
     const next = await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
-      const n = { ...cur, name: name ?? cur.name, language: language ?? cur.language };
+      const n = { ...cur, name: name ?? cur.name, language: language ?? cur.language, appRole: appRole ?? cur.appRole ?? null };
       t.set(P.user(u.id), n);
       return n;
     });
