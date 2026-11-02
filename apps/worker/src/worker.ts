@@ -76,13 +76,15 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
     if (r.ok && env.FIREBASE_PROJECT_ID) {
       const f = await fetch(`https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/settings/platform`, { headers: { authorization: `Bearer ${d.idToken}` } });
       const fd: any = await f.json().catch(() => ({}));
-      const st = String(fd?.error?.status ?? '');
+      const msg = String(fd?.error?.message ?? '');
+      // A missing document is fine (the database exists); a missing database is not.
+      const st = f.status === 404 && !/database/i.test(msg) ? '' : String(fd?.error?.status ?? '');
       const ffix = st === 'PERMISSION_DENIED'
         ? 'Firestore → Rules: paste the GymMantra rules and press Publish (or FIREBASE_PROJECT_ID belongs to another project)'
         : st === 'NOT_FOUND' || f.status === 404
           ? 'Firestore database not created yet, or FIREBASE_PROJECT_ID is wrong. Copy projectId exactly from Firebase'
           : `Firestore error: ${st || f.status} ${fd?.error?.message ?? ''}`;
-      add('Database (Firestore) is reachable', f.ok || (f.status === 404 && !st), ffix);
+      add('Database (Firestore) is reachable', f.ok || (f.status === 404 && st === ''), ffix);
     }
   }
   const allOk = steps.every((s) => s.ok);
