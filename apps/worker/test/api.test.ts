@@ -42,6 +42,16 @@ describe('auth', () => {
     expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).status).toBe(200);
   });
 
+  it('forgot password sends a reset email for email or mobile', async () => {
+    const u = await h.signup();
+    const r = await h.api.post('/auth/forgot', { identifier: u.phone });
+    expect(r.status).toBe(200);
+    expect(r.body.to).toMatch(/^u•+@test\.in$/);
+    expect((await h.api.post('/auth/forgot', { identifier: 'nobody@test.in' })).status).toBe(404);
+    if (!(h.deps.identity as any).resets) return;
+    expect((h.deps.identity as any).resets).toContain(u.email);
+  });
+
   it('Google login only works after Google signup', async () => {
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-1:g1@test.in' })).status).toBe(404);
     expect((await h.api.post('/auth/google/signup', { idToken: 'google:g-1:g1@test.in' })).status).toBe(201);

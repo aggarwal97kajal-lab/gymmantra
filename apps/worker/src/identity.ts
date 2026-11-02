@@ -16,6 +16,8 @@ export interface Identity {
   /** Throws HttpError(401) on a wrong email/password. */
   signIn(email: string, password: string): Promise<{ uid: string; idToken: string; expiresIn: number }>;
   changePassword(email: string, current: string | null, next: string): Promise<{ uid: string }>;
+  /** Firebase emails a password reset link. */
+  sendPasswordReset(email: string): Promise<void>;
   verifyGoogle(idToken: string): Promise<GoogleProfile>;
 }
 
@@ -63,6 +65,9 @@ export class FirebaseIdentity implements Identity {
     await this.call('update', { idToken: s.idToken, password: next, returnSecureToken: false });
     return { uid: s.uid };
   }
+  async sendPasswordReset(email: string) {
+    await this.call('sendOobCode', { requestType: 'PASSWORD_RESET', email });
+  }
   async verifyGoogle(idToken: string): Promise<GoogleProfile> {
     if (!this.googleClientIds.length) throw bad('Google sign-in is not set up yet');
     try {
@@ -94,6 +99,10 @@ export class FakeIdentity implements Identity {
     const s = await this.signIn(email, current);
     this.accounts.get(email)!.password = next;
     return { uid: s.uid };
+  }
+  resets: string[] = [];
+  async sendPasswordReset(email: string) {
+    this.resets.push(email);
   }
   /** Test tokens look like "google:<sub>:<email>". */
   async verifyGoogle(idToken: string) {

@@ -186,6 +186,31 @@ export function authRoutes(app: App) {
     return c.json({ token, user: publicUser(uid, user) });
   });
 
+  /** Forgot password: Firebase emails a reset link to the account's email. */
+  app.post('/api/v1/auth/forgot', async (c) => {
+    const { store, identity } = c.var.deps;
+    const b = body(await c.req.json().catch(() => null));
+    const identifier = str(b, 'identifier', { label: 'your email or mobile number' });
+    const email = normalizeEmail(identifier);
+    const phone = email ? null : normalizePhone(identifier);
+    if (!email && !phone) throw bad('Enter a valid email or 10-digit mobile number');
+    let user: UserDoc | null = null;
+    if (phone) {
+      const uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid;
+      user = uid ? await store.get<UserDoc>(P.user(uid)) : null;
+    } else {
+      user = (await store.query<UserDoc>('users', [['email', email!]]))[0]?.data ?? null;
+    }
+    if (!user || user.deleted) throw notFound('No GymMantra account found with this email or mobile number');
+    if (!user.authEmail) throw bad('This account uses Google sign-in. Use "Continue with Google" to log in');
+    if (user.authEmail.endsWith('@phone.gymmantra.app')) {
+      throw bad('This account has no email address. Ask your gym to help you reset the password');
+    }
+    await identity.sendPasswordReset(user.authEmail);
+    const [name, domain] = user.authEmail.split('@');
+    return c.json({ sent: true, to: `${name.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, name.length - 1)))}@${domain}` });
+  });
+
   app.post('/api/v1/auth/logout', (c) => {
     clearSession(c);
     return c.json({ ok: true });
