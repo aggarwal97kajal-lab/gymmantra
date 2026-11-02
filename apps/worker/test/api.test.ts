@@ -411,3 +411,64 @@ describe('trainers and offers', () => {
     expect((await h.api.post('/offers', { title: 'Nobody', validTill: far, forMembers: false, forTrainers: false }, A.token)).status).toBe(400);
   });
 });
+
+describe('personal training', () => {
+  it('member asks for PT, owner approves, trainer marks sessions, owner pays the trainer', async () => {
+    const A = await h.ownerWithGym('PT Gym');
+    // trainer
+    const tr = await h.signup('Vikram PT');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode, as: 'TRAINER' }, tr.token);
+    let jr = (await h.api.get('/join-requests', A.token)).body[0];
+    await h.api.post(`/join-requests/${jr.id}/approve`, {}, A.token);
+    const pk = await h.api.patch(`/trainers/${tr.user.id}`, { packages: [{ sessions: 3, days: 30, perWeek: 3, price: 6000 }], sharePercent: 50 }, A.token);
+    const packageId = pk.body.packages[0].id;
+    // member
+    const mem = await h.signup('Rahul PT');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem.token);
+    jr = (await h.api.get('/join-requests', A.token)).body[0];
+    await h.api.post(`/join-requests/${jr.id}/approve`, {}, A.token);
+    const list = await h.api.get(`/me/gyms/${A.gym.id}/trainers`, mem.token);
+    expect(list.body.trainers[0].packages[0].sessions).toBe(3);
+    expect(list.body.trainers[0].phone).toBeUndefined();
+    const req = await h.api.post('/me/pt', { tenantId: A.gym.id, trainerId: tr.user.id, packageId }, mem.token);
+    expect(req.status).toBe(201);
+    expect(req.body.state).toBe('PENDING');
+    expect((await h.api.post('/me/pt', { tenantId: A.gym.id, trainerId: tr.user.id, packageId }, mem.token)).status).toBe(400);
+    // trainer and owner were told
+    expect((await h.api.get('/me/notifications', tr.token)).body[0].title).toBe('New PT request');
+    expect((await h.api.get('/dashboard', A.token)).body.ptPending).toBe(1);
+    // trainer sees it as pending, cannot approve
+    expect((await h.api.get('/trainer/clients', tr.token)).body.clients[0].state).toBe('PENDING');
+    expect((await h.api.post(`/pt/${req.body.id}/approve`, {}, tr.token)).status).toBe(403);
+    // owner approves with money received
+    const ap = await h.api.post(`/pt/${req.body.id}/approve`, { amountReceived: 6000, paymentMode: 'UPI', startDate: addDays(todayIST(), -3) }, A.token);
+    expect(ap.status).toBe(200);
+    expect(ap.body.left).toBe(3);
+    // trainer marks sessions
+    const today = todayIST();
+    const mark = (date: string, m: string) => h.api.post(`/pt/${req.body.id}/session`, { tenantId: A.gym.id, date, mark: m }, tr.token);
+    expect((await mark(today, 'DONE')).body.left).toBe(2);
+    expect((await mark(addDays(today, -1), 'MISSED')).body.missed).toBe(1);
+    expect((await mark(addDays(today, -9), 'DONE')).status).toBe(400);
+    expect((await mark(addDays(today, 2), 'DONE')).status).toBe(400);
+    expect((await mark(addDays(today, 2), 'PLANNED')).status).toBe(200);
+    const c = await h.api.get('/trainer/clients', tr.token);
+    expect(c.body.clients[0].left).toBe(2);
+    expect(c.body.clients[0].price).toBeUndefined();
+    // member sees the same calendar
+    const my = await h.api.get('/me/pt', mem.token);
+    expect(my.body[0].log[today]).toBe('DONE');
+    expect(my.body[0].trainerName).toBe('Vikram PT');
+    // another member cannot touch it; front desk cannot mark
+    const other = await h.signup('Other');
+    expect((await h.api.post(`/pt/${req.body.id}/session`, { tenantId: A.gym.id, date: today, mark: 'DONE' }, other.token)).status).toBe(403);
+    // PT money: trainer earned 50% of 6000
+    const acc = await h.api.get('/pt-accounts', A.token);
+    expect(acc.body.trainers[0].earned).toBe(3000);
+    expect(acc.body.trainers[0].due).toBe(3000);
+    expect((await h.api.post('/pt-payouts', { trainerId: tr.user.id, amount: 2000, mode: 'UPI' }, A.token)).status).toBe(201);
+    expect((await h.api.get('/pt-accounts', A.token)).body.trainers[0].due).toBe(1000);
+    expect((await h.api.get('/trainer/payouts', tr.token)).body[0].amount).toBe(2000);
+    expect((await h.api.get('/pt-accounts', tr.token)).status).toBe(403);
+  });
+});

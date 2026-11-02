@@ -232,11 +232,12 @@ export function memberRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const { store } = c.var.deps;
-    const [roster, daily, joins, tickets] = await Promise.all([
+    const [roster, daily, joins, tickets, pts] = await Promise.all([
       readRoster(store, g.tenantId),
       store.get<Record<string, number>>(P.daily(g.tenantId, todayIST())),
       store.query(P.joins(g.tenantId), [['status', 'PENDING']]),
       store.query(P.tickets, [['tenantId', g.tenantId], ['routedTo', 'GYM'], ['status', 'OPEN']]),
+      store.query(P.pts(g.tenantId), [['status', 'PENDING']]),
     ]);
     const all = summaries(g, roster);
     const count = (s: MembershipStatus) => all.filter((m) => m.status === s).length;
@@ -253,6 +254,7 @@ export function memberRoutes(app: App) {
       },
       today: { collected: daily?.collected ?? 0, payments: daily?.payments ?? 0, checkins: daily?.checkins ?? 0 },
       joinPending: joins.length,
+      ptPending: pts.length,
       openTickets: tickets.length,
       renewalsDue: all
         .filter((m) => m.status === 'ENDING_SOON' || (m.status === 'EXPIRED' && (m.daysLeft ?? -999) >= -30))
