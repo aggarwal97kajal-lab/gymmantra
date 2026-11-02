@@ -1,4 +1,5 @@
 import { App, audit, authenticate, gymOf, P, Role, TenantDoc, UserDoc } from '../core';
+import { noticesFor } from './notices';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, int, oneOf, optBool, optInt, optStr, str } from '../lib/validate';
@@ -168,10 +169,13 @@ export function trainerRoutes(app: App) {
       store.getMany<TrainerDoc>(gyms.map((t) => P.trainer(t, u.id))),
       store.getMany<TenantDoc>(pending.map(P.tenant)),
     ]);
-    const offers = await Promise.all(gyms.map((t) => offersFor(store, t, 'TRAINER')));
+    const [offers, notices] = await Promise.all([
+      Promise.all(gyms.map((t) => offersFor(store, t, 'TRAINER'))),
+      Promise.all(gyms.map((t) => noticesFor(store, t, 'TRAINER'))),
+    ]);
     return c.json({
       gyms: gyms
-        .map((id, i) => (tenants[i] && profiles[i] ? { id, name: tenants[i]!.name, phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i] } : null))
+        .map((id, i) => (tenants[i] && profiles[i] ? { id, name: tenants[i]!.name, phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i], notices: notices[i] } : null))
         .filter(Boolean),
       pending: pending.map((id, i) => (pendingTenants[i] ? { id, name: pendingTenants[i]!.name } : null)).filter(Boolean),
     });

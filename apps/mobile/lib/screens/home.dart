@@ -95,6 +95,9 @@ class HomeScreen extends ConsumerWidget {
                 final main = list.isEmpty ? null : list.first;
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   for (final m in list)
+                    for (final n in ((m['notices'] as List?) ?? const []).cast<Map>())
+                      NoticeBanner(title: n['title'] as String, message: n['message'] as String, gym: m['gym']['name'] as String?, date: n['createdAt'] as String?),
+                  for (final m in list)
                     for (final o in ((m['offers'] as List?) ?? const []).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?),
                   for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],

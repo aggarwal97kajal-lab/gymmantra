@@ -172,12 +172,14 @@ export const P = {
   trainers: (t: string) => `tenants/${t}/trainers`,
   trainer: (t: string, uid: string) => `tenants/${t}/trainers/${uid}`,
   offers: (t: string) => `tenants/${t}/offers`,
+  notices: (t: string) => `tenants/${t}/notices`,
   program: (t: string, memberId: string) => `tenants/${t}/programs/${memberId}`,
   pts: (t: string) => `tenants/${t}/pt`,
   pt: (t: string, id: string) => `tenants/${t}/pt/${id}`,
   payouts: (t: string) => `tenants/${t}/ptPayouts`,
   payout: (t: string, id: string) => `tenants/${t}/ptPayouts/${id}`,
   offer: (t: string, id: string) => `tenants/${t}/offers/${id}`,
+  notice: (t: string, id: string) => `tenants/${t}/notices/${id}`,
   join: (t: string, j: string) => `tenants/${t}/joinRequests/${j}`,
   attendance: (t: string) => `tenants/${t}/attendance`,
   attendanceEv: (t: string, e: string) => `tenants/${t}/attendance/${e}`,
@@ -379,8 +381,8 @@ export interface NoteItem {
 /** In-app notification (kept as the last 50 per user in one document). */
 export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string) {
   if (!userId) return;
-  const cur = (await t.get<{ items: NoteItem[] }>(P.notes(userId)))?.items ?? [];
-  t.set(P.notes(userId), { items: [{ id: uuid(), tenantId, title, body, createdAt: nowIso(), readAt: null }, ...cur].slice(0, 50) });
+  const doc = (await t.get<{ items: NoteItem[] }>(P.notes(userId))) ?? { items: [] };
+  t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
 }
 
 // ---------- Roster ----------

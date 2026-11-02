@@ -473,6 +473,54 @@ class OfferBanner extends StatelessWidget {
       );
 }
 
+/// Gym notice ("Gym closed tomorrow") from the owner, shown on dashboards.
+class NoticeBanner extends StatelessWidget {
+  const NoticeBanner({super.key, required this.title, required this.message, this.gym, this.date});
+  final String title;
+  final String message;
+  final String? gym;
+  final String? date;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.c;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 13, 14, 14),
+      decoration: BoxDecoration(
+        color: C.warn.withAlpha(p.dark ? 34 : 26),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: C.warn.withAlpha(150), width: 1.3),
+      ),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(color: C.warn, borderRadius: BorderRadius.circular(12)),
+          child: const Icon(Icons.campaign_rounded, color: Colors.white, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Text(context.t('NOTICE'), style: const TextStyle(color: Color(0xFFB45309), fontWeight: FontWeight.w800, fontSize: 11, letterSpacing: 0.6)),
+              if (gym != null) ...[
+                const SizedBox(width: 6),
+                Flexible(child: Text('· $gym', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.mut, fontSize: 11))),
+              ],
+              if (date != null) ...[const Spacer(), Text(fmtDate(date), style: TextStyle(color: p.mut, fontSize: 11))],
+            ]),
+            const SizedBox(height: 3),
+            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 2),
+            Text(message, style: TextStyle(fontSize: 13.5, height: 1.35, color: p.fg.withAlpha(220))),
+          ]),
+        ),
+      ]),
+    );
+  }
+}
+
 /// Small stat tile (number + label).
 class StatTile extends StatelessWidget {
   const StatTile({super.key, required this.icon, required this.value, required this.label, this.color});

@@ -179,7 +179,7 @@ class OwnerHomeScreen extends ConsumerWidget {
                       _Quick(Icons.sports_rounded, context.t('Trainers'), () async {
                         if (await checkUnlocked(context, ref, 'pt') && context.mounted) context.push('/o/trainers');
                       }),
-                      _Quick(Icons.language_rounded, context.t('Website'), () => openUrl(Api.instance.base)),
+                      _Quick(Icons.campaign_rounded, context.t('Send notice'), () => context.push('/o/notices/new')),
                     ],
                   ),
                   if (due.isNotEmpty) ...[
@@ -1029,6 +1029,7 @@ class OwnerMoreScreen extends ConsumerWidget {
                             ? context.t('{plan} plan', {'plan': sub['plan']['name']})
                             : context.t('Trial ended — choose a plan'),
               ),
+            row(Icons.campaign_rounded, context.t('Notices'), () => context.push('/o/notices'), sub: context.t('Gym closed, timing change… to members or trainers')),
             row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices'), lock: 'pt'),
             row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer'), lock: 'pt'),
             if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets'), lock: 'pt'),

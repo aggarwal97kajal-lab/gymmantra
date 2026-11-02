@@ -603,3 +603,323 @@ class _BranchSheetState extends State<_BranchSheet> {
         ]),
       );
 }
+
+// ============================================================ notices
+
+final noticesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/notices'));
+
+String _noticeAudience(BuildContext context, Map n) {
+  final parts = <String>[];
+  if (n['forMembers'] == true) {
+    parts.add(switch (n['memberFilter']) {
+      'ACTIVE' => context.t('Active members'),
+      'EXPIRED' => context.t('Expired members'),
+      _ => context.t('All members'),
+    });
+  }
+  if (n['forTrainers'] == true) parts.add(context.t('Trainers'));
+  return parts.join(' + ');
+}
+
+String _noticeShareText(Map n, String? gym) => '📢 ${gym ?? ''}\n*${n['title']}*\n${n['message']}';
+
+class NoticesScreen extends ConsumerWidget {
+  const NoticesScreen({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(noticesProvider);
+    final gymName = ref.watch(sessionProvider).myGym?['name'] as String?;
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Notices'))),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/o/notices/new'),
+        icon: const Icon(Icons.campaign_rounded),
+        label: Text(context.t('New notice')),
+      ),
+      body: RefreshIndicator(
+        color: context.c.primary,
+        onRefresh: () async => ref.invalidate(noticesProvider),
+        child: AsyncBody(
+          value: v,
+          onRetry: () => ref.invalidate(noticesProvider),
+          builder: (d) {
+            final list = (d as List).cast<Map>();
+            if (list.isEmpty) {
+              return ListView(padding: const EdgeInsets.all(28), children: [
+                const SizedBox(height: 40),
+                Icon(Icons.campaign_outlined, size: 64, color: context.c.mut),
+                const SizedBox(height: 12),
+                Text(context.t('No notices yet'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Muted(context.t('Tell members or trainers about a holiday, gym closed, new timings or anything else. It shows on their dashboard and in notifications.'), align: TextAlign.center),
+              ]);
+            }
+            return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 96), children: [
+              for (final n in list) ...[
+                Panel(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: (n['live'] == true ? C.ok : context.c.mut).withAlpha(40), borderRadius: BorderRadius.circular(20)),
+                        child: Text(context.t(n['live'] == true ? 'Showing' : 'Ended'),
+                            style: TextStyle(color: n['live'] == true ? C.ok : context.c.mut, fontSize: 11, fontWeight: FontWeight.w800)),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(child: Muted(_noticeAudience(context, n), size: 12, maxLines: 1)),
+                      Muted(fmtDate(n['createdAt'] as String), size: 11.5),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(n['title'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 2),
+                    Text(n['message'] as String, style: const TextStyle(height: 1.35)),
+                    const SizedBox(height: 6),
+                    Muted(context.t('Shows till {date}', {'date': fmtDate(n['showTill'] as String)}), size: 12),
+                    const Divider(height: 18),
+                    Row(children: [
+                      TextButton.icon(
+                        onPressed: () => openUrl(waLink('', _noticeShareText(n, gymName))),
+                        icon: const Icon(Icons.share_rounded, size: 18, color: C.wa),
+                        label: Text(context.t('WhatsApp'), style: const TextStyle(color: C.wa)),
+                      ),
+                      const Spacer(),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final ok = await showDialog<bool>(
+                            context: context,
+                            builder: (c) => AlertDialog(
+                              title: Text(context.t('Remove this notice?')),
+                              content: Text(context.t('Members and trainers will no longer see it.')),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(c, false), child: Text(context.t('Cancel'))),
+                                TextButton(onPressed: () => Navigator.pop(c, true), child: Text(context.t('Remove'), style: const TextStyle(color: C.red))),
+                              ],
+                            ),
+                          );
+                          if (ok != true) return;
+                          try {
+                            await Api.instance.delete('/notices/${n['id']}');
+                            ref.invalidate(noticesProvider);
+                          } catch (e) {
+                            if (context.mounted) toast(context, e.toString());
+                          }
+                        },
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: C.red),
+                        label: Text(context.t('Remove'), style: const TextStyle(color: C.red)),
+                      ),
+                    ]),
+                  ]),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ]);
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class NewNoticeScreen extends ConsumerStatefulWidget {
+  const NewNoticeScreen({super.key});
+  @override
+  ConsumerState<NewNoticeScreen> createState() => _NewNoticeState();
+}
+
+class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
+  final title = TextEditingController();
+  final message = TextEditingController();
+  bool members = true;
+  bool trainers = false;
+  String filter = 'ALL';
+  int showDays = 2; // today + 2 more days
+  DateTime? custom;
+  bool busy = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    title.addListener(() => setState(() {}));
+  }
+
+  static const templates = [
+    ('Gym closed tomorrow', 'The gym will stay closed tomorrow. See you the day after!'),
+    ('Holiday', 'The gym is closed on the holiday. Normal timings from the next day.'),
+    ('Timing change', 'From tomorrow the gym opens at 6 AM and closes at 10 PM.'),
+    ('Renew your membership', 'Your membership is ending soon. Renew at the front desk to keep training.'),
+  ];
+
+  DateTime get _istToday {
+    final n = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+    return DateTime(n.year, n.month, n.day);
+  }
+
+  DateTime get till => custom ?? _istToday.add(Duration(days: showDays));
+  String ymd(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> send() async {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    final sent = context.t('Notice sent');
+    try {
+      await Api.instance.post('/notices', {
+        'title': title.text.trim(),
+        'message': message.text.trim(),
+        'forMembers': members,
+        'forTrainers': trainers,
+        'memberFilter': filter,
+        'showTill': ymd(till),
+      });
+      ref.invalidate(noticesProvider);
+      if (mounted) {
+        toast(context, sent);
+        context.pop();
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Widget _who(IconData icon, String label, String sub, bool on, VoidCallback tap) {
+    final p = context.c;
+    return Expanded(
+      child: Material(
+        color: on ? p.primary.withAlpha(30) : p.surf,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: on ? p.primary : p.line, width: on ? 1.6 : 1)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: tap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Row(children: [
+                Icon(icon, color: on ? p.primary : p.mut),
+                const Spacer(),
+                Icon(on ? Icons.check_circle_rounded : Icons.circle_outlined, size: 20, color: on ? p.primary : p.mut),
+              ]),
+              const SizedBox(height: 8),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
+              Muted(sub, size: 11.5),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.c;
+    final gymName = ref.watch(sessionProvider).myGym?['name'] as String?;
+    Widget dayChip(String label, int d) {
+      final on = custom == null && showDays == d;
+      return ChoiceChip(
+        label: Text(label),
+        selected: on,
+        showCheckmark: false,
+        selectedColor: p.primary,
+        labelStyle: TextStyle(color: on ? Colors.white : p.fg, fontWeight: FontWeight.w700),
+        onSelected: (_) => setState(() {
+          custom = null;
+          showDays = d;
+        }),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('New notice'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+        Muted(context.t('Quick start'), size: 13),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          for (final (t, m) in templates)
+            ActionChip(
+              avatar: const Icon(Icons.bolt_rounded, size: 16),
+              label: Text(context.t(t)),
+              onPressed: () => setState(() {
+                title.text = context.t(t);
+                message.text = context.t(m);
+              }),
+            ),
+        ]),
+        const SizedBox(height: 16),
+        LabeledField(label: context.t('Heading'), controller: title, icon: Icons.title_rounded, hint: context.t('e.g. Gym closed tomorrow'), caps: TextCapitalization.sentences),
+        Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Text(context.t('Message'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: p.mut))),
+        TextField(
+          controller: message,
+          minLines: 3,
+          maxLines: 6,
+          maxLength: 600,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(hintText: context.t('Write what members or trainers should know')),
+        ),
+        const SizedBox(height: 10),
+        Text(context.t('Send to'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        const SizedBox(height: 8),
+        Row(children: [
+          _who(Icons.groups_rounded, context.t('Members'), context.t('On their app dashboard'), members, () => setState(() => members = !members)),
+          const SizedBox(width: 10),
+          _who(Icons.sports_rounded, context.t('Trainers'), context.t('On the trainer dashboard'), trainers, () => setState(() => trainers = !trainers)),
+        ]),
+        if (members) ...[
+          const SizedBox(height: 12),
+          Muted(context.t('Which members?'), size: 13),
+          const SizedBox(height: 6),
+          Seg<String>(
+            value: filter,
+            items: [('ALL', context.t('All'), null), ('ACTIVE', context.t('Active'), null), ('EXPIRED', context.t('Expired'), null)],
+            onChanged: (v) => setState(() => filter = v),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Text(context.t('Show on dashboard till'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          dayChip(context.t('Today'), 0),
+          dayChip(context.t('Tomorrow'), 1),
+          dayChip(context.t('3 days'), 2),
+          dayChip(context.t('1 week'), 6),
+          ActionChip(
+            avatar: Icon(Icons.event_rounded, size: 16, color: custom != null ? Colors.white : p.fg),
+            backgroundColor: custom != null ? p.primary : null,
+            label: Text(custom != null ? fmtDate(ymd(custom!)) : context.t('Pick date'), style: TextStyle(color: custom != null ? Colors.white : p.fg, fontWeight: FontWeight.w700)),
+            onPressed: () async {
+              final d = await showDatePicker(context: context, initialDate: till, firstDate: _istToday, lastDate: _istToday.add(const Duration(days: 90)));
+              if (d != null) setState(() => custom = d);
+            },
+          ),
+        ]),
+        const SizedBox(height: 6),
+        Muted(context.t('It also stays in their notifications.'), size: 12),
+        const SizedBox(height: 18),
+        Muted(context.t('Preview'), size: 13),
+        const SizedBox(height: 8),
+        NoticeBanner(
+          title: title.text.trim().isEmpty ? context.t('Heading') : title.text.trim(),
+          message: message.text.trim().isEmpty ? context.t('Message') : message.text.trim(),
+          gym: gymName,
+        ),
+        ErrorText(error),
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          onPressed: busy || (!members && !trainers) ? null : send,
+          icon: const Icon(Icons.send_rounded, size: 18),
+          label: Text(context.t(busy ? 'Sending…' : 'Send notice')),
+        ),
+        const SizedBox(height: 8),
+        TextButton.icon(
+          onPressed: () => openUrl(waLink('', _noticeShareText({'title': title.text.trim(), 'message': message.text.trim()}, gymName))),
+          icon: const Icon(Icons.share_rounded, size: 18, color: C.wa),
+          label: Text(context.t('Also share on WhatsApp group'), style: const TextStyle(color: C.wa)),
+        ),
+      ]),
+    );
+  }
+}

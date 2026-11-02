@@ -129,6 +129,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
+        GoRoute(path: '/o/notices', builder: (_, __) => const NoticesScreen()),
+        GoRoute(path: '/o/notices/new', builder: (_, __) => const NewNoticeScreen()),
         GoRoute(path: '/o/plans', builder: (_, __) => const ManagePlansScreen()),
         GoRoute(path: '/o/settings', builder: (_, __) => const GymSettingsScreen()),
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),

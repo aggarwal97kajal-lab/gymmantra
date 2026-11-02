@@ -10,6 +10,7 @@ import { publicUser } from './auth';
 import type { PlanDoc } from './members';
 import type { ScanLog } from './attendance';
 import { offersFor } from './trainers';
+import { noticeNotes, noticesFor } from './notices';
 import { replyTicket, TICKET_TOPICS, Ticket, getTicket } from './tickets';
 
 const MAX_PHOTO_BYTES = 400 * 1024;
@@ -44,7 +45,10 @@ export function meRoutes(app: App) {
     ]);
     const month = todayIST().slice(0, 7);
     const states = entries.map(([tid, mid], i) => (rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).status : 'NO_PLAN'));
-    const offers = await Promise.all(entries.map(([tid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i]) : [])));
+    const [offers, notices] = await Promise.all([
+      Promise.all(entries.map(([tid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i]) : []))),
+      Promise.all(entries.map(([tid], i) => (tenants[i] ? noticesFor(store, tid, 'MEMBER', states[i]) : []))),
+    ]);
     const memberships = entries
       .map(([tid, mid], i) => {
         const tn = tenants[i];
@@ -63,6 +67,7 @@ export function meRoutes(app: App) {
           visitsThisMonth: logs[i]?.month === month ? logs[i]!.visits : 0,
           lastVisitAt: logs[i]?.lastAllowedAt ?? null,
           offers: offers[i],
+          notices: notices[i],
         };
       })
       .filter(Boolean);
@@ -364,16 +369,18 @@ export function meRoutes(app: App) {
 
   app.get('/api/v1/me/notifications', async (c) => {
     const u = await authenticate(c);
-    return c.json((await c.var.deps.store.get<{ items: NoteItem[] }>(P.notes(u.id)))?.items ?? []);
+    const { store } = c.var.deps;
+    const doc = await store.get<{ items: NoteItem[]; noticesReadAt?: string }>(P.notes(u.id));
+    const notices = await noticeNotes(store, u, doc?.noticesReadAt ?? null);
+    return c.json([...(doc?.items ?? []), ...notices].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
   });
 
   app.post('/api/v1/me/notifications/read', async (c) => {
     const u = await authenticate(c);
     await c.var.deps.store.tx(async (t) => {
       const cur = await t.get<{ items: NoteItem[] }>(P.notes(u.id));
-      if (!cur) return;
       const at = nowIso();
-      t.set(P.notes(u.id), { items: cur.items.map((n) => ({ ...n, readAt: n.readAt ?? at })) });
+      t.set(P.notes(u.id), { items: (cur?.items ?? []).map((n) => ({ ...n, readAt: n.readAt ?? at })), noticesReadAt: at });
     });
     return c.json({ ok: true });
   });

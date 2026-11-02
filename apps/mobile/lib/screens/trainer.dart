@@ -92,6 +92,8 @@ class TrainerHomeScreen extends ConsumerWidget {
                 final soon = active.where((c) => c['endingSoon'] == true).length;
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   for (final g in gyms) ...[
+                    for (final n in ((g['notices'] as List?) ?? const []).cast<Map>())
+                      NoticeBanner(title: n['title'] as String, message: n['message'] as String, gym: g['name'] as String?, date: n['createdAt'] as String?),
                     for (final o in (g['offers'] as List).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?),
                     Row(children: [

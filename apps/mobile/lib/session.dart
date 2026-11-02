@@ -136,6 +136,7 @@ class Session extends ChangeNotifier {
           '/members?tab=all',
           '/join-requests',
           '/offers',
+          '/notices',
           '/gym',
           '/plans',
           '/subscription',

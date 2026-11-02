@@ -582,6 +582,38 @@ describe('gym address, plans and bills', () => {
   });
 });
 
+describe('notices', () => {
+  it('owner sends a notice to members or trainers; they see it on the dashboard and in notifications', async () => {
+    const owner = await h.ownerWithGym('Notice Gym');
+    const mem = await h.signup('Notice Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+
+    expect((await h.api.post('/notices', { title: 'Gym closed', message: 'Closed tomorrow for Diwali', forMembers: false, forTrainers: false }, owner.token)).status).toBe(400);
+    const onlyTrainers = await h.api.post('/notices', { title: 'Staff meeting', message: 'Meeting at 9 am', forMembers: false, forTrainers: true }, owner.token);
+    expect(onlyTrainers.status).toBe(201);
+    const n = await h.api.post('/notices', { title: 'Gym closed', message: 'Closed tomorrow for Diwali', forMembers: true }, owner.token);
+    expect(n.status).toBe(201);
+
+    const gyms = await h.api.get('/me/gyms', mem.token);
+    const notices = gyms.body.memberships[0].notices;
+    expect(notices.map((x: any) => x.title)).toEqual(['Gym closed']);
+    const inbox = await h.api.get('/me/notifications', mem.token);
+    const item = inbox.body.find((x: any) => x.id === `notice:${n.body.id}`);
+    expect(item.readAt).toBeNull();
+    await h.api.post('/me/notifications/read', {}, mem.token);
+    expect((await h.api.get('/me/notifications', mem.token)).body.find((x: any) => x.id === `notice:${n.body.id}`).readAt).not.toBeNull();
+
+    // another gym cannot remove it; the owner can
+    const other = await h.ownerWithGym('Other Gym');
+    expect((await h.api.del(`/notices/${n.body.id}`, other.token)).status).toBe(404);
+    expect((await h.api.del(`/notices/${n.body.id}`, owner.token)).status).toBe(200);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].notices).toHaveLength(0);
+    expect((await h.api.get('/notices', owner.token)).body.map((x: any) => x.title)).toEqual(['Staff meeting']);
+  });
+});
+
 describe('ads', () => {
   it('super admin runs an ad for chosen roles and states', async () => {
     await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });

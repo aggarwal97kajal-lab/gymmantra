@@ -1,3 +1,4 @@
+import { noticeRoutes } from './routes/notices';
 import { reportRoutes } from './routes/reports';
 import { adRoutes } from './routes/ads';
 import { billingRoutes } from './routes/billing';
@@ -60,6 +61,7 @@ export function createApp(getDeps: () => Deps) {
   billingRoutes(app);
   adRoutes(app);
   reportRoutes(app);
+  noticeRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;
