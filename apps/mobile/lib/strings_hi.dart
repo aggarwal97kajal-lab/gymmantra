@@ -26,14 +26,14 @@ const hindi = <String, String>{
   'Sign up with Google': 'Google से साइन अप',
   'Fill in your mobile number above so your gym can find you.': 'ऊपर मोबाइल नंबर भरें, ताकि आपका जिम आपको ढूँढ सके।',
   'Already have an account?': 'पहले से अकाउंट है?',
-  'Enter your email or mobile number.': 'अपना ईमेल या मोबाइल नंबर डालें।',
   'Email sent!': 'ईमेल भेज दिया!',
   'We sent a link to {email}. Open it, set a new password, then log in here.': '{email} पर लिंक भेजा है। लिंक खोलें, नया पासवर्ड बनाएँ, फिर यहाँ लॉग इन करें।',
   'Not in your inbox? Check the Spam folder.': 'इनबॉक्स में नहीं दिखा? Spam फ़ोल्डर देखें।',
   'Back to login': 'लॉग इन पर वापस',
   'Resend in 0:{s}': '0:{s} में दोबारा भेजें',
   'Resend link': 'लिंक दोबारा भेजें',
-  'Enter your email or mobile number. We will email you a link to set a new password.': 'अपना ईमेल या मोबाइल नंबर डालें। हम आपके ईमेल पर नया पासवर्ड बनाने का लिंक भेजेंगे।',
+  'Enter the email you signed up with. We will email you a link to set a new password.': 'वह ईमेल डालें जिससे आपने साइन अप किया था। हम उस पर नया पासवर्ड बनाने का लिंक भेजेंगे।',
+  'Enter the email you signed up with.': 'वह ईमेल डालें जिससे आपने साइन अप किया था।',
   'Send reset link': 'रीसेट लिंक भेजें',
 
   // gym
@@ -210,4 +210,17 @@ const hindi = <String, String>{
   'No plan': 'कोई प्लान नहीं',
   'Starts later': 'बाद में शुरू',
   'Try again': 'फिर कोशिश करें',
+  'Vibrate on tap': 'टैप पर वाइब्रेशन',
+
+  // messages from the server
+  'This email ID already exists. Please log in, or use a different email': 'यह ईमेल ID पहले से मौजूद है। लॉग इन करें, या दूसरा ईमेल डालें।',
+  'This mobile number already exists. Please log in, or use a different number': 'यह मोबाइल नंबर पहले से मौजूद है। लॉग इन करें, या दूसरा नंबर डालें।',
+  'Wrong email/mobile or password': 'ईमेल/मोबाइल या पासवर्ड गलत है',
+  'Enter a valid email address': 'सही ईमेल पता डालें',
+  'Enter a valid 10-digit mobile number': 'सही 10 अंकों का मोबाइल नंबर डालें',
+  'No GymMantra account found with this email or mobile number': 'इस ईमेल या मोबाइल नंबर से कोई GymMantra अकाउंट नहीं मिला',
+  'Could not reach GymMantra. Check your internet and try again.': 'GymMantra से जुड़ नहीं पाए। इंटरनेट चेक करके फिर कोशिश करें।',
+  'Google sign-in failed. Please try again': 'Google से साइन इन नहीं हुआ। फिर कोशिश करें।',
+  'This account was created with Google. Use "Continue with Google" to log in': 'यह अकाउंट Google से बना है। लॉग इन के लिए "Google से जारी रखें" दबाएँ।',
+  'This account uses Google sign-in. Use "Continue with Google" to log in': 'यह अकाउंट Google से बना है। लॉग इन के लिए "Google से जारी रखें" दबाएँ।',
 };

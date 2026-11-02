@@ -38,10 +38,11 @@ class HelpScreen extends ConsumerStatefulWidget {
 
 class _HelpState extends ConsumerState<HelpScreen> {
   String q = '';
+  String? openQ;
   @override
   Widget build(BuildContext context) {
     final tickets = ref.watch(ticketsProvider);
-    final shown = faqs.where((f) => q.isEmpty || '${f.$2} ${f.$3}'.toLowerCase().contains(q.toLowerCase())).toList();
+    final shown = faqs.where((f) => q.isEmpty || '${f.$2} ${f.$3} ${context.t(f.$2)} ${context.t(f.$3)}'.toLowerCase().contains(q.toLowerCase())).toList();
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Help & Support'))),
       floatingActionButton: FloatingActionButton.extended(
@@ -85,22 +86,70 @@ class _HelpState extends ConsumerState<HelpScreen> {
           ),
           const SizedBox(height: 16),
           SectionTitle(context.t('Common questions')),
-          for (final f in shown)
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                iconColor: context.c.primary,
-                title: Text(context.t(f.$2), style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(context.t(f.$1), style: TextStyle(color: context.c.mut, fontSize: 12)),
-                childrenPadding: const EdgeInsets.only(bottom: 12),
-                expandedAlignment: Alignment.centerLeft,
-                children: [Text(context.t(f.$3), style: TextStyle(color: context.c.mut, height: 1.45))],
-              ),
-            ),
+          // Only one answer open at a time: opening a question closes the previous one.
+          Panel(
+            padding: EdgeInsets.zero,
+            child: Column(children: [
+              for (final (i, f) in shown.indexed)
+                _FaqTile(
+                  question: context.t(f.$2),
+                  topic: context.t(f.$1),
+                  answer: context.t(f.$3),
+                  open: openQ == f.$2,
+                  last: i == shown.length - 1,
+                  onTap: () => setState(() => openQ = openQ == f.$2 ? null : f.$2),
+                ),
+            ]),
+          ),
         ]),
       ),
     );
+  }
+}
+
+class _FaqTile extends StatelessWidget {
+  const _FaqTile({required this.question, required this.topic, required this.answer, required this.open, required this.last, required this.onTap});
+  final String question, topic, answer;
+  final bool open, last;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.c;
+    return Column(children: [
+      InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(question, style: TextStyle(fontWeight: FontWeight.w700, color: open ? p.primary : p.fg)),
+                const SizedBox(height: 2),
+                Text(topic, style: TextStyle(color: p.mut, fontSize: 12)),
+              ]),
+            ),
+            AnimatedRotation(
+              turns: open ? 0.5 : 0,
+              duration: const Duration(milliseconds: 220),
+              child: Icon(Icons.keyboard_arrow_down_rounded, color: open ? p.primary : p.mut),
+            ),
+          ]),
+        ),
+      ),
+      AnimatedSize(
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+        alignment: Alignment.topCenter,
+        child: open
+            ? Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Text(answer, style: TextStyle(color: p.mut, height: 1.5)),
+              )
+            : const SizedBox(width: double.infinity),
+      ),
+      if (!last) Divider(height: 1, indent: 16, endIndent: 16, color: p.line),
+    ]);
   }
 }
 

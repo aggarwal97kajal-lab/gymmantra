@@ -53,6 +53,7 @@ class AppSettings extends ChangeNotifier {
 
   ThemeMode themeMode = ThemeMode.system;
   String lang = 'en';
+  bool haptics = true;
 
   void load() {
     themeMode = switch (Prefs.getString('themeMode')) {
@@ -61,6 +62,13 @@ class AppSettings extends ChangeNotifier {
       _ => ThemeMode.system,
     };
     lang = Prefs.getString('lang') == 'hi' ? 'hi' : 'en';
+    haptics = Prefs.getString('haptics') != 'off';
+  }
+
+  void setHaptics(bool on) {
+    haptics = on;
+    Prefs.setString('haptics', on ? 'on' : 'off');
+    notifyListeners();
   }
 
   void setTheme(ThemeMode m) {

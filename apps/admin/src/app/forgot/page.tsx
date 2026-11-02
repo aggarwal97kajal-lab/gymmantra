@@ -7,14 +7,14 @@ import { ErrorBox, Field, useAction } from '@/components/ui';
 import { api } from '@/lib/api';
 
 export default function ForgotPage() {
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [sentTo, setSentTo] = useState<string | null>(null);
   const { busy, error, run } = useAction();
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     run(async () => {
-      const r = await api<{ to: string }>('/auth/forgot', { body: { identifier } });
+      const r = await api<{ to: string }>('/auth/forgot', { body: { identifier: email.trim() } });
       setSentTo(r.to);
     });
   };
@@ -24,6 +24,7 @@ export default function ForgotPage() {
       {sentTo ? (
         <>
           <div className="alert okk">We sent a password reset link to {sentTo}. Open it, set a new password, then log in here.</div>
+          <p className="mut small" style={{ margin: 0 }}>Not in your inbox? Check the Spam folder and mark it &quot;Not spam&quot;.</p>
           <Link className="btn block" href="/login">
             Back to login
           </Link>
@@ -31,10 +32,10 @@ export default function ForgotPage() {
       ) : (
         <form className="stack" onSubmit={submit}>
           <p className="mut" style={{ margin: 0 }}>
-            Enter your email or mobile number. We will email you a link to set a new password.
+            Enter the email you signed up with. We will email you a link to set a new password.
           </p>
-          <Field label="Email or mobile number">
-            <input className="inp" value={identifier} onChange={(e) => setIdentifier(e.target.value)} required autoFocus />
+          <Field label="Email">
+            <input className="inp" type="email" inputMode="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
           </Field>
           <ErrorBox error={error} />
           <button className="btn block" disabled={busy}>

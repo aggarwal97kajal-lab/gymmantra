@@ -172,7 +172,7 @@ class ErrorText extends StatelessWidget {
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Icon(Icons.error_outline, color: C.red, size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text(error!, style: TextStyle(color: context.c.dark ? const Color(0xFFFFB3B3) : const Color(0xFFB91C1C)))),
+        Expanded(child: Text(context.t(error!), style: TextStyle(color: context.c.dark ? const Color(0xFFFFB3B3) : const Color(0xFFB91C1C)))),
       ]),
     );
   }
@@ -310,7 +310,7 @@ class AsyncBody<T> extends StatelessWidget {
 void toast(BuildContext context, String msg) {
   final m = ScaffoldMessenger.maybeOf(context);
   m?.hideCurrentSnackBar();
-  m?.showSnackBar(SnackBar(content: Text(msg)));
+  m?.showSnackBar(SnackBar(content: Text(translate(AppLang.current, msg))));
 }
 
 // ---------------------------------------------------------------- brand

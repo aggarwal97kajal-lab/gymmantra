@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'haptics.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/auth.dart';
@@ -19,6 +20,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Prefs.init();
   AppSettings.instance.load();
+  TapHaptics.install();
   runApp(const ProviderScope(child: GymMantraApp()));
 }
 
@@ -97,8 +99,11 @@ class _AppState extends ConsumerState<GymMantraApp> {
   }
 }
 
-/// Animated splash: the dumbbell drops in and bounces, the heartbeat line
-/// draws across it, then the name and tagline rise up (about 1.4 seconds).
+/// Animated splash (2 seconds):
+/// 1. the dumbbell drops in with a little spin, bounces and squashes on landing,
+/// 2. ripples spread out and the heartbeat line draws across it,
+/// 3. it "beats" twice like a heart while sparks float up,
+/// 4. the name rises letter by letter with a shine, then the tagline.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
   @override
@@ -106,13 +111,23 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late final AnimationController a = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
+  late final AnimationController a = AnimationController(vsync: this, duration: const Duration(milliseconds: 2000));
 
-  late final drop = CurvedAnimation(parent: a, curve: const Interval(0, 0.42, curve: Curves.bounceOut));
-  late final fadeIn = CurvedAnimation(parent: a, curve: const Interval(0, 0.18, curve: Curves.easeOut));
-  late final glow = CurvedAnimation(parent: a, curve: const Interval(0.3, 0.7, curve: Curves.easeOut));
-  late final pulse = CurvedAnimation(parent: a, curve: const Interval(0.42, 0.72, curve: Curves.easeInOut));
-  late final words = CurvedAnimation(parent: a, curve: const Interval(0.6, 0.9, curve: Curves.easeOutCubic));
+  Animation<double> _iv(double b, double e, [Curve c = Curves.easeOut]) => CurvedAnimation(parent: a, curve: Interval(b, e, curve: c));
+  late final drop = _iv(0, 0.3, Curves.bounceOut);
+  late final fadeIn = _iv(0, 0.12);
+  late final spin = _iv(0, 0.34, Curves.easeOutBack);
+  late final squash = _iv(0.22, 0.36, Curves.easeInOut);
+  late final ripple1 = _iv(0.24, 0.6);
+  late final ripple2 = _iv(0.34, 0.72);
+  late final pulse = _iv(0.3, 0.52, Curves.easeInOut);
+  late final beat1 = _iv(0.52, 0.62, Curves.easeInOut);
+  late final beat2 = _iv(0.63, 0.73, Curves.easeInOut);
+  late final glow = _iv(0.1, 0.7);
+  late final sparks = _iv(0.3, 1, Curves.linear);
+  late final words = _iv(0.58, 0.86, Curves.linear);
+  late final shine = _iv(0.8, 0.98, Curves.easeInOut);
+  late final tagline = _iv(0.78, 0.95);
 
   @override
   void initState() {
@@ -127,9 +142,21 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
     super.dispose();
   }
 
+  /// 0 → 1 → 0 bump used for the squash and the heart beats.
+  double _bump(double v) => v <= 0 || v >= 1 ? 0.0 : (v < 0.5 ? v * 2 : (1 - v) * 2);
+
+  Widget _ripple(double v) => Opacity(
+        opacity: v <= 0 ? 0.0 : (1 - v).clamp(0.0, 1.0),
+        child: Container(
+          width: 110 + 110 * v,
+          height: 110 + 110 * v,
+          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.orange.withAlpha(170), width: 2)),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
-    final t = translate(AppLang.current, 'Fitness ka sahi mantra.');
+    final tag = translate(AppLang.current, 'Fitness ka sahi mantra.');
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
       child: Scaffold(
@@ -137,50 +164,52 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
         body: AnimatedBuilder(
           animation: a,
           builder: (context, _) {
+            final sq = _bump(squash.value);
+            final beat = 1 + 0.12 * _bump(beat1.value) + 0.08 * _bump(beat2.value);
             return Stack(children: [
-              // warm glow behind the logo
               Positioned.fill(
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: RadialGradient(
                       center: const Alignment(0, -0.15),
-                      radius: 0.9,
-                      colors: [C.orange.withAlpha((50 * glow.value).round()), C.night],
+                      radius: 0.8 + 0.25 * glow.value,
+                      colors: [C.orange.withAlpha((60 * glow.value + 25 * _bump(beat1.value)).round().clamp(0, 255)), C.night],
                     ),
                   ),
                 ),
               ),
+              Positioned.fill(child: CustomPaint(painter: _SparksPainter(sparks.value))),
               Align(
                 alignment: const Alignment(0, -0.12),
                 child: Column(mainAxisSize: MainAxisSize.min, children: [
                   SizedBox(
-                    width: 200,
-                    height: 200,
+                    width: 230,
+                    height: 230,
                     child: Stack(alignment: Alignment.center, children: [
-                      Opacity(
-                        opacity: (1 - glow.value).clamp(0.0, 1.0) * (glow.value > 0 ? 1 : 0),
-                        child: Container(
-                          width: 110 + 90 * glow.value,
-                          height: 110 + 90 * glow.value,
-                          decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.orange.withAlpha(150), width: 2)),
-                        ),
-                      ),
+                      _ripple(ripple1.value),
+                      _ripple(ripple2.value),
                       Transform.translate(
-                        offset: Offset(0, -160 * (1 - drop.value)),
-                        child: Opacity(opacity: fadeIn.value, child: Logo(size: 112, mark: Colors.white, pulse: pulse.value)),
+                        offset: Offset(0, -190 * (1 - drop.value)),
+                        child: Transform.rotate(
+                          angle: -0.6 * (1 - spin.value),
+                          child: Transform.scale(
+                            scaleX: (1 + 0.14 * sq) * beat,
+                            scaleY: (1 - 0.16 * sq) * beat,
+                            alignment: Alignment.bottomCenter,
+                            child: Opacity(opacity: fadeIn.value, child: Logo(size: 116, mark: Colors.white, pulse: pulse.value)),
+                          ),
+                        ),
                       ),
                     ]),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 4),
+                  _Letters(progress: words.value, shine: shine.value),
+                  const SizedBox(height: 8),
                   Opacity(
-                    opacity: words.value,
+                    opacity: tagline.value,
                     child: Transform.translate(
-                      offset: Offset(0, 16 * (1 - words.value)),
-                      child: Column(children: [
-                        const Wordmark(size: 36, color: Colors.white),
-                        const SizedBox(height: 6),
-                        Text(t, style: const TextStyle(color: Color(0xFF8B95A5), fontSize: 14)),
-                      ]),
+                      offset: Offset(0, 10 * (1 - tagline.value)),
+                      child: Text(tag, style: const TextStyle(color: Color(0xFF8B95A5), fontSize: 14, letterSpacing: 0.3)),
                     ),
                   ),
                 ]),
@@ -206,4 +235,69 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
       ),
     );
   }
+}
+
+/// "GymMantra" rising one letter at a time, then a light sweep across it.
+class _Letters extends StatelessWidget {
+  const _Letters({required this.progress, required this.shine});
+  final double progress;
+  final double shine;
+  static const text = 'GymMantra';
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(mainAxisSize: MainAxisSize.min, children: [
+      for (var i = 0; i < text.length; i++)
+        Builder(builder: (_) {
+          final start = i / (text.length + 3);
+          final v = ((progress - start) * (text.length + 3) / 4).clamp(0.0, 1.0);
+          final e = Curves.easeOutBack.transform(v);
+          return Opacity(
+            opacity: v,
+            child: Transform.translate(
+              offset: Offset(0, 22 * (1 - e)),
+              child: Text(
+                text[i],
+                style: TextStyle(fontSize: 38, fontWeight: FontWeight.w800, letterSpacing: -0.8, color: i < 3 ? Colors.white : C.orange, height: 1.1),
+              ),
+            ),
+          );
+        }),
+    ]);
+    if (shine <= 0 || shine >= 1) return row;
+    return ShaderMask(
+      blendMode: BlendMode.srcATop,
+      shaderCallback: (r) => LinearGradient(
+        colors: const [Color(0x00FFFFFF), Color(0xCCFFFFFF), Color(0x00FFFFFF)],
+        stops: const [0.0, 0.5, 1.0],
+        begin: Alignment(-2.5 + 5 * shine, 0),
+        end: Alignment(-1.5 + 5 * shine, 0),
+      ).createShader(r),
+      child: row,
+    );
+  }
+}
+
+/// Small orange sparks drifting up behind the logo.
+class _SparksPainter extends CustomPainter {
+  _SparksPainter(this.t);
+  final double t;
+  static const _seeds = [
+    (0.18, 0.62, 3.0, 0.0), (0.30, 0.70, 2.0, 0.15), (0.42, 0.58, 2.5, 0.35), (0.58, 0.66, 3.0, 0.1),
+    (0.70, 0.60, 2.0, 0.28), (0.82, 0.68, 2.5, 0.05), (0.25, 0.52, 1.8, 0.45), (0.76, 0.50, 1.8, 0.4),
+    (0.50, 0.74, 2.2, 0.22), (0.12, 0.56, 1.6, 0.3), (0.88, 0.56, 1.6, 0.18), (0.64, 0.76, 2.4, 0.5),
+  ];
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (t <= 0) return;
+    for (final (x, y, r, delay) in _seeds) {
+      final v = ((t - delay) / (1 - delay)).clamp(0.0, 1.0);
+      if (v <= 0) continue;
+      final alpha = (v < 0.2 ? v / 0.2 : (1 - v) / 0.8).clamp(0.0, 1.0);
+      final pos = Offset(size.width * x + 8 * (v - 0.5), size.height * (y - 0.28 * v));
+      canvas.drawCircle(pos, r, Paint()..color = C.orange.withAlpha((200 * alpha).round()));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_SparksPainter o) => o.t != t;
 }

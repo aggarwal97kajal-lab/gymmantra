@@ -343,7 +343,7 @@ class _ForgotState extends ConsumerState<ForgotScreen> with _Busy {
     super.didChangeDependencies();
     if (id.text.isEmpty) {
       final extra = GoRouterState.of(context).extra;
-      if (extra is String) id.text = extra;
+      if (extra is String && extra.contains('@')) id.text = extra.trim();
     }
   }
 
@@ -354,8 +354,9 @@ class _ForgotState extends ConsumerState<ForgotScreen> with _Busy {
   }
 
   void send() {
-    if (id.text.trim().isEmpty) {
-      setState(() => error = context.t('Enter your email or mobile number.'));
+    final v = id.text.trim();
+    if (!RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v)) {
+      setState(() => error = context.t('Enter the email you signed up with.'));
       return;
     }
     run(() async {
@@ -422,15 +423,17 @@ class _ForgotState extends ConsumerState<ForgotScreen> with _Busy {
     return _AuthFrame(
       back: true,
       title: context.t('Forgot password?'),
-      subtitle: context.t('Enter your email or mobile number. We will email you a link to set a new password.'),
+      subtitle: context.t('Enter the email you signed up with. We will email you a link to set a new password.'),
       children: [
         Align(alignment: Alignment.centerLeft, child: IconTile(Icons.key_rounded, size: 52, color: p.primary)),
         const SizedBox(height: 18),
         LabeledField(
-          label: context.t('Email or mobile number'),
+          label: context.t('Email'),
           controller: id,
           icon: Icons.mail_outline_rounded,
+          hint: 'name@gmail.com',
           keyboard: TextInputType.emailAddress,
+          autofill: const [AutofillHints.email],
           onSubmitted: (_) => send(),
         ),
         ErrorText(error),

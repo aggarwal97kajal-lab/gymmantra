@@ -293,6 +293,13 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
               items: const [('en', 'English', null), ('hi', 'हिन्दी', null)],
               onChanged: (v) => s.setLanguage(v),
             ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.vibration_rounded, size: 18, color: p.primary),
+              const SizedBox(width: 8),
+              Expanded(child: Text(context.t('Vibrate on tap'), style: const TextStyle(fontWeight: FontWeight.w700))),
+              Switch(value: settings.haptics, activeTrackColor: p.primary, onChanged: settings.setHaptics),
+            ]),
           ]),
         ),
         const SizedBox(height: 12),

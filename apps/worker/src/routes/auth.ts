@@ -47,7 +47,8 @@ function tooMany(until: string) {
   return new HttpError(429, `Too many attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}`, { retryAfterMinutes: mins });
 }
 
-const PHONE_TAKEN = 'This mobile number is already used by another GymMantra account. Each account needs its own mobile number. Please log in, or use a different number';
+const PHONE_TAKEN = 'This mobile number already exists. Please log in, or use a different number';
+const EMAIL_TAKEN = 'This email ID already exists. Please log in, or use a different email';
 
 /** Mobile numbers with no email get a private sign-in address for Firebase. */
 export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phone.gymmantra.app`;
@@ -55,7 +56,8 @@ export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phon
 /** Creates a password account in Firebase and the GymMantra user record. */
 export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string }) {
   const { store, identity, superAdminEmail } = c.var.deps;
-  // The mobile number must be free. An index left behind by a removed account does not count.
+  // The email and the mobile number must be free. Records of removed accounts do not count.
+  if (input.email && (await store.query<UserDoc>('users', [['email', input.email]])).some((r) => !r.data.deleted)) throw conflict(EMAIL_TAKEN);
   const phoneRef = await store.get<{ uid: string }>(P.phone(input.phone));
   const phoneOwner = phoneRef ? await store.get<UserDoc>(P.user(phoneRef.uid)) : null;
   if (phoneOwner && !phoneOwner.deleted) throw conflict(PHONE_TAKEN);
@@ -67,7 +69,7 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
   } catch (e) {
     if (!(e instanceof HttpError && e.message === 'EMAIL_EXISTS')) throw e;
     const owner = (await store.query<UserDoc>('users', [['authEmail', authEmail]])).find((r) => !r.data.deleted);
-    if (owner) throw conflict(input.email ? 'An account with this email already exists. Please log in' : PHONE_TAKEN);
+    if (owner) throw conflict(input.email ? EMAIL_TAKEN : PHONE_TAKEN);
     // Firebase has the login but GymMantra has no record (an earlier sign-up did not finish).
     // If the password matches, finish that sign-up now.
     try {
@@ -242,6 +244,31 @@ export function authRoutes(app: App) {
     await identity.sendPasswordReset(user.authEmail);
     const [name, domain] = user.authEmail.split('@');
     return c.json({ sent: true, to: `${name.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, name.length - 1)))}@${domain}` });
+  });
+
+  /** Our own "set a new password" page (the link in the reset email points here). */
+  app.post('/api/v1/auth/reset/check', async (c) => {
+    const b = body(await c.req.json().catch(() => null));
+    const email = await c.var.deps.identity.checkResetCode(str(b, 'oobCode', { max: 2000, label: 'the reset code' }));
+    const [n, d] = email.split('@');
+    return c.json({ email: `${n.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, n.length - 1)))}@${d}` });
+  });
+
+  app.post('/api/v1/auth/reset', async (c) => {
+    const { store, identity } = c.var.deps;
+    const b = body(await c.req.json().catch(() => null));
+    const code = str(b, 'oobCode', { max: 2000, label: 'the reset code' });
+    const password = str(b, 'password', { min: 8, max: 100, label: 'new password' });
+    const email = await identity.resetPassword(code, password);
+    // A fresh password also clears any lockout.
+    const row = (await store.query<UserDoc>('users', [['authEmail', email]]))[0];
+    if (row && (row.data.failed || row.data.lockedUntil)) {
+      await store.tx(async (t) => {
+        const u = await t.get<UserDoc>(P.user(row.id));
+        if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null });
+      });
+    }
+    return c.json({ ok: true });
   });
 
   app.post('/api/v1/auth/logout', (c) => {

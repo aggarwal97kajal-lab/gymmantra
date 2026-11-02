@@ -20,6 +20,10 @@ export interface Identity {
   changePassword(email: string, current: string | null, next: string): Promise<{ uid: string }>;
   /** Firebase emails a password reset link. */
   sendPasswordReset(email: string): Promise<void>;
+  /** Checks a reset link's code; returns the account email. */
+  checkResetCode(code: string): Promise<string>;
+  /** Sets a new password with a reset link's code; returns the account email. */
+  resetPassword(code: string, password: string): Promise<string>;
   verifyGoogle(idToken: string): Promise<GoogleProfile>;
 }
 
@@ -46,6 +50,7 @@ export class FirebaseIdentity implements Identity {
       if (code.startsWith('WEAK_PASSWORD')) throw bad('Password is too weak. Use at least 8 characters');
       if (code === 'INVALID_EMAIL') throw bad('Enter a valid email address');
       if (code === 'USER_DISABLED') throw new HttpError(403, 'This account is disabled');
+      if (code === 'EXPIRED_OOB_CODE' || code === 'INVALID_OOB_CODE') throw bad('This link has expired or was already used. Ask for a new reset link');
       if (code === 'TOO_MANY_ATTEMPTS_TRY_LATER') throw new HttpError(429, 'Too many attempts. Try again later');
       if (code === 'OPERATION_NOT_ALLOWED') throw new HttpError(500, 'Email/password sign-in is not turned on in Firebase');
       throw new HttpError(502, `Login service error (${code})`);
@@ -72,6 +77,14 @@ export class FirebaseIdentity implements Identity {
   }
   async sendPasswordReset(email: string) {
     await this.call('sendOobCode', { requestType: 'PASSWORD_RESET', email });
+  }
+  async checkResetCode(code: string) {
+    const d = await this.call('resetPassword', { oobCode: code });
+    return String(d.email ?? '');
+  }
+  async resetPassword(code: string, password: string) {
+    const d = await this.call('resetPassword', { oobCode: code, newPassword: password });
+    return String(d.email ?? '');
   }
   async verifyGoogle(idToken: string): Promise<GoogleProfile> {
     if (!this.googleClientIds.length) throw bad('Google sign-in is not set up yet');
@@ -113,6 +126,18 @@ export class FakeIdentity implements Identity {
   async sendPasswordReset(email: string) {
     if (!this.accounts.has(email)) throw unauthorized('WRONG_PASSWORD');
     this.resets.push(email);
+  }
+  /** Test reset codes look like "reset:<email>". */
+  async checkResetCode(code: string) {
+    const email = code.startsWith('reset:') ? code.slice(6) : '';
+    if (!this.accounts.has(email)) throw bad('This link has expired or was already used. Ask for a new reset link');
+    return email;
+  }
+  async resetPassword(code: string, password: string) {
+    const email = await this.checkResetCode(code);
+    if (password.length < 6) throw bad('Password is too weak. Use at least 8 characters');
+    this.accounts.get(email)!.password = password;
+    return email;
   }
   /** Test tokens look like "google:<sub>:<email>". */
   async verifyGoogle(idToken: string) {

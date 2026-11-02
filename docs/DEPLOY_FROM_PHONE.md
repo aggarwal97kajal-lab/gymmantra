@@ -122,3 +122,13 @@ Iske liye Google Cloud mein OAuth Client ID chahiye:
 - app ke liye "Android" client ID, package `com.gymmantra.gymmantra` aur SHA-1 `4B:43:F7:B1:5D:B9:3B:D2:FD:7E:7D:8F:36:9D:C2:8B:A9:22:67:97`
 
 Web client ID ko Cloudflare mein `GOOGLE_CLIENT_IDS` naam se daal do. Tab tak Google button chhupa rahega.
+
+## Password reset email (apna design)
+
+Firebase → **Authentication → Templates → Password reset** → ✏️ (pencil):
+- **Sender name:** GymMantra
+- **Reply to:** aapka support email
+- **Subject:** GymMantra: naya password banayein
+- **Customize action URL** (neeche link): `https://<aapka-link>/reset` — ab email ka link GymMantra ke apne page pe khulega.
+
+Email inbox mein aaye (spam nahi), iske liye apna domain chahiye (jaise `gymmantra.in`). Domain lene ke baad Templates → **Customize domain** se add karo aur jo DNS records Firebase de, wo domain mein daal do.

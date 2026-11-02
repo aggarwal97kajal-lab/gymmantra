@@ -56,7 +56,10 @@ describe('auth', () => {
     const u = await h.signup();
     const r = await h.api.post('/auth/signup', { name: 'Other', email: 'other@test.in', phone: u.phone, password: 'secret123' });
     expect(r.status).toBe(409);
-    expect(r.body.message).toMatch(/mobile number is already used/);
+    expect(r.body.message).toMatch(/mobile number already exists/);
+    const e = await h.api.post('/auth/signup', { name: 'Other', email: u.email, phone: h.nextPhone(), password: 'secret123' });
+    expect(e.status).toBe(409);
+    expect(e.body.message).toMatch(/email ID already exists/);
     const ok = await h.api.post('/auth/signup', { name: 'Other', email: 'other@test.in', phone: h.nextPhone(), password: 'secret123' });
     expect(ok.status).toBe(201);
   });
@@ -71,6 +74,19 @@ describe('auth', () => {
     const r = await h.api.post('/auth/signup', { name: 'Half', email, phone: h.nextPhone(), password: 'secret123' });
     expect(r.status).toBe(201);
     expect((await h.api.post('/auth/login', { identifier: email, password: 'secret123' })).status).toBe(200);
+  });
+
+  it('reset link page sets a new password and clears the lock', async () => {
+    if (!(h.deps.identity as any).resets) return; // reset codes cannot be read from the emulator here
+    const u = await h.signup();
+    for (let i = 0; i < 3; i++) await h.api.post('/auth/login', { identifier: u.email, password: 'wrong-pass' });
+    expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).status).toBe(429);
+    const chk = await h.api.post('/auth/reset/check', { oobCode: `reset:${u.email}` });
+    expect(chk.status).toBe(200);
+    expect(chk.body.email).toMatch(/^u•+@test\.in$/);
+    expect((await h.api.post('/auth/reset/check', { oobCode: 'bad' })).status).toBe(400);
+    expect((await h.api.post('/auth/reset', { oobCode: `reset:${u.email}`, password: 'brandnew1' })).status).toBe(200);
+    expect((await h.api.post('/auth/login', { identifier: u.email, password: 'brandnew1' })).status).toBe(200);
   });
 
   it('accepts real-length Google tokens', async () => {
