@@ -5,6 +5,37 @@ cd "$(dirname "$0")/.."
 M=android/app/src/main/AndroidManifest.xml
 grep -q 'android.permission.INTERNET' "$M" || sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$M"
 sed -i 's#android:label="[^"]*"#android:label="GymMantra"#' "$M"
+# Location (gym check-in near the gym) and saving the QR poster on old Android versions
+for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION CAMERA; do
+  grep -q "android.permission.$perm\"" "$M" || sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\"/>\n    <application#" "$M"
+done
+grep -q 'WRITE_EXTERNAL_STORAGE' "$M" || sed -i 's#<application#<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n    <application#' "$M"
+# Block screenshots on screens that show a trainer's PDF (method channel "gymmantra/secure")
+MA=$(find android/app/src/main -name 'MainActivity.kt' | head -1)
+if [ -n "$MA" ]; then
+  PKG=$(sed -n 's/^package \(.*\)$/\1/p' "$MA")
+  cat > "$MA" <<KT
+package $PKG
+
+import android.view.WindowManager
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymmantra/secure").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "on" -> { window.addFlags(WindowManager.LayoutParams.FLAG_SECURE); result.success(null) }
+                "off" -> { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE); result.success(null) }
+                else -> result.notImplemented()
+            }
+        }
+    }
+}
+KT
+fi
 # Photo cropper screen (image_cropper / uCrop)
 grep -q 'UCropActivity' "$M" || sed -i 's#</application>#    <activity android:name="com.yalantis.ucrop.UCropActivity" android:screenOrientation="portrait" android:theme="@style/GmCropTheme"/>\n    </application>#' "$M"
 sed -i 's#android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>#android:theme="@style/GmCropTheme"/>#' "$M"
