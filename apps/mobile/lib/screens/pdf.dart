@@ -170,7 +170,7 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
       widget.onChanged((p as Map)[widget.kind == 'diet' ? 'dietPdf' : 'workoutPdf'] as Map?);
       if (mounted) toast(context, sent);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) {
         setState(() {
@@ -187,7 +187,7 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
       await Api.instance.delete('/programs/${widget.memberId}/pdf/${widget.kind}?tenantId=${widget.tenantId}');
       widget.onChanged(null);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }

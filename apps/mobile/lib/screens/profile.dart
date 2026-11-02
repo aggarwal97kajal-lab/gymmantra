@@ -38,7 +38,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
       await fn();
       if (done != null && mounted) toast(context, done);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -52,7 +52,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     try {
       file = await ImagePicker().pickImage(source: source, maxWidth: 1280, maxHeight: 1280, imageQuality: 88, preferredCameraDevice: CameraDevice.front);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
       return;
     }
     if (file == null) return;
@@ -98,7 +98,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
       ref.read(sessionProvider).patchUser({'photoUrl': url});
       if (mounted) toast(context, doneMsg);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) {
         setState(() {

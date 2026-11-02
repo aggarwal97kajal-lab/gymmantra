@@ -138,7 +138,7 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
       await f.writeAsString(lines.join('\n'));
       await Share.shareXFiles([XFile(f.path, mimeType: 'text/csv')], text: 'GymMantra report · last $days days');
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     }
   }
 
@@ -795,7 +795,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                                 await Api.instance.delete('/gym/branches/${b['id']}');
                                 ref.invalidate(gymProvider);
                               } catch (e) {
-                                if (context.mounted) toast(context, e.toString());
+                                if (context.mounted) toastError(context, e);
                               }
                             },
                           )
@@ -1073,7 +1073,7 @@ class NoticesScreen extends ConsumerWidget {
                             await Api.instance.delete('/notices/${n['id']}');
                             ref.invalidate(noticesProvider);
                           } catch (e) {
-                            if (context.mounted) toast(context, e.toString());
+                            if (context.mounted) toastError(context, e);
                           }
                         },
                         icon: const Icon(Icons.delete_outline_rounded, size: 18, color: C.red),

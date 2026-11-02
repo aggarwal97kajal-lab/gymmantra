@@ -1,7 +1,9 @@
+export 'drip.dart' show DripKind;
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'drip.dart';
 import 'i18n.dart';
 import 'photo.dart';
 import 'theme.dart';
@@ -309,11 +311,14 @@ class AsyncBody<T> extends StatelessWidget {
   }
 }
 
-void toast(BuildContext context, String msg) {
-  final m = ScaffoldMessenger.maybeOf(context);
-  m?.hideCurrentSnackBar();
-  m?.showSnackBar(SnackBar(content: Text(translate(AppLang.current, msg))));
+/// Shows a drip toast (drips out of the front camera). [kind] is guessed from
+/// the words when not given; [detail] and [action] turn it into a card.
+void toast(BuildContext context, String msg, {DripKind? kind, String? detail, String? action, VoidCallback? onAction}) {
+  Drip.show(context, translate(AppLang.current, msg), kind: kind, detail: detail, action: action, onAction: onAction);
 }
+
+/// Error from a failed call.
+void toastError(BuildContext context, Object e) => toast(context, e.toString(), kind: DripKind.error);
 
 // ---------------------------------------------------------------- brand
 

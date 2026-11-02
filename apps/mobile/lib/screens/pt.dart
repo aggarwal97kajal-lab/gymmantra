@@ -638,7 +638,7 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
       ref.invalidate(trainerClientsProvider);
       ref.invalidate(ownerPtProvider('ACTIVE'));
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -864,7 +864,7 @@ class OwnerPtRequests extends ConsumerWidget {
                               ref.invalidate(ownerPtProvider('PENDING'));
                               ref.invalidate(dashboardProvider);
                             } catch (e) {
-                              if (context.mounted) toast(context, e.toString());
+                              if (context.mounted) toastError(context, e);
                             }
                           },
                           child: Text(context.t('Decline')),

@@ -178,7 +178,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
       final f = await _tempPng(png, 'gym_join_${gym['gymCode'] ?? 'qr'}');
       await Share.shareXFiles([XFile(f.path, mimeType: 'image/png')], text: joinMessage(gym));
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -207,7 +207,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
       final f = await _tempPng(png, name);
       await Share.shareXFiles([XFile(f.path, mimeType: 'image/png')]);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -233,7 +233,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
       ref.invalidate(gymQrProvider);
       if (mounted) toast(context, '$ok (±${best.accuracy.round()} m)');
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -256,7 +256,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
       await Api.instance.post('/gym/checkin-qr/rotate');
       ref.invalidate(gymQrProvider);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     }
   }
 

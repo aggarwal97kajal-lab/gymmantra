@@ -134,7 +134,7 @@ class _DueSheetState extends ConsumerState<_DueSheet> {
       });
       ref.invalidate(duesProvider);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }

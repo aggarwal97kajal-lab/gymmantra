@@ -143,7 +143,7 @@ class _JoinState extends ConsumerState<JoinScreen> {
                       }
                       ref.invalidate(gymsProvider);
                       if (mounted) {
-                        toast(context, context.t('Request sent to {gym}', {'gym': gym!['name']}));
+                        toast(context, context.t('Request sent to {gym}', {'gym': gym!['name']}), kind: DripKind.ok, detail: context.t('The gym will approve it. You will get a notification.'));
                         context.pop();
                       }
                     }),
@@ -273,7 +273,7 @@ class _PlansScreenState extends ConsumerState<PlansScreen> {
       ref.invalidate(plansProvider(widget.tenantId));
       if (mounted) toast(context, ok);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy.remove(p['id']));
     }

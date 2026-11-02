@@ -41,7 +41,7 @@ Future<Uint8List?> pickBanner(BuildContext context) async {
     }
     return bytes;
   } catch (e) {
-    if (context.mounted) toast(context, e.toString());
+    if (context.mounted) toastError(context, e);
     return null;
   }
 }

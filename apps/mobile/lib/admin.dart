@@ -335,7 +335,7 @@ class AdminGym extends ConsumerWidget {
       ref.invalidate(_gyms);
       if (context.mounted) toast(context, context.t('Saved'));
     } catch (e) {
-      if (context.mounted) toast(context, e.toString());
+      if (context.mounted) toastError(context, e);
     }
   }
 
@@ -789,7 +789,7 @@ class _QuickSwitchState extends State<_QuickSwitch> {
           } catch (e) {
             if (mounted) {
               setState(() => v = null);
-              toast(context, e.toString());
+              toastError(context, e);
             }
           }
         },
@@ -905,7 +905,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
                   await Api.instance.delete('/super/ads/${widget.ad!['id']}');
                   if (context.mounted) context.pop();
                 } catch (e) {
-                  if (context.mounted) toast(context, e.toString());
+                  if (context.mounted) toastError(context, e);
                 }
               },
             ),

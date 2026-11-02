@@ -521,7 +521,7 @@ class _TicketState extends ConsumerState<TicketScreen> {
                                     ref.invalidate(prov);
                                     ref.invalidate(ticketsProvider);
                                   } catch (e) {
-                                    if (mounted) toast(context, e.toString());
+                                    if (mounted) toastError(context, e);
                                   } finally {
                                     if (mounted) setState(() => busy = false);
                                   }

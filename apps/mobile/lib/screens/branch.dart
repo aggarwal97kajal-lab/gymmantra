@@ -135,7 +135,7 @@ class _TransferRequestsState extends ConsumerState<TransferRequests> {
       ref.invalidate(dashboardProvider);
       if (mounted) toast(context, done);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy.remove(id));
     }
@@ -150,7 +150,7 @@ class _TransferRequestsState extends ConsumerState<TransferRequests> {
     } catch (e) {
       if (mounted) {
         setState(() => allowOverride = !v);
-        toast(context, e.toString());
+        toastError(context, e);
       }
     }
   }
@@ -284,7 +284,7 @@ Future<bool> moveMemberSheet(BuildContext context, WidgetRef ref, String memberI
     if (context.mounted) toast(context, context.t('Moved to {b}', {'b': list.firstWhere((b) => b['id'] == to)['name']}));
     return true;
   } catch (e) {
-    if (context.mounted) toast(context, e.toString());
+    if (context.mounted) toastError(context, e);
     return false;
   }
 }
@@ -312,7 +312,7 @@ class _MemberTransferScreenState extends ConsumerState<MemberTransferScreen> {
       ref.invalidate(myTransferProvider(widget.tenantId));
       if (mounted) toast(context, context.t('Request sent for {b}. The gym owner will approve it.', {'b': r['toBranch']}));
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
       ref.invalidate(myTransferProvider(widget.tenantId));
     } finally {
       if (mounted) setState(() => busy = false);
@@ -325,7 +325,7 @@ class _MemberTransferScreenState extends ConsumerState<MemberTransferScreen> {
       await Api.instance.delete('/me/gyms/${widget.tenantId}/transfer');
       ref.invalidate(myTransferProvider(widget.tenantId));
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy = false);
     }

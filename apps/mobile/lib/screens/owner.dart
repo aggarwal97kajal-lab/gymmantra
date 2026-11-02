@@ -702,7 +702,7 @@ class _OwnerRequestsState extends ConsumerState<OwnerRequestsScreen> {
       ref.invalidate(trainersProvider);
       if (mounted) toast(context, done);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     } finally {
       if (mounted) setState(() => busy.remove(id));
     }
@@ -879,7 +879,7 @@ class _OwnerOffersState extends ConsumerState<OwnerOffersScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => flips.remove(id));
-        toast(context, e.toString());
+        toastError(context, e);
       }
     }
   }
@@ -905,7 +905,7 @@ class _OwnerOffersState extends ConsumerState<OwnerOffersScreen> {
     } catch (e) {
       if (mounted) {
         setState(() => gone.remove(id));
-        toast(context, e.toString());
+        toastError(context, e);
       }
     }
   }
@@ -917,7 +917,7 @@ class _OwnerOffersState extends ConsumerState<OwnerOffersScreen> {
       await Api.instance.post('/offers/${o['id']}/image', {'mime': 'image/jpeg', 'base64': base64Encode(bytes)});
       ref.invalidate(offersProvider);
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     }
   }
 
@@ -1277,7 +1277,7 @@ class OwnerTrainersScreen extends ConsumerWidget {
                               await Api.instance.patch('/trainers/${t['id']}', {'visible': on});
                               ref.invalidate(trainersProvider);
                             } catch (e) {
-                              if (context.mounted) toast(context, e.toString());
+                              if (context.mounted) toastError(context, e);
                             }
                           },
                         ),
@@ -1384,7 +1384,7 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
       ref.invalidate(trainersProvider);
       if (mounted) context.pop();
     } catch (e) {
-      if (mounted) toast(context, e.toString());
+      if (mounted) toastError(context, e);
     }
   }
 
