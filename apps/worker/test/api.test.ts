@@ -195,6 +195,19 @@ describe('gym, members and memberships', () => {
     expect(dash.body.totals.active).toBe(1);
   });
 
+  it('reports money, visits and plans for the period', async () => {
+    await h.api.post(`/members/${memberA.id}/memberships`, { planId: planA.id, paymentMode: 'UPI' }, A.token);
+    const r = await h.api.get('/reports?days=7', A.token);
+    expect(r.status).toBe(200);
+    expect(r.body.series).toHaveLength(7);
+    expect(r.body.totals.collected).toBe(4500);
+    expect(r.body.totals.sold).toBe(1);
+    expect(r.body.totals.newMembers).toBe(1);
+    expect(r.body.plans[0]).toMatchObject({ name: 'Quarterly', active: 1, sold: 1 });
+    // gym B sees only its own numbers
+    expect((await h.api.get('/reports', B.token)).body.totals.collected).toBe(0);
+  });
+
   it('freezes the current membership within the allowed days', async () => {
     await h.api.post(`/members/${memberA.id}/memberships`, { planId: planA.id, paymentMode: 'CASH' }, A.token);
     const d = await h.api.get(`/members/${memberA.id}`, A.token);

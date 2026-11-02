@@ -103,6 +103,17 @@ class Api {
 
   void forget() => _mem.clear();
 
+  /// Loads screens' data in the background so they open instantly later.
+  Future<void> prefetch(List<String> paths) async {
+    await Future.wait(paths.map((p) async {
+      try {
+        final fresh = await get(p);
+        _mem[p] = fresh;
+        Prefs.setJson('c:$p', fresh);
+      } catch (_) {}
+    }));
+  }
+
   /// Gives the saved copy first (instant), then the fresh answer from the server.
   /// If the server can't be reached but a saved copy exists, the saved copy stays.
   Stream<dynamic> cachedGet(String path) async* {

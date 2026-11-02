@@ -6,6 +6,7 @@ import '../i18n.dart';
 import '../photo.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'trainer.dart' show TrainerClientsScreen;
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
 
@@ -527,6 +528,7 @@ class _TrainerClientsListState extends ConsumerState<TrainerClientsList> {
   bool soonOnly = false;
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(sessionProvider).mode != 'trainer') return const TrainerClientsScreen();
     final v = ref.watch(trainerClientsProvider);
     return Scaffold(
       appBar: AppBar(title: Text(context.t('My PT clients'))),

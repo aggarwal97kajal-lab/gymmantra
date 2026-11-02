@@ -215,6 +215,7 @@ class TrainerJoinScreen extends ConsumerStatefulWidget {
 class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
   final code = TextEditingController();
   final years = TextEditingController();
+  final phone = TextEditingController();
   Map? gym;
   String speciality = 'Weight loss';
   bool busy = false;
@@ -242,7 +243,17 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
     return Scaffold(
       body: SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(22, 16, 22, 28), children: [
-          const Row(children: [_BackToRole()]),
+          Row(children: [
+            Material(
+              color: context.c.surf,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: context.c.line)),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => context.canPop() ? context.pop() : context.go('/t/home'),
+                child: const SizedBox(width: 42, height: 42, child: Icon(Icons.chevron_left_rounded)),
+              ),
+            ),
+          ]),
           const SizedBox(height: 20),
           Align(alignment: Alignment.centerLeft, child: _Chip(Icons.sports_rounded, context.t('Trainer'))),
           const SizedBox(height: 10),
@@ -291,10 +302,18 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
             ]),
             const SizedBox(height: 14),
             LabeledField(label: context.t('Experience (years)'), controller: years, icon: Icons.timeline_rounded, keyboard: TextInputType.number),
+            if (ref.watch(sessionProvider).user?['phone'] == null)
+              LabeledField(label: context.t('Your mobile number'), controller: phone, icon: Icons.phone_iphone_rounded, keyboard: TextInputType.phone, hint: '98765 43210'),
             FilledButton(
               onPressed: busy
                   ? null
                   : () => run(() async {
+                        final s = ref.read(sessionProvider);
+                        if (s.user?['phone'] == null) {
+                          if (phone.text.trim().isEmpty) throw ApiException(400, context.t('Enter your mobile number'));
+                          final u = await Api.instance.patch('/me/contact', {'phone': phone.text.trim()});
+                          s.patchUser({'phone': (u as Map)['phone']});
+                        }
                         await Api.instance.post('/me/join', {
                           'gymCode': code.text.trim(),
                           'as': 'TRAINER',
@@ -302,6 +321,8 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
                           if (int.tryParse(years.text.trim()) != null) 'experienceYears': int.parse(years.text.trim()),
                         });
                         await ref.read(sessionProvider).refreshUser();
+                        ref.invalidate(trainerHomeProvider);
+                        if (mounted && context.canPop()) context.pop();
                       }),
               child: Text(context.t('Send join request')),
             ),

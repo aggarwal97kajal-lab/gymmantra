@@ -141,7 +141,25 @@ ThemeData buildTheme(Brightness b) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
-      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.android: QuickPageTransitionsBuilder(),
     }),
   );
+}
+
+/// Fast screen change (220 ms, slight slide + fade). Flutter's default Android
+/// animation takes about 800 ms, which made screens feel slow to open.
+class QuickPageTransitionsBuilder extends PageTransitionsBuilder {
+  const QuickPageTransitionsBuilder();
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 220);
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 180);
+  @override
+  Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
+    final a = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);
+    return FadeTransition(
+      opacity: a,
+      child: SlideTransition(position: Tween(begin: const Offset(0.06, 0), end: Offset.zero).animate(a), child: child),
+    );
+  }
 }

@@ -16,6 +16,7 @@ class JoinScreen extends ConsumerStatefulWidget {
 
 class _JoinState extends ConsumerState<JoinScreen> {
   final code = TextEditingController();
+  final phone = TextEditingController();
   Map? gym;
   String? branchId;
   bool busy = false;
@@ -82,11 +83,25 @@ class _JoinState extends ConsumerState<JoinScreen> {
                 contentPadding: EdgeInsets.zero,
               ),
           ],
+          if (ref.watch(sessionProvider).user?['phone'] == null) ...[
+            const SizedBox(height: 12),
+            TextField(
+              controller: phone,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(labelText: context.t('Your mobile number'), hintText: '98765 43210', prefixIcon: const Icon(Icons.phone_iphone_rounded, size: 20)),
+            ),
+          ],
           const SizedBox(height: 12),
           FilledButton(
             onPressed: busy || (branches.length > 1 && branchId == null)
                 ? null
                 : () => run(() async {
+                      final s = ref.read(sessionProvider);
+                      if (s.user?['phone'] == null) {
+                        if (phone.text.trim().isEmpty) throw ApiException(400, context.t('Enter your mobile number'));
+                        final u = await Api.instance.patch('/me/contact', {'phone': phone.text.trim()});
+                        s.patchUser({'phone': (u as Map)['phone']});
+                      }
                       await Api.instance.post('/me/join', {'gymCode': code.text.trim(), if (branchId != null) 'branchId': branchId});
                       ref.invalidate(gymsProvider);
                       if (mounted) {

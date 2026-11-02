@@ -6,6 +6,7 @@ import 'admin.dart';
 import 'haptics.dart';
 import 'i18n.dart';
 import 'prefs.dart';
+import 'screens/gym_admin.dart';
 import 'screens/auth.dart';
 import 'screens/billing.dart';
 import 'screens/gym.dart';
@@ -71,9 +72,9 @@ class _AppState extends ConsumerState<GymMantraApp> {
         final (home, prefix) = switch (session.mode) {
           'owner' => ('/o/home', '/o/'),
           'trainer' => ('/t/home', '/t/'),
-          'waiting' => ('/waiting', '/waiting'),
+          // A trainer who has not joined a gym yet still gets the trainer dashboard.
+          'waiting' || 'trainerJoin' => ('/t/home', '/t/'),
           'registerGym' => ('/register-gym', '/register-gym'),
-          'trainerJoin' => ('/trainer-join', '/trainer-join'),
           'role' => ('/role', '/role'),
           _ => ('/home', ''),
         };
@@ -83,6 +84,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
           if (open.contains(loc) || loc == '/splash' || others.any((p) => loc.startsWith(p))) return home;
           return null;
         }
+        if (prefix == '/t/' && (loc.startsWith('/trainer-join') || loc.startsWith('/waiting'))) return null;
         return loc.startsWith(prefix) ? null : home;
       },
       routes: [
@@ -126,6 +128,9 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/subscription', builder: (_, __) => const SubscriptionScreen()),
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
+        GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
+        GoRoute(path: '/o/plans', builder: (_, __) => const ManagePlansScreen()),
+        GoRoute(path: '/o/settings', builder: (_, __) => const GymSettingsScreen()),
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),
         // ---- choosing a role ----
         GoRoute(path: '/role', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen())),

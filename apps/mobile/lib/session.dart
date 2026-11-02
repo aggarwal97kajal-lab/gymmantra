@@ -30,7 +30,7 @@ class Session extends ChangeNotifier {
         user = Map<String, dynamic>.from(saved);
         ready = true;
         notifyListeners();
-        refreshUser().catchError((Object e) {
+        refreshUser().then((_) => warmUp()).catchError((Object e) {
           if (e is ApiException && e.status == 401) Api.instance.onLoggedOut?.call();
         });
         loadConfig();
@@ -81,6 +81,7 @@ class Session extends ChangeNotifier {
       if (user?['appRole'] == null && user?['isOwner'] != true && user?['isTrainer'] != true && pending != null) {
         await chooseRole(pending);
       }
+      warmUp();
     } catch (_) {}
     notifyListeners();
   }
@@ -124,6 +125,31 @@ class Session extends ChangeNotifier {
     final me = await api.get('/auth/me');
     _setUser({...Map<String, dynamic>.from(me['user']), 'gyms': me['gyms'] ?? []});
     notifyListeners();
+  }
+
+  /// Fetches the main screens of this person's part of the app in the background,
+  /// so tapping a tab or menu shows data at once instead of waiting for the server.
+  void warmUp() {
+    final paths = switch (mode) {
+      'owner' => [
+          '/dashboard',
+          '/members?tab=all',
+          '/join-requests',
+          '/offers',
+          '/gym',
+          '/plans',
+          '/subscription',
+          '/trainers',
+          '/pt?status=PENDING',
+          '/pt?status=ACTIVE',
+          '/ads?role=OWNER',
+          '/me/notifications',
+        ],
+      'trainer' || 'waiting' || 'trainerJoin' => ['/trainer/home', '/trainer/clients', '/trainer/payouts', '/ads?role=TRAINER', '/me/notifications'],
+      'member' => ['/me/gyms', '/me/pt', '/me/program', '/me/notifications', '/me/tickets', '/exercises', '/ads?role=MEMBER'],
+      _ => const <String>[],
+    };
+    if (paths.isNotEmpty) api.prefetch(paths);
   }
 
   /// Which part of the app this person sees.

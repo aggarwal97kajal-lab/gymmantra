@@ -83,7 +83,7 @@ class TrainerHomeScreen extends ConsumerWidget {
               loading: const ListSkeleton(first: 110),
               builder: (d) {
                 final gyms = (d['gyms'] as List).cast<Map>();
-                if (gyms.isEmpty) return Muted(context.t('You are not a trainer at any gym right now.'));
+                if (gyms.isEmpty) return _NoGymCard(pending: ((d['pending'] as List?) ?? const []).cast<Map>());
                 final clients = ((ref.watch(trainerClientsProvider).valueOrNull?['clients'] as List?) ?? const []).cast<Map>();
                 final active = clients.where((c) => c['state'] == 'ACTIVE').toList();
                 final pendingPt = clients.where((c) => c['state'] == 'PENDING').toList();
@@ -144,6 +144,83 @@ class TrainerHomeScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// Trainer who is not at a gym yet: join with the gym code, or wait for the owner.
+class _NoGymCard extends ConsumerWidget {
+  const _NoGymCard({required this.pending});
+  final List<Map> pending;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final waiting = pending.isNotEmpty || ref.watch(sessionProvider).mode == 'waiting';
+    final gymName = pending.isNotEmpty ? pending.first['name'] as String : context.t('your gym');
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          gradient: LinearGradient(
+            colors: waiting ? const [Color(0xFFFBBF24), C.warn] : const [C.orangeSoft, C.orange, C.orangeDeep],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(waiting ? Icons.hourglass_top_rounded : Icons.storefront_rounded, color: Colors.white, size: 32),
+          const SizedBox(height: 10),
+          Text(
+            waiting ? context.t('Waiting for the owner’s approval') : context.t('Join your gym'),
+            style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            waiting
+                ? context.t('Your request went to {gym}. Your clients show here as soon as the owner approves.', {'gym': gymName})
+                : context.t('Enter your gym code to send a join request. The owner approves it, then your clients show here.'),
+            style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 13.5, height: 1.35),
+          ),
+          const SizedBox(height: 14),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: waiting ? const Color(0xFFB45309) : C.orangeDeep),
+            onPressed: waiting
+                ? () async {
+                    await ref.read(sessionProvider).refreshUser();
+                    ref.invalidate(trainerHomeProvider);
+                  }
+                : () => context.push('/trainer-join'),
+            child: Text(waiting ? context.t('Check again') : context.t('Join with gym code')),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 14),
+      Row(children: [
+        Expanded(child: StatTile(icon: Icons.groups_rounded, value: '0', label: context.t('PT clients'))),
+        const SizedBox(width: 9),
+        Expanded(child: StatTile(icon: Icons.event_available_rounded, value: '0', label: context.t('Sessions today'), color: C.ok)),
+        const SizedBox(width: 9),
+        Expanded(child: StatTile(icon: Icons.schedule_rounded, value: '0', label: context.t('Ending soon'), color: C.warn)),
+      ]),
+      const SizedBox(height: 14),
+      Panel(
+        onTap: () => context.go('/t/profile'),
+        child: Row(children: [
+          const IconTile(Icons.person_rounded, size: 38),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(context.t('Complete your profile'), style: const TextStyle(fontWeight: FontWeight.w800)),
+              Muted(context.t('Photo and mobile number help the owner and members know you'), size: 12),
+            ]),
+          ),
+          Icon(Icons.chevron_right_rounded, color: context.c.mut),
+        ]),
+      ),
+      if (waiting) ...[
+        const SizedBox(height: 10),
+        TextButton(onPressed: () => context.push('/trainer-join'), child: Text(context.t('Join a different gym'))),
+      ],
+    ]);
   }
 }
 

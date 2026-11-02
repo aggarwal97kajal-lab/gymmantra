@@ -35,6 +35,7 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 - **Plans lock features** (`billing.ts`: `offers`, `pt`, `reports`, `branches`; trial unlocks all). Owner photo gets a glowing ring in the plan colour. Plan payments are recorded by the super admin (no gateway yet) and make a receipt in `tenants/{t}/bills`.
 - **GST:** GymMantra is not registered, so bills have no GST and signup says nothing about tax. The super admin turns it on in GM Admin → GST (`settings/platform.gst`); new bills then get CGST+SGST for Delhi gyms and IGST for others (from the gym's state). New gyms must give address, state, city and a PIN that fits the state (`lib/india.ts`, `assets/india.json`).
 - **Look:** logo C (dumbbell + heartbeat), orange `#FF5A1F`, font Plus Jakarta Sans. App has Light/Dark/Auto theme and English/Hindi (`lib/strings_hi.dart`, English text is the key).
+- **Owner tools in the app:** Reports (`GET /reports?days=7|30|90`, feature `reports`), membership plans and gym settings (branches, join poster) are in the owner app, not only on the website. A trainer with no gym yet still lands on the trainer dashboard with a "Join your gym" card. Login checks the role picked on the first screen against the account (`accountRole`).
 - **Forgot password:** `POST /auth/forgot` sends the Firebase reset email (not for Google-only accounts).
 - **Pricing:** first 3 months free; Starter ₹399/₹3,990, Growth ₹799/₹7,990, Pro ₹1,399/₹13,990. Seed data only; the super admin edits plans in the panel.
 
