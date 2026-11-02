@@ -252,9 +252,15 @@ export async function authenticate(c: C): Promise<AuthUser> {
   const u = await c.var.deps.store.get<UserDoc>(P.user(uid));
   if (!u || u.deleted) throw unauthorized();
   const user = { ...u, id: uid };
+  // Owner decision: GymMantra admins and gym staff use the website, not the member app.
+  if (isMobile(c) && isWebOnly(user)) throw unauthorized(WEB_ONLY_MESSAGE);
   c.set('user', user);
   return user;
 }
+
+export const WEB_ONLY_MESSAGE = 'This account is for gym staff or GymMantra admin. Please use the GymMantra website to log in.';
+export const isMobile = (c: C) => c.req.header('x-gm-client') === 'mobile';
+export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isSuperAdmin || Object.values(u.staffOf ?? {}).some((s) => s.active);
 
 export function requireSuper(c: C) {
   if (!c.var.user.isSuperAdmin) throw forbidden('Super admin only');

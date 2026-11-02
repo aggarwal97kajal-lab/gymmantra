@@ -1,4 +1,4 @@
-import { App, AuthUser, authenticate, C, clearSession, issueSession, P, UserDoc } from '../core';
+import { App, AuthUser, authenticate, C, clearSession, isMobile, issueSession, isWebOnly, P, UserDoc, WEB_ONLY_MESSAGE } from '../core';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, optStr, str } from '../lib/validate';
@@ -136,6 +136,7 @@ export function authRoutes(app: App) {
       t.set(P.user(uid!), next);
       return next;
     });
+    if (isMobile(c) && isWebOnly(fresh)) throw forbidden(WEB_ONLY_MESSAGE);
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, fresh) });
   });
@@ -180,6 +181,7 @@ export function authRoutes(app: App) {
     const user = await store.get<UserDoc>(P.user(uid));
     if (!user || user.deleted) throw notFound('No GymMantra account for this Google account. Please sign up with Google first');
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
+    if (isMobile(c) && isWebOnly(user)) throw forbidden(WEB_ONLY_MESSAGE);
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, user) });
   });

@@ -61,6 +61,19 @@ describe('auth', () => {
     expect((await h.api.post('/gyms', { name: 'Cookie Gym' }, undefined, { ...cookie, 'x-gm-client': 'admin' })).status).toBe(201);
   });
 
+  it('staff and super admin cannot use the member app; members can', async () => {
+    const owner = await h.ownerWithGym('Web Only Gym');
+    const mobile = { 'x-gm-client': 'mobile' };
+    const r = await h.api.post('/auth/login', { identifier: owner.email, password: 'secret123' }, undefined, mobile);
+    expect(r.status).toBe(403);
+    expect(r.body.message).toMatch(/website/);
+    expect((await h.api.get('/me/gyms', owner.token, mobile)).status).toBe(401);
+    expect((await h.api.get('/gym', owner.token)).status).toBe(200);
+    const mem = await h.signup('Plain Member');
+    expect((await h.api.post('/auth/login', { identifier: mem.email, password: 'secret123' }, undefined, mobile)).status).toBe(200);
+    expect((await h.api.get('/me/gyms', mem.token, mobile)).status).toBe(200);
+  });
+
   it('the super admin email becomes super admin', async () => {
     const r = await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
     expect(r.body.user.isSuperAdmin).toBe(true);
