@@ -93,12 +93,31 @@ function readWorkout(v: unknown, by: string) {
 
 const PDF_MAX_BYTES = 2 * 1024 * 1024;
 const PART_CHARS = 700_000; // base64 characters per Firestore document (documents are limited to 1 MiB)
+// The app sends and reads PDFs in small pieces. One big 2 MB request is too much work for a
+// single Worker request on the free plan (10 ms CPU), which is why a 1.7 MB PDF failed.
+const UP_PART_CHARS = 350_000;
+const MAX_UP_PARTS = Math.ceil((PDF_MAX_BYTES * 4) / 3 / UP_PART_CHARS) + 1;
 const PDF_KINDS = ['diet', 'workout'] as const;
 type PdfKind = (typeof PDF_KINDS)[number];
 const pdfKey = (k: PdfKind) => (k === 'diet' ? 'dietPdf' : 'workoutPdf') as 'dietPdf' | 'workoutPdf';
 function kindOf(v: string): PdfKind {
   if (!(PDF_KINDS as readonly string[]).includes(v)) throw notFound('Unknown plan type');
   return v as PdfKind;
+}
+
+/** "?part=n" gives one piece, "?meta=1" the list of pieces, nothing the whole file (older apps). */
+async function readPdfFor(c: C, r: Reader, tenantId: string, meta: PdfMeta | null | undefined) {
+  if (!meta) throw notFound('No PDF uploaded yet');
+  const q = c.req.query('part');
+  if (c.req.query('meta')) return { id: meta.id, name: meta.name, size: meta.size, uploadedAt: meta.uploadedAt, parts: meta.parts };
+  if (q !== undefined) {
+    const n = Number(q);
+    if (!Number.isInteger(n) || n < 0 || n >= meta.parts) throw notFound('No such piece');
+    const part = await r.get<{ data: string }>(P.filePart(tenantId, meta.id, n));
+    if (!part) throw notFound('This PDF could not be read. Ask the trainer to upload it again');
+    return { n, data: part.data };
+  }
+  return readPdf(r, tenantId, meta);
 }
 
 async function readPdf(r: Reader, tenantId: string, meta: PdfMeta | null | undefined) {
@@ -155,6 +174,24 @@ export function programRoutes(app: App) {
   });
 
   // ---- PDF diet chart / workout (member reads it inside the app only) ----
+  /** One piece of a PDF being uploaded (base64 text). Pieces are saved as they come. */
+  app.put('/api/v1/programs/:memberId/pdf/:kind/parts/:n', async (c) => {
+    await authenticate(c);
+    kindOf(c.req.param('kind'));
+    const n = Number(c.req.param('n'));
+    if (!Number.isInteger(n) || n < 0 || n >= MAX_UP_PARTS) throw bad('PDF is too big. Upload a PDF up to 2 MB');
+    const b = body(await c.req.json().catch(() => null));
+    const tenantId = str(b, 'tenantId', { label: 'the gym' });
+    const uploadId = str(b, 'uploadId', { max: 40 });
+    if (!/^[0-9a-f-]{36}$/i.test(uploadId)) throw bad('Upload failed. Try again');
+    const data = typeof b.data === 'string' ? b.data : '';
+    if (!data || data.length > UP_PART_CHARS) throw bad('Upload failed. Try again');
+    if (n === 0 && !data.startsWith('JVBER')) throw bad('Only PDF files can be uploaded');
+    await canWrite(c, tenantId, c.req.param('memberId'));
+    await c.var.deps.store.set(P.filePart(tenantId, uploadId, n), { data });
+    return c.json({ ok: true, n });
+  });
+
   app.put('/api/v1/programs/:memberId/pdf/:kind', async (c) => {
     const u = await authenticate(c);
     const kind = kindOf(c.req.param('kind'));
@@ -163,14 +200,28 @@ export function programRoutes(app: App) {
     const memberId = c.req.param('memberId');
     await canWrite(c, tenantId, memberId);
     const name = (str(b, 'name', { max: 120, label: 'the file name' }).replace(/[\\/]/g, '_') || 'plan.pdf').slice(0, 120);
-    const b64 = str(b, 'base64', { max: Math.ceil((PDF_MAX_BYTES * 4) / 3) + 8, label: 'the PDF' }).replace(/\s/g, '');
-    if (!b64.startsWith('JVBER')) throw bad('Only PDF files can be uploaded');
-    const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
-    if (size > PDF_MAX_BYTES) throw bad('PDF is too big. Upload a PDF up to 2 MB');
     const { store } = c.var.deps;
     const gymDoc = await store.get<TenantDoc>(P.tenant(tenantId));
     if (gymDoc) await requireFeature(store, gymDoc, 'pt');
-    const meta: PdfMeta = { id: uuid(), name, size, parts: Math.ceil(b64.length / PART_CHARS), uploadedAt: nowIso(), uploadedBy: u.name };
+    let meta: PdfMeta;
+    let b64 = '';
+    if (typeof b.uploadId === 'string') {
+      // Pieces were sent first (PUT .../parts/:n); this only links them to the member.
+      const uploadId = b.uploadId;
+      if (!/^[0-9a-f-]{36}$/i.test(uploadId)) throw bad('Upload failed. Try again');
+      const parts = Number(b.parts);
+      const size = Number(b.size);
+      if (!Number.isInteger(parts) || parts < 1 || parts > MAX_UP_PARTS) throw bad('Upload failed. Try again');
+      if (!Number.isFinite(size) || size <= 0 || size > PDF_MAX_BYTES) throw bad('PDF is too big. Upload a PDF up to 2 MB');
+      meta = { id: uploadId, name, size, parts, uploadedAt: nowIso(), uploadedBy: u.name };
+    } else {
+      // Older app versions send the whole file at once.
+      b64 = str(b, 'base64', { max: Math.ceil((PDF_MAX_BYTES * 4) / 3) + 8, label: 'the PDF' }).replace(/\s/g, '');
+      if (!b64.startsWith('JVBER')) throw bad('Only PDF files can be uploaded');
+      const size = Math.floor((b64.length * 3) / 4) - (b64.endsWith('==') ? 2 : b64.endsWith('=') ? 1 : 0);
+      if (size > PDF_MAX_BYTES) throw bad('PDF is too big. Upload a PDF up to 2 MB');
+      meta = { id: uuid(), name, size, parts: Math.ceil(b64.length / PART_CHARS), uploadedAt: nowIso(), uploadedBy: u.name };
+    }
     const out = await store.tx(async (t) => {
       const [m, prog] = await t.getMany<MemberDoc | ProgramDoc>([P.member(tenantId, memberId), P.program(tenantId, memberId)]) as [MemberDoc | null, ProgramDoc | null];
       if (!m) throw notFound('Member not found');
@@ -180,7 +231,7 @@ export function programRoutes(app: App) {
         for (let i = 0; i < old.parts; i++) t.delete(P.filePart(tenantId, old.id, i));
         t.delete(P.file(tenantId, old.id));
       }
-      for (let i = 0; i < meta.parts; i++) t.set(P.filePart(tenantId, meta.id, i), { data: b64.slice(i * PART_CHARS, (i + 1) * PART_CHARS) });
+      if (b64) for (let i = 0; i < meta.parts; i++) t.set(P.filePart(tenantId, meta.id, i), { data: b64.slice(i * PART_CHARS, (i + 1) * PART_CHARS) });
       t.set(P.file(tenantId, meta.id), { ...meta, memberId, kind });
       const next = { ...cur, [pdfKey(kind)]: meta };
       t.set(P.program(tenantId, memberId), JSON.parse(JSON.stringify(next)));
@@ -217,7 +268,7 @@ export function programRoutes(app: App) {
     await canWrite(c, tenantId, memberId);
     const { store } = c.var.deps;
     const p = await store.get<ProgramDoc>(P.program(tenantId, memberId));
-    return c.json(await readPdf(store, tenantId, p?.[pdfKey(kind)]));
+    return c.json(await readPdfFor(c, store, tenantId, p?.[pdfKey(kind)]));
   });
 
   /** Member reads their own PDF (the app shows it with their name on it; no download). */
@@ -229,7 +280,7 @@ export function programRoutes(app: App) {
     if (!memberId) throw forbidden('Not your gym');
     const { store } = c.var.deps;
     const p = await store.get<ProgramDoc>(P.program(tenantId, memberId));
-    return c.json(await readPdf(store, tenantId, p?.[pdfKey(kind)]));
+    return c.json(await readPdfFor(c, store, tenantId, p?.[pdfKey(kind)]));
   });
 
   /** Member: their plans from every gym. */

@@ -3,7 +3,7 @@ import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optBool, optStr, str, strList } from '../lib/validate';
-import type { Reader } from '../store/store';
+import type { Reader, Store } from '../store/store';
 import { createPasswordUser } from './auth';
 import { pinMatchesState, stateByName } from '../lib/india';
 
@@ -42,6 +42,29 @@ async function uniqueGymCode(r: Reader, name: string) {
     if (!(await r.get(P.gymCode(code)))) return code;
   }
   return `GM${100000 + Math.floor(Math.random() * 900000)}`;
+}
+
+/**
+ * Branches made before branch codes existed have none. Give each one its own code the
+ * first time the gym is opened (the first branch keeps the gym's code).
+ */
+export async function ensureBranchCodes(store: Store, tenantId: string, tenant: TenantDoc): Promise<TenantDoc> {
+  const missing = tenant.branches.filter((b, i) => i > 0 && !b.code);
+  if (!missing.length) return tenant;
+  const codes = new Map<string, string>();
+  for (const b of missing) {
+    let code = await uniqueGymCode(store, `${tenant.name} ${b.name}`);
+    while ([...codes.values()].includes(code)) code = await uniqueGymCode(store, `${tenant.name} ${b.name}`);
+    codes.set(b.id, code);
+  }
+  return store.tx(async (t) => {
+    const cur = (await t.get<TenantDoc>(P.tenant(tenantId)))!;
+    const branches = cur.branches.map((b, i) => (i > 0 && !b.code && codes.has(b.id) ? { ...b, code: codes.get(b.id)! } : b));
+    for (const b of branches) if (codes.get(b.id) === b.code) t.create(P.gymCode(b.code!), { tenantId, branchId: b.id });
+    const next = { ...cur, branches };
+    t.set(P.tenant(tenantId), next);
+    return next;
+  });
 }
 
 function prefixFrom(name: string) {
@@ -128,6 +151,7 @@ export function gymRoutes(app: App) {
   app.get('/api/v1/gym', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    g.tenant = await ensureBranchCodes(c.var.deps.store, g.tenantId, g.tenant);
     const branches = g.tenant.branches.map((b) => ({ ...b, code: branchCode(g.tenant, b) }));
     return c.json({ id: g.tenantId, ...g.tenant, branches, allowTransfer: g.tenant.allowTransfer ?? false, myRole: g.role, myBranchIds: g.branchIds, currentBranchId: g.branchId, limits: await gymLimits(c.var.deps.store, g.tenant) });
   });

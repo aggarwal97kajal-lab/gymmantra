@@ -252,7 +252,8 @@ Map<String, dynamic> withBranch(Map g) {
   final out = Map<String, dynamic>.from(g);
   final branches = ((g['branches'] as List?) ?? const []).whereType<Map>().toList();
   if (branches.length < 2) return out;
-  final cur = branches.firstWhere((b) => b['id'] == g['currentBranchId'], orElse: () => branches.first);
+  final curId = Api.instance.branchId ?? g['currentBranchId'];
+  final cur = branches.firstWhere((b) => b['id'] == curId, orElse: () => branches.first);
   out['gymCode'] = cur['code'] ?? g['gymCode'];
   out['branchName'] = cur['name'];
   out['name'] = '${g['name']} – ${cur['name']}';
@@ -277,6 +278,7 @@ final myTransferProvider = StreamProvider.autoDispose.family<dynamic, String>((r
 final gymsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/gyms'));
 final membershipProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, memberId) => Api.instance.cachedGet('/me/memberships/$memberId'));
 final plansProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, tenantId) => Api.instance.cachedGet('/me/gyms/$tenantId/plans'));
+final superTicketsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/tickets'));
 final ticketsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/tickets'));
 final superTicketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/super/tickets/$id'));
 final ticketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/me/tickets/$id'));

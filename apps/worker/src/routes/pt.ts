@@ -96,7 +96,7 @@ async function withPhotos(r: Reader, list: PtDoc[]) {
   const users = await r.getMany<UserDoc>(ids.map(P.user));
   const map = new Map(ids.map((id, i) => [id, users[i]]));
   return list.map((p) =>
-    ptView(p, {
+    ptView({ ...p, trainerName: map.get(p.trainerId)?.name ?? p.trainerName }, {
       memberPhotoUrl: p.memberUserId ? photoUrlOf(p.memberUserId, map.get(p.memberUserId)) : null,
       memberPhone: p.memberUserId ? map.get(p.memberUserId)?.phone ?? null : null,
       trainerPhotoUrl: photoUrlOf(p.trainerId, map.get(p.trainerId)),

@@ -1008,4 +1008,7 @@ const hindi = <String, String>{
   'Each branch has its own code. Check this is your branch.': 'हर ब्रांच का अलग कोड है। देख लें कि यह आपकी ब्रांच है।',
   'Move': 'ट्रांसफ़र',
   'The gym will approve it. You will get a notification.': 'जिम अप्रूव करेगा। अप्रूव होते ही नोटिफ़िकेशन आएगा।',
+  'This branch': 'यह ब्रांच',
+  'Switch': 'बदलें',
+  'Edit branch': 'ब्रांच बदलें',
 };

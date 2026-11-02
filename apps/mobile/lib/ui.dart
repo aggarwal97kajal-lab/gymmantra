@@ -1,4 +1,4 @@
-export 'drip.dart' show DripKind;
+export 'drip.dart' show DripKind, Drip;
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -315,6 +315,21 @@ class AsyncBody<T> extends StatelessWidget {
 /// the words when not given; [detail] and [action] turn it into a card.
 void toast(BuildContext context, String msg, {DripKind? kind, String? detail, String? action, VoidCallback? onAction}) {
   Drip.show(context, translate(AppLang.current, msg), kind: kind, detail: detail, action: action, onAction: onAction);
+}
+
+/// Saves without making the person wait: the screen closes at once and the
+/// call runs in the background. If it fails, a red drip toast says why and
+/// [onFail] can undo the change shown on screen.
+void saveInBackground(BuildContext context, Future<void> Function() work, {VoidCallback? onFail}) {
+  final ov = Overlay.maybeOf(context, rootOverlay: true);
+  work().catchError((Object e) {
+    onFail?.call();
+    if (ov != null && ov.mounted) {
+      Drip.showOn(ov, e.toString(), kind: DripKind.error);
+    } else {
+      Drip.showLater(e.toString(), kind: DripKind.error);
+    }
+  });
 }
 
 /// Error from a failed call.

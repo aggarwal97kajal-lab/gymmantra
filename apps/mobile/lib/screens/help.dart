@@ -420,6 +420,8 @@ class TicketScreen extends ConsumerStatefulWidget {
 class _TicketState extends ConsumerState<TicketScreen> {
   final msg = TextEditingController();
   bool busy = false;
+  /// Messages shown at once while they are still being sent.
+  final List<Map> sending = [];
 
   @override
   Widget build(BuildContext context) {
@@ -431,10 +433,13 @@ class _TicketState extends ConsumerState<TicketScreen> {
       body: AsyncBody(
         value: t,
         builder: (d) {
-          final messages = (d['messages'] as List).cast<Map>();
+          final server = (d['messages'] as List).cast<Map>();
+          // A message being sent disappears from "sending" once the server copy is here.
+          final pending = sending.where((p) => !server.any((m) => m['body'] == p['body'] && (m['fromStaff'] == true) == (p['fromStaff'] == true))).toList();
+          final messages = [...server, ...pending];
           final (label, color) = ticketState(context, d as Map);
           // People wait for support's answer before writing again; support can always reply.
-          final locked = !widget.admin && d['waiting'] == true;
+          final locked = !widget.admin && (d['waiting'] == true || pending.isNotEmpty);
           return Column(children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -510,22 +515,27 @@ class _TicketState extends ConsumerState<TicketScreen> {
                         const SizedBox(width: 8),
                         IconButton.filled(
                           style: IconButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: Colors.white),
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  if (msg.text.trim().isEmpty) return;
-                                  setState(() => busy = true);
-                                  try {
-                                    await Api.instance.post('${widget.admin ? '/super' : '/me'}/tickets/${widget.id}/messages', {'body': msg.text.trim()});
-                                    msg.clear();
-                                    ref.invalidate(prov);
-                                    ref.invalidate(ticketsProvider);
-                                  } catch (e) {
-                                    if (mounted) toastError(context, e);
-                                  } finally {
-                                    if (mounted) setState(() => busy = false);
-                                  }
-                                },
+                          onPressed: () {
+                            final text = msg.text.trim();
+                            if (text.isEmpty) return;
+                            // Show the message straight away; send it in the background.
+                            final m = {'body': text, 'authorId': me, 'fromStaff': widget.admin, 'createdAt': DateTime.now().toUtc().toIso8601String()};
+                            setState(() => sending.add(m));
+                            msg.clear();
+                            Api.instance.post('${widget.admin ? '/super' : '/me'}/tickets/${widget.id}/messages', {'body': text}).then((_) {
+                              ref.invalidate(prov);
+                              ref.invalidate(ticketsProvider);
+                              if (widget.admin) ref.invalidate(superTicketsProvider);
+                              Future.delayed(const Duration(seconds: 8), () {
+                                if (mounted) setState(() => sending.remove(m));
+                              });
+                            }).catchError((Object e) {
+                              if (!mounted) return;
+                              setState(() => sending.remove(m));
+                              if (msg.text.isEmpty) msg.text = text;
+                              toastError(context, e);
+                            });
+                          },
                           icon: const Icon(Icons.send),
                         ),
                       ]),

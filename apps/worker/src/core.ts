@@ -355,6 +355,20 @@ export interface GymCtx {
 export const branchOf = (t: Pick<TenantDoc, 'branches'>, id: string | null | undefined) => id ?? t.branches[0]?.id ?? null;
 export const branchCode = (t: Pick<TenantDoc, 'branches' | 'gymCode'>, b: Branch) => b.code ?? (b.id === t.branches[0]?.id ? t.gymCode : null);
 /** Is this record part of the branch the staff app is looking at? */
+/** How a member or trainer sees their gym: with the branch name, address and code when the gym has branches. */
+export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
+  const id = branchOf(t, branchId);
+  const b = t.branches.find((x) => x.id === id) ?? null;
+  const multi = t.branches.length > 1;
+  return {
+    name: multi && b ? `${t.name} – ${b.name}` : t.name,
+    gymName: t.name,
+    branchId: b?.id ?? null,
+    branchName: b?.name ?? null,
+    code: (b && branchCode(t, b)) ?? t.gymCode,
+    address: (multi && b?.address) || t.address,
+  };
+}
 export const inBranch = (g: GymCtx, id: string | null | undefined) => branchOf(g.tenant, id) === g.branchId;
 
 /**

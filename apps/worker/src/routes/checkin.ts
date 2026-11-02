@@ -3,6 +3,7 @@ import { todayIST } from '../lib/dates';
 import { bad, forbidden, notFound, nowIso, uuid } from '../lib/http';
 import { body, str } from '../lib/validate';
 import { recordMemberCheckIn } from './attendance';
+import { ensureBranchCodes } from './gym';
 
 // ---------- Gym check-in QR: members and trainers scan it at the gym ----------
 // Two different QR codes exist on purpose:
@@ -79,6 +80,7 @@ export function checkinRoutes(app: App) {
   app.get('/api/v1/gym/checkin-qr', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    g.tenant = await ensureBranchCodes(c.var.deps.store, g.tenantId, g.tenant);
     const spot = await c.var.deps.store.tx(async (t) => {
       const r = spotOf(await t.get<CheckinDoc>(P.checkin(g.tenantId)), g.tenant, g.branchId);
       if (r.changed) t.set(P.checkin(g.tenantId), r.cfg);

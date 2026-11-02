@@ -36,8 +36,9 @@ export function createApp(getDeps: () => Deps) {
   app.use('/api/*', async (c, next) => {
     const deps = getDeps();
     c.set('deps', deps);
-    c.set('secrets', await loadSecrets(deps.store));
-    await ensureBaseData(deps.store);
+    // Both are read once per Worker instance; do them together to save a round trip.
+    const [secrets] = await Promise.all([loadSecrets(deps.store), ensureBaseData(deps.store)]);
+    c.set('secrets', secrets);
     await next();
     c.header('cache-control', 'no-store');
   });

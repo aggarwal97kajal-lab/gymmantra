@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
@@ -89,7 +91,11 @@ class Api {
       throw ApiException(0, 'Could not reach GymMantra. Check your internet and try again.');
     }
     final code = res.statusCode ?? 0;
-    if (code >= 200 && code < 300) return res.data;
+    if (code >= 200 && code < 300) {
+      // Something changed on the server: screens must load fresh data next time.
+      if (method != 'GET') _fetchedAt.clear();
+      return res.data;
+    }
     var msg = 'Something went wrong ($code)';
     final d = res.data;
     if (d is Map && d['message'] != null) {
@@ -115,17 +121,54 @@ class Api {
   /// Last answer for each path, kept in memory and on the phone.
   final Map<String, dynamic> _mem = {};
 
-  dynamic cached(String path) => _mem[_k(path)] ?? Prefs.getJson('c:${_k(path)}');
+  /// When each path was last loaded. Going back and forth between screens within a few
+  /// seconds uses what is in memory instead of asking the server again.
+  final Map<String, DateTime> _fetchedAt = {};
+  static const _freshFor = Duration(seconds: 10);
+  bool _isFresh(String key) {
+    final t = _fetchedAt[key];
+    return t != null && _mem.containsKey(key) && DateTime.now().difference(t) < _freshFor;
+  }
 
-  void forget() => _mem.clear();
+  void _remember(String key, dynamic fresh) {
+    _mem[key] = fresh;
+    _fetchedAt[key] = DateTime.now();
+    _save(key, fresh);
+  }
+
+  /// Saves a copy on the phone without holding up the screen (the JSON text is made off the main thread).
+  final Map<String, Timer> _saveTimers = {};
+  void _save(String key, dynamic data) {
+    _saveTimers[key]?.cancel();
+    _saveTimers[key] = Timer(const Duration(milliseconds: 400), () async {
+      _saveTimers.remove(key);
+      try {
+        final text = await Isolate.run(() => jsonEncode(data));
+        await Prefs.setString('c:$key', text);
+      } catch (_) {}
+    });
+  }
+
+  dynamic cached(String path) {
+    final key = _k(path);
+    final m = _mem[key];
+    if (m != null) return m;
+    final saved = Prefs.getJson('c:$key');
+    if (saved != null) _mem[key] = saved; // read the phone copy only once
+    return saved;
+  }
+
+  void forget() {
+    _mem.clear();
+    _fetchedAt.clear();
+  }
 
   /// Loads screens' data in the background so they open instantly later.
   Future<void> prefetch(List<String> paths) async {
     await Future.wait(paths.map((p) async {
       try {
         final fresh = await get(p);
-        _mem[_k(p)] = fresh;
-        Prefs.setJson('c:${_k(p)}', fresh);
+        _remember(_k(p), fresh);
       } catch (_) {}
     }));
   }
@@ -143,13 +186,13 @@ class Api {
   /// Gives the saved copy first (instant), then the fresh answer from the server.
   /// If the server can't be reached but a saved copy exists, the saved copy stays.
   Stream<dynamic> cachedGet(String path) async* {
+    final key = _k(path);
     final old = cached(path);
     if (old != null) yield old;
+    if (_isFresh(key)) return; // just loaded a moment ago
     try {
-      final key = _k(path);
       final fresh = await get(path);
-      _mem[key] = fresh;
-      Prefs.setJson('c:$key', fresh);
+      _remember(key, fresh);
       yield fresh;
     } catch (e) {
       if (old == null) rethrow;

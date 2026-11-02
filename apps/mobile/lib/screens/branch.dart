@@ -19,7 +19,7 @@ class BranchChip extends ConsumerWidget {
     final g = ref.watch(gymProvider).valueOrNull as Map?;
     final list = branchesOf(g);
     if (list.length < 2) return const SizedBox.shrink();
-    final cur = list.firstWhere((b) => b['id'] == g?['currentBranchId'], orElse: () => list.first);
+    final cur = list.firstWhere((b) => b['id'] == (Api.instance.branchId ?? g?['currentBranchId']), orElse: () => list.first);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -51,7 +51,7 @@ class BranchChip extends ConsumerWidget {
 Future<void> pickBranch(BuildContext context, WidgetRef ref) async {
   final g = ref.read(gymProvider).valueOrNull as Map?;
   final list = branchesOf(g);
-  final curId = g?['currentBranchId'] ?? (list.isEmpty ? null : list.first['id']);
+  final curId = Api.instance.branchId ?? g?['currentBranchId'] ?? (list.isEmpty ? null : list.first['id']);
   final picked = await showModalBottomSheet<String>(
     context: context,
     useSafeArea: true,
@@ -84,7 +84,7 @@ Future<void> pickBranch(BuildContext context, WidgetRef ref) async {
 /// Gym settings → tap a branch: show that branch's Join and Check-in QR.
 Future<void> showBranchQr(BuildContext context, WidgetRef ref, Map b) async {
   final g = ref.read(gymProvider).valueOrNull as Map?;
-  if (g?['currentBranchId'] != b['id']) ref.read(sessionProvider).setBranch(b['id'] as String);
+  if ((Api.instance.branchId ?? g?['currentBranchId']) != b['id']) ref.read(sessionProvider).setBranch(b['id'] as String);
   if (context.mounted) context.push('/o/gym-qr');
 }
 
@@ -98,7 +98,7 @@ class BranchTarget extends ConsumerWidget {
     final g = ref.watch(gymProvider).valueOrNull as Map?;
     final list = branchesOf(g);
     if (list.length < 2) return const SizedBox.shrink();
-    final cur = list.firstWhere((b) => b['id'] == g?['currentBranchId'], orElse: () => list.first);
+    final cur = list.firstWhere((b) => b['id'] == (Api.instance.branchId ?? g?['currentBranchId']), orElse: () => list.first);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

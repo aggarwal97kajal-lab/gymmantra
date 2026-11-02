@@ -409,15 +409,22 @@ class ScanCheckinScreen extends ConsumerStatefulWidget {
 }
 
 class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObserver {
-  // Started by hand (not autoStart) so it can be restarted after the camera permission
-  // is given, or when the person comes back from phone settings.
-  MobileScannerController? cam = MobileScannerController(autoStart: false, detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
+  // Started by hand (not autoStart). Some phones (Xiaomi/Redmi/Poco, Vivo, Oppo) pause the
+  // app while the permission box is open, which breaks a camera that is half started.
+  // So: never stop the camera while it is starting, and when anything goes wrong throw the
+  // old camera away and start a brand-new one (a few tries, automatically).
+  MobileScannerController? cam = _newCam();
+  int camGen = 0;
   bool working = false;
   Map? result;
   String? error;
   bool torch = false;
   MobileScannerErrorCode? camError;
   bool starting = false;
+  bool again2 = false;
+
+  static MobileScannerController _newCam() =>
+      MobileScannerController(autoStart: false, detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
 
   @override
   void initState() {
@@ -426,31 +433,62 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
     WidgetsBinding.instance.addPostFrameCallback((_) => startCam());
   }
 
-  Future<void> startCam() async {
-    if (starting || cam == null || result != null) return;
+  bool get _running => cam?.value.isRunning == true;
+
+  /// Starts the camera; on failure makes a fresh camera and tries again (3 tries).
+  Future<void> startCam({bool fresh = false}) async {
+    if (result != null || !mounted) return;
+    if (starting) {
+      again2 = true;
+      return;
+    }
     starting = true;
-    try {
-      await cam!.start();
-      if (mounted) setState(() => camError = null);
-    } on MobileScannerException catch (e) {
-      if (e.errorCode == MobileScannerErrorCode.controllerAlreadyInitialized) {
-        if (mounted) setState(() => camError = null);
-      } else if (mounted) {
-        setState(() => camError = e.errorCode);
+    MobileScannerErrorCode? last;
+    for (var attempt = 0; attempt < 3 && mounted; attempt++) {
+      try {
+        if (fresh || attempt > 0 || cam?.value.error != null) {
+          final old = cam;
+          setState(() {
+            cam = _newCam();
+            camGen++;
+            torch = false;
+          });
+          try {
+            await old?.dispose();
+          } catch (_) {}
+          await WidgetsBinding.instance.endOfFrame;
+          if (attempt > 0) await Future.delayed(Duration(milliseconds: 350 * attempt));
+        }
+        await cam!.start();
+        last = null;
+        break;
+      } on MobileScannerException catch (e) {
+        if (e.errorCode == MobileScannerErrorCode.controllerAlreadyInitialized && cam?.value.error == null) {
+          last = null;
+          break;
+        }
+        last = e.errorCode;
+        if (e.errorCode == MobileScannerErrorCode.permissionDenied) break; // trying again will not help
+      } catch (_) {
+        last = MobileScannerErrorCode.genericError;
       }
-    } catch (_) {
-      if (mounted) setState(() => camError = MobileScannerErrorCode.genericError);
-    } finally {
-      starting = false;
+    }
+    starting = false;
+    if (!mounted) return;
+    setState(() => camError = last);
+    if (again2) {
+      again2 = false;
+      if (!_running) startCam(fresh: true);
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (cam == null) return;
+    if (cam == null || result != null) return;
     if (state == AppLifecycleState.resumed) {
-      if (result == null) startCam();
-    } else if (state == AppLifecycleState.paused) {
+      // Back from the permission box or phone settings: start again if the camera is not running.
+      if (!_running) startCam(fresh: camError != null || cam?.value.error != null);
+    } else if (state == AppLifecycleState.paused && !starting && _running) {
       cam!.stop();
     }
   }
@@ -495,7 +533,7 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
       result = null;
       error = null;
     });
-    startCam();
+    startCam(fresh: !_running);
   }
 
   @override
@@ -513,17 +551,18 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
       body: Stack(children: [
         Positioned.fill(
           child: MobileScanner(
+            key: ValueKey(camGen),
             controller: cam,
             onDetect: (cap) {
               final v = cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
               if (v != null) onCode(v);
             },
-            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, onRetry: startCam),
+            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, onRetry: () => startCam(fresh: true)),
           ),
         ),
-        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, onRetry: startCam)),
+        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, onRetry: () => startCam(fresh: true))),
         // Frame
-        if (camError == null)
+        if (camError == null && cam?.value.error == null)
         Center(
           child: Container(
             width: 250,

@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc, gymFace } from '../core';
 import { noticesFor } from './notices';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -192,7 +192,7 @@ export function trainerRoutes(app: App) {
     ]);
     return c.json({
       gyms: gyms
-        .map((id, i) => (tenants[i] && profiles[i] ? { id, name: tenants[i]!.name, phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i], notices: notices[i] } : null))
+        .map((id, i) => (tenants[i] && profiles[i] ? { id, ...(() => { const f = gymFace(tenants[i]!, myBranch[i]); return { name: f.name, branchName: f.branchName, code: f.code, address: f.address }; })(), phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i], notices: notices[i] } : null))
         .filter(Boolean),
       pending: pending.map((id, i) => (pendingTenants[i] ? { id, name: pendingTenants[i]!.name } : null)).filter(Boolean),
     });

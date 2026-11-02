@@ -715,6 +715,21 @@ describe('dues, check-in QR, leads, PDFs, reports', () => {
     expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, other.token)).status).toBe(403);
     expect((await h.api.del(`/programs/${memberId}/pdf/diet?tenantId=${A.gym.id}`, A.token)).status).toBe(200);
     expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, mem.token)).status).toBe(404);
+    // new app: in pieces (a 1.9 MB PDF)
+    const big = Buffer.from('%PDF-1.7\n' + 'y'.repeat(1_900_000)).toString('base64');
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const pieces = big.match(/[\s\S]{1,350000}/g)!;
+    for (let i = 0; i < pieces.length; i++) {
+      expect((await h.api.put(`/programs/${memberId}/pdf/workout/parts/${i}`, { tenantId: A.gym.id, uploadId: id, data: pieces[i] }, A.token)).status).toBe(200);
+    }
+    const done = await h.api.put(`/programs/${memberId}/pdf/workout`, { tenantId: A.gym.id, name: 'gym.pdf', uploadId: id, parts: pieces.length, size: 1_900_009 }, A.token);
+    expect(done.status).toBe(200);
+    const meta = await h.api.get(`/me/program/${A.gym.id}/pdf/workout?meta=1`, mem.token);
+    expect(meta.body.parts).toBe(pieces.length);
+    let joined = '';
+    for (let i = 0; i < meta.body.parts; i++) joined += (await h.api.get(`/me/program/${A.gym.id}/pdf/workout?part=${i}`, mem.token)).body.data;
+    expect(joined).toBe(big);
+    expect((await h.api.put(`/programs/${memberId}/pdf/workout/parts/0`, { tenantId: A.gym.id, uploadId: id, data: 'aGVsbG8=' }, A.token)).status).toBe(400);
   });
 });
 
@@ -874,6 +889,15 @@ describe('branches', () => {
     expect((await h.api.post(`/transfers/${list.body.items[0].id}/approve`, {}, A.token)).status).toBe(200);
     expect((await h.api.get('/members', A.token)).body.rows).toHaveLength(1);
     expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].branch.id).toBe(gym.body.branches[0].id);
+    // branches made before codes existed get one when the gym is opened
+    const tn: any = await h.store.get(`tenants/${A.gym.id}`);
+    await h.store.set(`tenants/${A.gym.id}`, { ...tn, branches: [...tn.branches, { id: 'old-branch', name: 'Old', address: 'Sector 21', hours: null, createdAt: tn.createdAt ?? '' }] });
+    const g2 = await h.api.get('/gym', A.token);
+    const old = g2.body.branches.find((b: any) => b.id === 'old-branch');
+    expect(old.code).toMatch(/^[A-Z]+\d+$/);
+    expect((await h.api.get(`/me/gym-lookup?code=${old.code}`, (await h.signup('Looker')).token)).body.branch.name).toBe('Old');
+    // member sees their branch in the gym name
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym.code).toBe(A.gym.gymCode);
     // a different gym is still fine
     const other = await h.ownerWithGym('Other Gym');
     expect((await h.api.post('/me/join', { gymCode: other.gym.gymCode }, mem.token)).status).toBe(201);

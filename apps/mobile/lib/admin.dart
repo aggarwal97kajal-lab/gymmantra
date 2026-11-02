@@ -50,7 +50,8 @@ final _gyms = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGe
 final _gym = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/super/gyms/$id'));
 final _plans = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/saas-plans'));
 final _ads = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/ads'));
-final _tickets = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/tickets'));
+final _tickets = superTicketsProvider;
+final _gymPatch = StateProvider.autoDispose.family<Map<String, dynamic>, String>((ref, id) => {});
 final _settings = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/settings'));
 final _bill = StreamProvider.autoDispose.family<dynamic, String>((ref, key) => Api.instance.cachedGet('/super/gyms/$key'));
 
@@ -328,14 +329,19 @@ class AdminGym extends ConsumerWidget {
   const AdminGym({super.key, required this.id});
   final String id;
 
+  /// Changes show at once; the server is told in the background.
   Future<void> patch(BuildContext context, WidgetRef ref, Map<String, dynamic> body) async {
+    final n = ref.read(_gymPatch(id).notifier);
+    final before = n.state;
+    n.state = {...before, ...body};
+    toast(context, context.t('Saved'));
     try {
       await Api.instance.patch('/super/gyms/$id', body);
       ref.invalidate(_gym(id));
       ref.invalidate(_gyms);
-      if (context.mounted) toast(context, context.t('Saved'));
     } catch (e) {
-      if (context.mounted) toastError(context, e);
+      n.state = before;
+      Drip.showLater(e.toString(), kind: DripKind.error);
     }
   }
 
@@ -347,7 +353,8 @@ class AdminGym extends ConsumerWidget {
       body: AsyncBody(
         value: v,
         onRetry: () => ref.invalidate(_gym(id)),
-        builder: (g) {
+        builder: (g0) {
+          final g = {...(g0 as Map), ...ref.watch(_gymPatch(id))};
           final access = g['access'] as Map;
           final owners = (g['owners'] as List).cast<Map>();
           final bills = (g['bills'] as List).cast<Map>();

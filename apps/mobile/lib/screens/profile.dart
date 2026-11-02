@@ -443,30 +443,46 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
   bool get emailChanged => email.text.trim().toLowerCase() != ((u['email'] as String?) ?? '').toLowerCase();
 
   Future<void> save() async {
+    final body = {
+      'firstName': first.text.trim(),
+      'middleName': middle.text.trim(),
+      'lastName': last.text.trim(),
+      'dob': dob,
+      'gender': gender,
+      'address': address.text.trim(),
+    };
+    final s = ref.read(sessionProvider);
+    // Name / date of birth / address: show the change and close at once; save in the background.
+    if (!phoneChanged && !emailChanged) {
+      final before = Map<String, dynamic>.from(s.user ?? {});
+      final name = [body['firstName'], body['middleName'], body['lastName']].whereType<String>().where((x) => x.isNotEmpty).join(' ');
+      s.patchUser({...body, if (name.isNotEmpty) 'name': name});
+      toast(context, context.t('Saved'));
+      context.pop();
+      saveInBackground(context, () async {
+        final r = await Api.instance.patch('/me/profile', body);
+        s.patchUser(Map<String, dynamic>.from(r as Map));
+      }, onFail: () => s.patchUser(before));
+      return;
+    }
+    // A new mobile number or email is checked by the server first (it may be taken).
     setState(() {
       busy = true;
       error = null;
     });
     final saved = context.t('Saved');
     try {
-      final r = await Api.instance.patch('/me/profile', {
-        'firstName': first.text.trim(),
-        'middleName': middle.text.trim(),
-        'lastName': last.text.trim(),
-        'dob': dob,
-        'gender': gender,
-        'address': address.text.trim(),
-      });
-      ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(r as Map));
-      if (phoneChanged || emailChanged) {
-        final hasPw = u['hasPassword'] == true;
-        final c = await Api.instance.patch('/me/contact', {
+      final hasPw = u['hasPassword'] == true;
+      final results = await Future.wait([
+        Api.instance.patch('/me/profile', body),
+        Api.instance.patch('/me/contact', {
           if (phoneChanged) 'phone': phone.text.trim(),
           if (emailChanged) 'email': email.text.trim(),
           if (hasPw) 'password': pw.text,
-        });
-        ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(c as Map));
-      }
+        }),
+      ]);
+      s.patchUser(Map<String, dynamic>.from(results[0] as Map));
+      s.patchUser(Map<String, dynamic>.from(results[1] as Map));
       if (mounted) {
         toast(context, saved);
         context.pop();

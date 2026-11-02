@@ -1,3 +1,4 @@
+import 'dart:math' show Random;
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
@@ -40,8 +41,13 @@ class _PdfViewState extends State<PdfViewScreen> {
 
   Future<void> load() async {
     try {
-      final r = await Api.instance.get(widget.path);
-      final bytes = Uint8List.fromList(base64Decode(r['base64'] as String));
+      // Read in pieces (a big PDF in one answer is too much for the server).
+      final sep = widget.path.contains('?') ? '&' : '?';
+      final meta = await Api.instance.get('${widget.path}${sep}meta=1');
+      final n = (meta['parts'] as num?)?.toInt() ?? 0;
+      final pieces = await Future.wait([for (var i = 0; i < n; i++) Api.instance.get('${widget.path}${sep}part=$i')]);
+      final b64 = pieces.map((x) => x['data'] as String).join();
+      final bytes = Uint8List.fromList(base64Decode(b64));
       if (!mounted) return;
       setState(() => ctrl = PdfControllerPinch(document: PdfDocument.openData(bytes)));
     } catch (e) {
@@ -160,13 +166,36 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
         uploadingName = f.name;
         uploadingSize = f.bytes!.length;
       });
-      final p = await Api.instance.put(
-        '/programs/${widget.memberId}/pdf/${widget.kind}',
-        {'tenantId': widget.tenantId, 'name': f.name, 'base64': base64Encode(f.bytes!)},
-        onSendProgress: (a, b) {
-          if (b > 0 && mounted) setState(() => progress = (a / b).clamp(0, 1).toDouble());
-        },
-      );
+      // Sent in small pieces, two at a time, so big PDFs (up to 2 MB) go through.
+      final b64 = base64Encode(f.bytes!);
+      const piece = 300000;
+      final parts = [for (var i = 0; i < b64.length; i += piece) b64.substring(i, i + piece > b64.length ? b64.length : i + piece)];
+      final uploadId = _uuid();
+      var sentChars = 0;
+      Future<void> sendPart(int i) async {
+        for (var attempt = 0; ; attempt++) {
+          try {
+            await Api.instance.put('/programs/${widget.memberId}/pdf/${widget.kind}/parts/$i', {'tenantId': widget.tenantId, 'uploadId': uploadId, 'data': parts[i]});
+            break;
+          } catch (e) {
+            if (attempt >= 2 || (e is ApiException && e.status >= 400 && e.status < 500)) rethrow;
+            await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+          }
+        }
+        sentChars += parts[i].length;
+        if (mounted) setState(() => progress = (sentChars / b64.length * 0.97).clamp(0, 1).toDouble());
+      }
+      for (var i = 0; i < parts.length; i += 2) {
+        await Future.wait([sendPart(i), if (i + 1 < parts.length) sendPart(i + 1)]);
+      }
+      final p = await Api.instance.put('/programs/${widget.memberId}/pdf/${widget.kind}', {
+        'tenantId': widget.tenantId,
+        'name': f.name,
+        'uploadId': uploadId,
+        'parts': parts.length,
+        'size': f.bytes!.length,
+      });
+      if (mounted) setState(() => progress = 1);
       widget.onChanged((p as Map)[widget.kind == 'diet' ? 'dietPdf' : 'workoutPdf'] as Map?);
       if (mounted) toast(context, sent);
     } catch (e) {
@@ -316,4 +345,14 @@ class PdfCard extends StatelessWidget {
           ]),
         ),
       );
+}
+
+/// Random id for an upload (UUID v4 format).
+String _uuid() {
+  final r = Random.secure();
+  final b = List<int>.generate(16, (_) => r.nextInt(256));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  final h = b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+  return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
 }

@@ -15,5 +15,9 @@
   },
   // Keep the settings typed in the Cloudflare dashboard when deploying.
   "keep_vars": true,
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Run the Worker close to the database (Firestore). One request makes several
+  // database calls; doing those near the database instead of across the world is
+  // what makes saves and screens fast. Cloudflare decides this automatically.
+  "placement": { "mode": "smart" }
 }

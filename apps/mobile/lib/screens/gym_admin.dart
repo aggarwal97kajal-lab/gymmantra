@@ -724,10 +724,37 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
           }
           final branches = ((g['branches'] as List?) ?? const []).cast<Map>();
           final limits = (g['limits'] as Map?) ?? {};
-          final cur = branches.firstWhere((b) => b['id'] == g['currentBranchId'], orElse: () => branches.isEmpty ? const {} : branches.first);
+          final curId = Api.instance.branchId ?? g['currentBranchId'];
+          final cur = branches.firstWhere((b) => b['id'] == curId, orElse: () => branches.isEmpty ? const {} : branches.first);
           final code = (cur['code'] as String?) ?? (g['gymCode'] as String);
           return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
             if (!owner) Padding(padding: const EdgeInsets.only(bottom: 12), child: Muted(context.t('Only the gym owner can change these settings.'))),
+            if (branches.length > 1) ...[
+              SectionTitle(context.t('This branch'), trailing: TextButton(onPressed: () => pickBranch(context, ref), child: Text(context.t('Switch')))),
+              Panel(
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const IconTile(Icons.place_rounded),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${cur['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      Text('${context.t('Code')}: ${cur['code'] ?? '—'}', style: TextStyle(color: context.c.primary, fontWeight: FontWeight.w800)),
+                      if ((cur['address'] as String?)?.isNotEmpty == true) Muted(cur['address'] as String, size: 12.5),
+                      if ((cur['hours'] as String?)?.isNotEmpty == true) Muted(cur['hours'] as String, size: 12.5),
+                    ]),
+                  ),
+                  if (owner)
+                    IconButton(
+                      icon: const Icon(Icons.edit_rounded),
+                      onPressed: () async {
+                        final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => _BranchSheet(edit: cur));
+                        if (ok == true) ref.invalidate(gymProvider);
+                      },
+                    ),
+                ]),
+              ),
+              const SizedBox(height: 16),
+            ],
             SectionTitle(context.t('Gym profile')),
             Panel(
               child: Column(children: [
@@ -872,22 +899,24 @@ extension on String {
 }
 
 class _BranchSheet extends StatefulWidget {
-  const _BranchSheet();
+  const _BranchSheet({this.edit});
+  /// A branch to change (null = add a new one).
+  final Map? edit;
   @override
   State<_BranchSheet> createState() => _BranchSheetState();
 }
 
 class _BranchSheetState extends State<_BranchSheet> {
-  final name = TextEditingController();
-  final address = TextEditingController();
-  final hours = TextEditingController();
+  late final name = TextEditingController(text: widget.edit?['name'] as String? ?? '');
+  late final address = TextEditingController(text: widget.edit?['address'] as String? ?? '');
+  late final hours = TextEditingController(text: widget.edit?['hours'] as String? ?? '');
   bool busy = false;
   String? error;
   @override
   Widget build(BuildContext context) => Padding(
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-          Text(context.t('Add branch'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+          Text(context.t(widget.edit == null ? 'Add branch' : 'Edit branch'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
           const SizedBox(height: 14),
           LabeledField(label: context.t('Branch name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
           LabeledField(label: context.t('Address'), controller: address, icon: Icons.place_rounded),
@@ -903,11 +932,16 @@ class _BranchSheetState extends State<_BranchSheet> {
                       error = null;
                     });
                     try {
-                      await Api.instance.post('/gym/branches', {
+                      final body = {
                         'name': name.text.trim(),
-                        if (address.text.trim().isNotEmpty) 'address': address.text.trim(),
-                        if (hours.text.trim().isNotEmpty) 'hours': hours.text.trim(),
-                      });
+                        'address': address.text.trim().isEmpty ? null : address.text.trim(),
+                        'hours': hours.text.trim().isEmpty ? null : hours.text.trim(),
+                      };
+                      if (widget.edit == null) {
+                        await Api.instance.post('/gym/branches', body);
+                      } else {
+                        await Api.instance.patch('/gym/branches/${widget.edit!['id']}', body);
+                      }
                       if (context.mounted) Navigator.pop(context, true);
                     } catch (e) {
                       if (mounted) setState(() => error = e.toString());
@@ -915,7 +949,7 @@ class _BranchSheetState extends State<_BranchSheet> {
                       if (mounted) setState(() => busy = false);
                     }
                   },
-            child: Text(context.t('Add branch')),
+            child: Text(context.t(widget.edit == null ? 'Add branch' : 'Save changes')),
           ),
         ]),
       );

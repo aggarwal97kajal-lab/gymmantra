@@ -1,4 +1,4 @@
-import { accountRole, branchOf, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -62,7 +62,10 @@ export function meRoutes(app: App) {
         return {
           memberId: mid,
           memberCode: e.memberCode,
-          gym: { id: tid, name: tn.name, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: tn.address },
+          gym: (() => {
+            const f = gymFace(tn, e.branchId);
+            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address };
+          })(),
           ...(() => {
             const bid = branchOf(tn, e.branchId);
             const br = tn.branches.find((x) => x.id === bid);
@@ -183,7 +186,10 @@ export function meRoutes(app: App) {
     const names = await userNames(store, visible.map((s) => s.createdById));
     const curDoc = st.current ? visible.find((s) => s.id === st.current!.id) : undefined;
     return c.json({
-      gym: { id: tenantId, name: tenant.name, phone: tenant.phone, whatsappNumber: tenant.whatsappNumber, address: tenant.address },
+      gym: (() => {
+        const f = gymFace(tenant, m.branchId);
+        return { id: tenantId, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, phone: tenant.phone, whatsappNumber: tenant.whatsappNumber, address: f.address };
+      })(),
       memberCode: m.memberCode,
       status: st.status,
       daysLeft: st.daysLeft,
@@ -281,6 +287,21 @@ export function meRoutes(app: App) {
       t.set(P.user(u.id), n);
       return n;
     });
+    // A trainer's new name shows everywhere: trainer cards and PT records in every gym.
+    if (next.name !== u.name) {
+      const gyms = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.role === 'TRAINER').map(([tid]) => tid);
+      const { store } = c.var.deps;
+      await Promise.all(
+        gyms.map(async (tid) => {
+          const pts = await store.query<{ trainerName: string }>(P.pts(tid), [['trainerId', u.id]]);
+          await store.tx(async (t) => {
+            const tr = await t.get<{ name: string }>(P.trainer(tid, u.id));
+            if (tr) t.set(P.trainer(tid, u.id), { ...tr, name: next.name });
+            for (const r of pts) if (r.data.trainerName !== next.name) t.set(P.pt(tid, r.id), { ...r.data, trainerName: next.name });
+          });
+        }),
+      ).catch((e) => console.error('trainer rename', e));
+    }
     return c.json(publicUser(u.id, next));
   });
 

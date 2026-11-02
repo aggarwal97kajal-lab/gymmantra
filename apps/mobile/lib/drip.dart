@@ -61,9 +61,22 @@ class Drip {
   static final fanned = ValueNotifier<bool>(false);
   static OverlayEntry? _entry;
 
+  static OverlayState? _last;
+
   static void show(BuildContext context, String title, {DripKind? kind, String? detail, String? action, VoidCallback? onAction, bool? single}) {
-    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    final overlay = Overlay.maybeOf(context, rootOverlay: true) ?? _last;
     if (overlay == null) return;
+    showOn(overlay, title, kind: kind, detail: detail, action: action, onAction: onAction, single: single);
+  }
+
+  /// For messages that arrive after the screen that asked has closed (saving in the background).
+  static void showLater(String title, {DripKind? kind}) {
+    final o = _last;
+    if (o != null && o.mounted) showOn(o, title, kind: kind);
+  }
+
+  static void showOn(OverlayState overlay, String title, {DripKind? kind, String? detail, String? action, VoidCallback? onAction, bool? single}) {
+    _last = overlay;
     if (_entry == null || !_entry!.mounted) {
       _entry = OverlayEntry(builder: (_) => const _DripHost());
       overlay.insert(_entry!);
