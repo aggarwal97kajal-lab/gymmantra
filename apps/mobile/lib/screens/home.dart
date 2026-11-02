@@ -14,7 +14,7 @@ class HomeShell extends StatelessWidget {
   const HomeShell({super.key, required this.child, required this.location});
   final Widget child;
   final String location;
-  static const tabs = ['/home', '/qr', '/trainers', '/workouts', '/profile'];
+  static const tabs = ['/home', '/qr', '/trainers', '/my-plan', '/profile'];
   @override
   Widget build(BuildContext context) {
     final i = tabs.indexWhere((t) => location.startsWith(t));
@@ -29,7 +29,7 @@ class HomeShell extends StatelessWidget {
             NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
             NavigationDestination(icon: const Icon(Icons.qr_code_2_rounded), label: context.t('Check-in')),
             NavigationDestination(icon: const Icon(Icons.sports_outlined), selectedIcon: const Icon(Icons.sports_rounded), label: context.t('Trainers')),
-            NavigationDestination(icon: const Icon(Icons.fitness_center_rounded), label: context.t('Workouts')),
+            NavigationDestination(icon: const Icon(Icons.assignment_outlined), selectedIcon: const Icon(Icons.assignment_rounded), label: context.t('My plan')),
             NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: context.t('Profile')),
           ],
         ),

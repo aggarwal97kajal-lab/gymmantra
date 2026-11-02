@@ -714,6 +714,24 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
             ),
             const SizedBox(height: 8),
             Muted(context.t('The member and the owner see this calendar too.'), size: 12),
+            const SizedBox(height: 16),
+            SectionTitle(context.t('Plan')),
+            Panel(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(children: [
+                for (final (w, icon, label) in [(false, Icons.restaurant_rounded, context.t('Diet chart')), (true, Icons.fitness_center_rounded, context.t('Workout plan'))])
+                  ListTile(
+                    leading: IconTile(icon, size: 36),
+                    title: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: p.primary.withAlpha(36), borderRadius: BorderRadius.circular(10)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.edit_rounded, size: 14, color: p.primary), const SizedBox(width: 4), Text(context.t('Edit'), style: TextStyle(color: p.primary, fontWeight: FontWeight.w700, fontSize: 12.5))]),
+                    ),
+                    onTap: () => context.push('/program-edit', extra: {'tenantId': widget.tenantId, 'memberId': pt['memberId'], 'memberName': pt['memberName'], 'workout': w}),
+                  ),
+              ]),
+            ),
           ],
         ],
       ]),

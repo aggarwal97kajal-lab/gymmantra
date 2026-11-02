@@ -10,6 +10,7 @@ import 'screens/gym.dart';
 import 'screens/help.dart';
 import 'screens/home.dart';
 import 'screens/profile.dart';
+import 'screens/program.dart';
 import 'screens/pt.dart';
 import 'screens/owner.dart';
 import 'screens/qr.dart';
@@ -54,7 +55,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         const open = ['/login', '/signup', '/forgot'];
         if (!session.loggedIn) return open.contains(loc) ? null : '/login';
         // Each kind of person has their own part of the app.
-        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client'];
+        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit'];
         if (shared.any((p) => loc.startsWith(p))) return null;
         final (home, prefix) = switch (session.mode) {
           'owner' => ('/o/home', '/o/'),
@@ -84,6 +85,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
             GoRoute(path: '/home', pageBuilder: (_, __) => const NoTransitionPage(child: HomeScreen())),
             GoRoute(path: '/qr', pageBuilder: (_, __) => const NoTransitionPage(child: QrScreen())),
             GoRoute(path: '/trainers', pageBuilder: (_, __) => const NoTransitionPage(child: MemberTrainersScreen())),
+            GoRoute(path: '/my-plan', pageBuilder: (_, __) => const NoTransitionPage(child: MyPlanScreen())),
             GoRoute(path: '/workouts', pageBuilder: (_, __) => const NoTransitionPage(child: WorkoutsScreen())),
             GoRoute(path: '/help', pageBuilder: (_, __) => const NoTransitionPage(child: HelpScreen())),
             GoRoute(path: '/profile', pageBuilder: (_, __) => const NoTransitionPage(child: ProfileScreen())),
@@ -100,6 +102,13 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/trainer-detail', builder: (_, s) => TrainerDetailScreen(trainer: (s.extra as Map)['trainer'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/my-pt', builder: (_, s) => MyPtScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/pt-client', builder: (_, s) => PtClientScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String, canMark: (s.extra as Map)['canMark'] == true)),
+        GoRoute(
+          path: '/program-edit',
+          builder: (_, s) {
+            final x = s.extra as Map;
+            return ProgramEditScreen(tenantId: x['tenantId'] as String, memberId: x['memberId'] as String, memberName: x['memberName'] as String, workout: x['workout'] == true);
+          },
+        ),
         GoRoute(path: '/o/pt', builder: (_, __) => const OwnerPtClientsScreen()),
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),
         // ---- choosing a role ----

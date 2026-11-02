@@ -57,6 +57,7 @@ class Api {
   Future<dynamic> get(String path) => _send('GET', path);
   Future<dynamic> post(String path, [Object? body]) => _send('POST', path, body ?? {});
   Future<dynamic> patch(String path, Object body) => _send('PATCH', path, body);
+  Future<dynamic> put(String path, Object body) => _send('PUT', path, body);
   Future<dynamic> delete(String path) => _send('DELETE', path);
 
   Future<dynamic> _send(String method, String path, [Object? body]) async {
