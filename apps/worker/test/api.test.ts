@@ -752,6 +752,23 @@ describe('tickets, deletes and offer banners', () => {
     const mine = await h.api.get(`/me/tickets/${r.body.id}`, owner.token);
     expect(mine.body.waiting).toBe(false);
     expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'Thanks!' }, owner.token)).status).toBe(201);
+    // statuses: person wrote → OPEN; super admin sets IN_PROGRESS → person still waits; RESOLVED → person can reopen; CLOSED → no more messages
+    expect((await h.api.get(`/me/tickets/${r.body.id}`, owner.token)).body.status).toBe('OPEN');
+    const ip = await h.api.patch(`/super/tickets/${r.body.id}`, { status: 'IN_PROGRESS' }, boss.body.token);
+    expect(ip.body.status).toBe('IN_PROGRESS');
+    expect((await h.api.get('/me/notifications', owner.token)).body[0].title).toContain('in progress');
+    expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'hello?' }, owner.token)).status).toBe(400);
+    await h.api.post(`/super/tickets/${r.body.id}/messages`, { body: 'Done, check now' }, boss.body.token);
+    expect((await h.api.get(`/me/tickets/${r.body.id}`, owner.token)).body).toMatchObject({ status: 'WAITING', canReply: true });
+    await h.api.patch(`/super/tickets/${r.body.id}`, { status: 'RESOLVED' }, boss.body.token);
+    expect((await h.api.get(`/me/tickets/${r.body.id}`, owner.token)).body).toMatchObject({ status: 'RESOLVED', canReply: true });
+    expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'Still not fixed' }, owner.token)).status).toBe(201);
+    expect((await h.api.get(`/me/tickets/${r.body.id}`, owner.token)).body.status).toBe('OPEN');
+    await h.api.patch(`/super/tickets/${r.body.id}`, { status: 'CLOSED' }, boss.body.token);
+    expect((await h.api.post(`/super/tickets/${r.body.id}/messages`, { body: 'x' }, boss.body.token)).status).toBe(201);
+    await h.api.patch(`/super/tickets/${r.body.id}`, { status: 'CLOSED' }, boss.body.token);
+    expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'one more' }, owner.token)).status).toBe(400);
+    expect((await h.api.get('/super/tickets?status=CLOSED', boss.body.token)).body).toHaveLength(1);
   });
 
   it('owner deletes offers, unused plans and empty branches; offers can have a banner', async () => {

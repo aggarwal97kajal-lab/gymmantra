@@ -1,6 +1,6 @@
 import { App, authenticate, C, gymOf, notify, P, requireSuper, UserDoc } from '../core';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
-import { body, optStr, str } from '../lib/validate';
+import { body, oneOf, optStr, str } from '../lib/validate';
 import type { Where } from '../store/store';
 
 /** Topics people pick in the app. Owner decision (Nov 2026): every ticket goes to GymMantra support (super admin). */
@@ -30,22 +30,80 @@ export interface Ticket {
   userId: string;
   topic: string;
   subject: string;
-  status: 'OPEN' | 'RESOLVED';
+  status: TicketStatus;
+  resolvedAt?: string | null;
   routedTo: 'GYM' | 'GYMMANTRA';
   createdAt: string;
   updatedAt: string;
   messages: { id: string; authorId: string; fromStaff: boolean; body: string; attachmentUrl: string | null; createdAt: string }[];
 }
 
+/**
+ * Ticket status (owner decision, Nov 2026):
+ *  OPEN        new, or the person wrote again — support has to act
+ *  IN_PROGRESS support is working on it (set by the super admin)
+ *  WAITING     support answered; the person's turn (set by a support reply)
+ *  RESOLVED    fixed; the person can still reply for 7 days, which opens it again
+ *  CLOSED      finished; no more messages (7 days after RESOLVED, or set by the super admin)
+ */
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'WAITING' | 'RESOLVED' | 'CLOSED';
+export const TICKET_STATUSES: TicketStatus[] = ['OPEN', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED'];
+export const REOPEN_DAYS = 7;
+const DAY = 86_400_000;
+
+export function ticketStatus(t: Ticket): TicketStatus {
+  if (t.status === 'RESOLVED') {
+    const at = Date.parse(t.resolvedAt ?? t.updatedAt);
+    return Number.isFinite(at) && Date.now() - at > REOPEN_DAYS * DAY ? 'CLOSED' : 'RESOLVED';
+  }
+  // Older tickets: "OPEN" with support's message last means the person's turn.
+  if (t.status === 'OPEN' && t.messages[t.messages.length - 1]?.fromStaff) return 'WAITING';
+  return t.status;
+}
+
+/** What the apps need: status, whether the person must wait for support, and whether they can write. */
+export function ticketFlags(t: Ticket) {
+  const status = ticketStatus(t);
+  return {
+    status,
+    waiting: status === 'OPEN' || status === 'IN_PROGRESS',
+    canReply: status === 'WAITING' || status === 'RESOLVED',
+    reopenUntil: status === 'RESOLVED' ? new Date(Date.parse(t.resolvedAt ?? t.updatedAt) + REOPEN_DAYS * DAY).toISOString() : null,
+  };
+}
+
+const ORDER: Record<TicketStatus, number> = { OPEN: 0, IN_PROGRESS: 1, WAITING: 2, RESOLVED: 3, CLOSED: 4 };
+
 export async function listTickets(c: C, where: Where) {
-  const status = c.req.query('status');
-  const w: Where = status === 'OPEN' || status === 'RESOLVED' ? [...where, ['status', status]] : where;
-  const rows = await c.var.deps.store.query<Ticket>(P.tickets, w);
+  const want = c.req.query('status');
+  const rows = await c.var.deps.store.query<Ticket>(P.tickets, where);
   return rows
-    .map((r) => ({ id: r.id, ...r.data, waiting: !r.data.messages[r.data.messages.length - 1]?.fromStaff, messages: r.data.messages.slice(-1) }))
-    // Tickets waiting for a reply first, then newest.
-    .sort((a, b) => (a.waiting !== b.waiting ? (a.waiting ? -1 : 1) : a.updatedAt < b.updatedAt ? 1 : -1))
-    .slice(0, 200);
+    .map((r) => ({ id: r.id, ...r.data, ...ticketFlags(r.data), messages: r.data.messages.slice(-1) }))
+    .filter((t) => !want || t.status === want)
+    // Open first (oldest first, so nobody waits too long), then in progress, waiting, resolved, closed.
+    .sort((a, b) => (a.status !== b.status ? ORDER[a.status] - ORDER[b.status] : a.status === 'OPEN' ? (a.updatedAt < b.updatedAt ? -1 : 1) : a.updatedAt < b.updatedAt ? 1 : -1))
+    .slice(0, 300);
+}
+
+const STATUS_NOTE: Partial<Record<TicketStatus, (n: string) => [string, string]>> = {
+  IN_PROGRESS: (n) => [`Ticket ${n} is in progress`, 'Our team is working on it.'],
+  WAITING: (n) => [`Ticket ${n}: we need your reply`, 'Open the ticket and answer our question.'],
+  RESOLVED: (n) => [`Ticket ${n} is resolved`, `Still not fixed? Reply within ${REOPEN_DAYS} days to open it again.`],
+  CLOSED: (n) => [`Ticket ${n} is closed`, 'Raise a new ticket if you need more help.'],
+};
+
+/** Super admin changes a ticket's status. The person gets a notification. */
+export async function setTicketStatus(c: C, id: string, status: TicketStatus) {
+  return c.var.deps.store.tx(async (tx) => {
+    const t = isUuid(id) ? await tx.get<Ticket>(P.ticket(id)) : null;
+    if (!t) throw notFound('Ticket not found');
+    const now = nowIso();
+    const next: Ticket = { ...t, status, resolvedAt: status === 'RESOLVED' ? now : status === 'CLOSED' ? t.resolvedAt ?? null : null, updatedAt: now };
+    tx.set(P.ticket(id), next);
+    const note = ticketStatus(t) !== status ? STATUS_NOTE[status]?.(t.number ?? '') : undefined;
+    if (note) await notify(tx, t.userId, t.tenantId, note[0], `${t.subject} · ${note[1]}`);
+    return { id, ...next, ...ticketFlags(next) };
+  });
 }
 
 export async function getTicket(c: C, id: string, allowed: (t: Ticket) => boolean) {
@@ -58,7 +116,7 @@ export async function getTicket(c: C, id: string, allowed: (t: Ticket) => boolea
   return {
     id,
     ...t,
-    waiting: !t.messages[t.messages.length - 1]?.fromStaff,
+    ...ticketFlags(t),
     member: member ? { id: member.id, name: member.name, memberCode: member.memberCode, phone: member.phone } : null,
     authors: ids.map((uid, i) => ({ id: uid, name: users[i]?.name ?? 'User' })),
   };
@@ -72,24 +130,24 @@ export async function replyTicket(c: C, id: string, allowed: (t: Ticket) => bool
   await c.var.deps.store.tx(async (tx) => {
     const t = isUuid(id) ? await tx.get<Ticket>(P.ticket(id)) : null;
     if (!t || !allowed(t)) throw notFound('Ticket not found');
-    // The person waits for support's answer before writing again on the same ticket.
-    if (!fromStaff && !t.messages[t.messages.length - 1]?.fromStaff) throw bad(WAIT_FOR_REPLY);
-    tx.set(P.ticket(id), { ...t, status: 'OPEN', updatedAt: msg.createdAt, messages: [...t.messages, msg].slice(-200) });
+    const now = ticketStatus(t);
+    if (!fromStaff) {
+      if (now === 'CLOSED') throw bad('This ticket is closed. Raise a new ticket if you need more help.');
+      // The person waits for support's answer before writing again on the same ticket.
+      if (now === 'OPEN' || now === 'IN_PROGRESS') throw bad(WAIT_FOR_REPLY);
+    }
+    // Support's answer → the person's turn. The person's answer → open again for support.
+    tx.set(P.ticket(id), { ...t, status: fromStaff ? 'WAITING' : 'OPEN', resolvedAt: null, updatedAt: msg.createdAt, messages: [...t.messages, msg].slice(-200) });
     if (fromStaff) await notify(tx, t.userId, t.tenantId, `Reply on ticket ${t.number ?? ''}`.trim(), t.subject);
   });
   return msg;
 }
 
 export async function resolveTicket(c: C, id: string, allowed: (t: Ticket) => boolean) {
-  return c.var.deps.store.tx(async (tx) => {
-    const t = isUuid(id) ? await tx.get<Ticket>(P.ticket(id)) : null;
-    if (!t || !allowed(t)) throw notFound('Ticket not found');
-    if (t.status === 'RESOLVED') throw bad('Already resolved');
-    const next = { ...t, status: 'RESOLVED' as const, updatedAt: nowIso() };
-    tx.set(P.ticket(id), next);
-    await notify(tx, t.userId, t.tenantId, `Ticket ${t.number ?? ''} closed`.replace('  ', ' '), t.subject);
-    return { id, ...next };
-  });
+  const t = isUuid(id) ? await c.var.deps.store.get<Ticket>(P.ticket(id)) : null;
+  if (!t || !allowed(t)) throw notFound('Ticket not found');
+  if (ticketStatus(t) === 'RESOLVED' || ticketStatus(t) === 'CLOSED') throw bad('Already resolved');
+  return setTicketStatus(c, id, 'RESOLVED');
 }
 
 export function ticketRoutes(app: App) {
@@ -132,6 +190,13 @@ export function ticketRoutes(app: App) {
     await authenticate(c);
     requireSuper(c);
     return c.json(await replyTicket(c, c.req.param('id'), superAllowed, true), 201);
+  });
+  app.patch('/api/v1/super/tickets/:id', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const b = body(await c.req.json().catch(() => null));
+    const status = oneOf(b, 'status', TICKET_STATUSES)!;
+    return c.json(await setTicketStatus(c, c.req.param('id'), status));
   });
   app.post('/api/v1/super/tickets/:id/resolve', async (c) => {
     await authenticate(c);

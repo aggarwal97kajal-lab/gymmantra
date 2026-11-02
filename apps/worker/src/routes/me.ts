@@ -11,7 +11,7 @@ import type { PlanDoc } from './members';
 import type { ScanLog } from './attendance';
 import { offersFor } from './trainers';
 import { noticeNotes, noticesFor } from './notices';
-import { replyTicket, TICKET_TOPICS, Ticket, getTicket } from './tickets';
+import { replyTicket, TICKET_TOPICS, Ticket, getTicket, ticketFlags } from './tickets';
 
 const MAX_PHOTO_BYTES = 400 * 1024;
 
@@ -442,7 +442,7 @@ export function meRoutes(app: App) {
     const rows = await c.var.deps.store.query<Ticket>(P.tickets, [['userId', u.id]]);
     return c.json(
       rows
-        .map((r) => ({ id: r.id, ...r.data, waiting: !r.data.messages[r.data.messages.length - 1]?.fromStaff, messages: r.data.messages.slice(-1) }))
+        .map((r) => ({ id: r.id, ...r.data, ...ticketFlags(r.data), messages: r.data.messages.slice(-1) }))
         .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
     );
   });

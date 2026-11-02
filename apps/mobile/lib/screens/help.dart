@@ -168,10 +168,32 @@ class _HelpState extends ConsumerState<HelpScreen> {
   }
 }
 
-(String, Color) ticketState(BuildContext context, Map t) {
-  if (t['status'] == 'RESOLVED') return (context.t('Closed'), context.c.mut);
-  if (t['waiting'] == false) return (context.t('Answered'), C.ok);
-  return (context.t('Open'), C.warn);
+/// Ticket statuses (kept in English everywhere, owner decision).
+const ticketStatuses = ['OPEN', 'IN_PROGRESS', 'WAITING', 'RESOLVED', 'CLOSED'];
+String ticketStatusLabel(String s, {bool admin = false}) => switch (s) {
+      'IN_PROGRESS' => 'In progress',
+      'WAITING' => admin ? 'Waiting for user' : 'Waiting for your reply',
+      'RESOLVED' => 'Resolved',
+      'CLOSED' => 'Closed',
+      _ => 'Open',
+    };
+Color ticketStatusColor(BuildContext context, String s) => switch (s) {
+      'IN_PROGRESS' => const Color(0xFF3B82F6),
+      'WAITING' => const Color(0xFF8B5CF6),
+      'RESOLVED' => C.ok,
+      'CLOSED' => context.c.mut,
+      _ => C.orange,
+    };
+String ticketStatusOf(Map t) {
+  final s = t['status'] as String? ?? 'OPEN';
+  // Older server answers: OPEN with support's reply last = the person's turn.
+  if (s == 'OPEN' && t['waiting'] == false) return 'WAITING';
+  return s;
+}
+
+(String, Color) ticketState(BuildContext context, Map t, {bool admin = false}) {
+  final s = ticketStatusOf(t);
+  return (ticketStatusLabel(s, admin: admin), ticketStatusColor(context, s));
 }
 
 class TicketTile extends StatelessWidget {
@@ -181,7 +203,7 @@ class TicketTile extends StatelessWidget {
   final bool admin;
   @override
   Widget build(BuildContext context) {
-    final (label, color) = ticketState(context, t);
+    final (label, color) = ticketState(context, t, admin: admin);
     final last = ((t['messages'] as List?) ?? const []).cast<Map>();
     final reply = last.isNotEmpty && last.last['fromStaff'] == true ? last.last['body'] as String? : null;
     return Padding(
@@ -422,6 +444,23 @@ class _TicketState extends ConsumerState<TicketScreen> {
   bool busy = false;
   /// Messages shown at once while they are still being sent.
   final List<Map> sending = [];
+  /// Status picked by the super admin, shown before the server answers.
+  String? statusNow;
+
+  Future<void> setStatus(String s, dynamic prov) async {
+    final before = statusNow;
+    setState(() => statusNow = s);
+    try {
+      await Api.instance.patch('/super/tickets/${widget.id}', {'status': s});
+      ref.invalidate(prov);
+      ref.invalidate(superTicketsProvider);
+      if (mounted) toast(context, 'Status: ${ticketStatusLabel(s, admin: true)}', kind: DripKind.ok);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => statusNow = before);
+      toastError(context, e);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -437,9 +476,11 @@ class _TicketState extends ConsumerState<TicketScreen> {
           // A message being sent disappears from "sending" once the server copy is here.
           final pending = sending.where((p) => !server.any((m) => m['body'] == p['body'] && (m['fromStaff'] == true) == (p['fromStaff'] == true))).toList();
           final messages = [...server, ...pending];
-          final (label, color) = ticketState(context, d as Map);
+          final shown = statusNow ?? ticketStatusOf(d as Map);
+          final (label, color) = (ticketStatusLabel(shown, admin: widget.admin), ticketStatusColor(context, shown));
           // People wait for support's answer before writing again; support can always reply.
-          final locked = !widget.admin && (d['waiting'] == true || pending.isNotEmpty);
+          final closed = shown == 'CLOSED';
+          final locked = !widget.admin && (closed || d['waiting'] == true || pending.isNotEmpty);
           return Column(children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
@@ -464,6 +505,27 @@ class _TicketState extends ConsumerState<TicketScreen> {
                     ),
                   ),
                 ]),
+                if (widget.admin) ...[
+                  const SizedBox(height: 10),
+                  // Super admin: change the status in one tap. The person gets a notification.
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(children: [
+                      for (final st in ticketStatuses)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(ticketStatusLabel(st, admin: true)),
+                            selected: shown == st,
+                            showCheckmark: false,
+                            selectedColor: ticketStatusColor(context, st),
+                            labelStyle: TextStyle(color: shown == st ? Colors.white : context.c.fg, fontWeight: FontWeight.w700, fontSize: 12.5),
+                            onSelected: shown == st ? null : (_) => setStatus(st, prov),
+                          ),
+                        ),
+                    ]),
+                  ),
+                ],
               ]),
             ),
             Expanded(
@@ -502,7 +564,9 @@ class _TicketState extends ConsumerState<TicketScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            context.t('Waiting for GymMantra support. You can write again after we reply (usually within 1 day).'),
+                            closed
+                                ? 'This ticket is closed. Raise a new ticket if you need more help.'
+                                : context.t('Waiting for GymMantra support. You can write again after we reply (usually within 1 day).'),
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12.5),
                           ),
                         ),
@@ -511,7 +575,14 @@ class _TicketState extends ConsumerState<TicketScreen> {
                   : Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(children: [
-                        Expanded(child: TextField(controller: msg, minLines: 1, maxLines: 4, decoration: InputDecoration(hintText: context.t('Write a message')))),
+                        Expanded(
+                          child: TextField(
+                            controller: msg,
+                            minLines: 1,
+                            maxLines: 4,
+                            decoration: InputDecoration(hintText: !widget.admin && shown == 'RESOLVED' ? 'Still not fixed? Reply to open it again' : context.t('Write a message')),
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         IconButton.filled(
                           style: IconButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: Colors.white),
@@ -520,7 +591,10 @@ class _TicketState extends ConsumerState<TicketScreen> {
                             if (text.isEmpty) return;
                             // Show the message straight away; send it in the background.
                             final m = {'body': text, 'authorId': me, 'fromStaff': widget.admin, 'createdAt': DateTime.now().toUtc().toIso8601String()};
-                            setState(() => sending.add(m));
+                            setState(() {
+                              sending.add(m);
+                              if (widget.admin) statusNow = 'WAITING';
+                            });
                             msg.clear();
                             Api.instance.post('${widget.admin ? '/super' : '/me'}/tickets/${widget.id}/messages', {'body': text}).then((_) {
                               ref.invalidate(prov);

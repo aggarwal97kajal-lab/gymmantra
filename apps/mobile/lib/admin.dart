@@ -11,7 +11,7 @@ import 'api.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/billing.dart';
-import 'screens/help.dart' show TicketScreen, TicketTile;
+import 'screens/help.dart' show TicketScreen, TicketTile, ticketStatuses, ticketStatusLabel, ticketStatusColor, ticketStatusOf;
 import 'screens/home.dart' show openUrl;
 import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, ProfileDetailsScreen, ChangePasswordScreen;
 import 'session.dart';
@@ -1077,13 +1077,20 @@ class _StatesSheetState extends State<_StatesSheet> {
 
 // ---------------- tickets, settings, more ----------------
 
-class AdminTickets extends ConsumerWidget {
+class AdminTickets extends ConsumerStatefulWidget {
   const AdminTickets({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AdminTickets> createState() => _AdminTicketsState();
+}
+
+class _AdminTicketsState extends ConsumerState<AdminTickets> {
+  String? filter; // null = all
+
+  @override
+  Widget build(BuildContext context) {
     final v = ref.watch(_tickets);
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Support tickets'))),
+      appBar: AppBar(title: const Text('Support tickets')),
       body: _refresh(
         context,
         () async => ref.invalidate(_tickets),
@@ -1091,11 +1098,35 @@ class AdminTickets extends ConsumerWidget {
           value: v,
           onRetry: () => ref.invalidate(_tickets),
           builder: (d) {
-            final list = (d as List).cast<Map>();
-            if (list.isEmpty) return ListView(children: [const SizedBox(height: 100), Muted(context.t('No tickets.'), align: TextAlign.center)]);
-            return ListView(padding: const EdgeInsets.all(16), children: [
-              Muted(context.t('Waiting for your reply: {n}', {'n': list.where((t) => t['status'] == 'OPEN' && t['waiting'] == true).length}), size: 12.5),
+            final all = (d as List).cast<Map>();
+            final count = {for (final st in ticketStatuses) st: all.where((t) => ticketStatusOf(t) == st).length};
+            final list = filter == null ? all.where((t) => ticketStatusOf(t) != 'CLOSED').toList() : all.where((t) => ticketStatusOf(t) == filter).toList();
+            Widget chip(String? st, String label, int n) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text('$label ($n)'),
+                    selected: filter == st,
+                    showCheckmark: false,
+                    selectedColor: st == null ? context.c.primary : ticketStatusColor(context, st),
+                    labelStyle: TextStyle(color: filter == st ? Colors.white : context.c.fg, fontWeight: FontWeight.w700, fontSize: 12.5),
+                    onSelected: (_) => setState(() => filter = st),
+                  ),
+                );
+            return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 16), children: [
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  chip(null, 'Active', all.length - count['CLOSED']!),
+                  for (final st in ticketStatuses) chip(st, ticketStatusLabel(st, admin: true), count[st]!),
+                ]),
+              ),
+              const SizedBox(height: 6),
+              Muted(
+                filter == null ? 'Open tickets first (oldest on top), then in progress, waiting, resolved.' : 'Resolved tickets close by themselves after 7 days.',
+                size: 12,
+              ),
               const SizedBox(height: 10),
+              if (list.isEmpty) Padding(padding: const EdgeInsets.only(top: 60), child: Muted('No tickets here.', align: TextAlign.center)),
               for (final t in list) TicketTile(t: t, admin: true, onTap: () => context.push('/a/ticket/${t['id']}')),
             ]);
           },
