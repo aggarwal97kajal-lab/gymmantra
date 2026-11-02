@@ -123,31 +123,66 @@ export class FirestoreStore implements Store {
     await this.call('POST', `${this.base}:commit`, { writes: [{ delete: this.name(path) }] });
   }
 
+  /**
+   * Atomic read-then-write without Firestore server transactions (signed-in
+   * Firebase users may not start them over REST). Every document read is
+   * remembered with its version; the commit only succeeds if none of the
+   * written documents changed in the meantime. On a clash the whole function
+   * runs again.
+   */
   async tx<R>(fn: (t: Tx) => Promise<R>): Promise<R> {
     for (let attempt = 0; ; attempt++) {
-      const { transaction } = await this.call('POST', `${this.base}:beginTransaction`, { options: { readWrite: {} } });
-      const writes: any[] = [];
-      const t: Tx = {
-        get: (p) => this.getIn(p, transaction),
-        getMany: (ps) => this.getManyIn(ps, transaction),
-        query: (c, w) => this.queryIn(c, w, transaction),
-        set: (p, d) => void writes.push({ update: { name: this.name(p), fields: encFields(d) } }),
-        create: (p, d) => void writes.push({ update: { name: this.name(p), fields: encFields(d) }, currentDocument: { exists: false } }),
-        delete: (p) => void writes.push({ delete: this.name(p) }),
+      const versions = new Map<string, string | null>(); // doc name -> updateTime (null = missing)
+      const creates = new Set<string>();
+      const writes = new Map<string, any>();
+      const readMany = async <T,>(paths: string[]) => {
+        if (!paths.length) return [] as (T | null)[];
+        const res: any[] = await this.call('POST', `${this.base}:batchGet`, { documents: paths.map((p) => this.name(p)) });
+        const byName = new Map<string, T | null>();
+        for (const r of res) {
+          if (r.found) {
+            byName.set(r.found.name, decFields(r.found.fields ?? {}) as T);
+            if (!versions.has(r.found.name)) versions.set(r.found.name, r.found.updateTime);
+          } else if (r.missing) {
+            byName.set(r.missing, null);
+            if (!versions.has(r.missing)) versions.set(r.missing, null);
+          }
+        }
+        return paths.map((p) => byName.get(this.name(p)) ?? null);
       };
+      const t: Tx = {
+        get: async (p) => (await readMany<any>([p]))[0],
+        getMany: (ps) => readMany(ps),
+        query: (c, w) => this.queryIn(c, w),
+        set: (p, d) => void writes.set(this.name(p), { update: { name: this.name(p), fields: encFields(d) } }),
+        create: (p, d) => {
+          creates.add(this.name(p));
+          writes.set(this.name(p), { update: { name: this.name(p), fields: encFields(d) } });
+        },
+        delete: (p) => void writes.set(this.name(p), { delete: this.name(p) }),
+      };
+      const r = await fn(t);
+      if (!writes.size) return r;
+      const list = [...writes.entries()].map(([name, w]) => {
+        if (creates.has(name)) return { ...w, currentDocument: { exists: false } };
+        if (!versions.has(name)) return w;
+        const v = versions.get(name);
+        return { ...w, currentDocument: v ? { updateTime: v } : { exists: false } };
+      });
       try {
-        const r = await fn(t);
-        await this.call('POST', `${this.base}:commit`, { writes, transaction });
+        await this.call('POST', `${this.base}:commit`, { writes: list });
         return r;
       } catch (e: any) {
-        const retry = (e?.fsStatus === 'ABORTED' || e?.fsStatus === 'UNAVAILABLE') && attempt < 4;
-        if (!retry) {
-          if (!(e instanceof AlreadyExists) && !e?.fsStatus) {
-            await this.call('POST', `${this.base}:rollback`, { transaction }).catch(() => undefined);
-          }
-          throw e;
+        const clash = e instanceof AlreadyExists || e?.fsStatus === 'FAILED_PRECONDITION' || e?.fsStatus === 'ABORTED' || e?.fsStatus === 'NOT_FOUND';
+        if (!clash) throw e;
+        // An explicit create that hits an existing document is a real conflict, not a race.
+        if (creates.size) {
+          const now = await this.getManyIn<any>([...creates].map((n) => n.split('/documents/')[1]));
+          if (now.some((d) => d !== null)) throw new AlreadyExists('');
         }
+        if (attempt >= 5) throw new Error('The database was busy. Please try again.');
       }
     }
   }
+
 }

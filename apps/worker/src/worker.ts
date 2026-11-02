@@ -92,8 +92,7 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
       };
       await probe('write', `${base}:commit`, { writes: [{ update: { name, fields: { at: { stringValue: new Date().toISOString() } } } }] });
       await probe('batch read', `${base}:batchGet`, { documents: [name] });
-      const tx = await probe('start transaction', `${base}:beginTransaction`, { options: { readWrite: {} } });
-      if (tx?.transaction) await probe('transaction commit', `${base}:commit`, { writes: [], transaction: tx.transaction });
+      await probe('safe update', `${base}:commit`, { writes: [{ update: { name, fields: { at: { stringValue: 'ok' } } }, currentDocument: { exists: true } }] });
       const st = missingDoc ? '' : String(fd?.error?.status ?? '');
       const ffix = st === 'PERMISSION_DENIED'
         ? 'Firestore → Rules: paste the GymMantra rules and press Publish (or FIREBASE_PROJECT_ID belongs to another project)'

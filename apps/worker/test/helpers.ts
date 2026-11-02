@@ -39,6 +39,12 @@ export function setup() {
   let store: Store;
   let identity: any;
   if (EMULATOR) {
+    // Real Firebase refuses server transactions for signed-in users; make sure we never use them.
+    const realFetch = globalThis.fetch;
+    (globalThis as any).fetch = (u: any, i?: any) => {
+      if (String(u).includes(':beginTransaction')) throw new Error('beginTransaction is not allowed on real Firebase');
+      return realFetch(u, i);
+    };
     identity = new EmulatorIdentity('fake-key', [], AUTH_HOST);
     store = new FirestoreStore(PROJECT, serverToken(identity, SERVER_EMAIL, SERVER_PASSWORD), FS_HOST);
   } else {
