@@ -235,6 +235,23 @@ export function memberRoutes(app: App) {
 
   // ---------- Dashboard and members ----------
 
+  /** Delete a plan nobody has used yet; a used plan can only be switched off. */
+  app.delete('/api/v1/plans/:id', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    const { store } = c.var.deps;
+    await store.tx(async (t) => {
+      const [plan, roster] = (await t.getMany<any>([P.plan(g.tenantId, isUuid(id) ? id : 'x'), P.roster(g.tenantId)])) as [PlanDoc | null, Roster | null];
+      if (!plan) throw notFound('Plan not found');
+      const used = Object.values(roster?.members ?? {}).some((e) => e.subs.some((s) => s.planId === id));
+      if (used) throw bad('Members have this plan, so it cannot be deleted. Switch it off (Active) instead');
+      t.delete(P.plan(g.tenantId, id));
+      audit(t, g.tenantId, u.id, 'plan.delete', 'plan', id, plan, null);
+    });
+    return c.json({ ok: true });
+  });
+
   app.get('/api/v1/dashboard', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);

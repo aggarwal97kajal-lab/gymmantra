@@ -339,39 +339,47 @@ export function meRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const topic = oneOf(b, 'topic', Object.keys(TICKET_TOPICS))!;
     const subject = str(b, 'subject', { min: 3, max: 120, label: 'a subject' });
-    const text = str(b, 'body', { max: 4000, label: 'a message' });
-    const route = TICKET_TOPICS[topic];
-    let tenantId: string | null = null;
-    let memberId: string | null = null;
-    if (route === 'GYM') {
-      const mid = optStr(b, 'memberId');
-      if (!mid) throw bad('Choose your gym');
-      const r = await myMember(c, mid);
-      tenantId = r.tenantId;
-      memberId = r.m.id;
-    }
+    const text = str(b, 'body', { min: 5, max: 1000, label: 'a message' });
+    const { store } = c.var.deps;
+    // Context for support: the person's gym (as member, owner or trainer).
+    const tenantId = Object.keys(u.memberships ?? {})[0] ?? Object.entries(u.staffOf ?? {}).find(([, s]) => s.active)?.[0] ?? null;
+    const memberId = tenantId ? u.memberships?.[tenantId] ?? null : null;
+    const gym = tenantId ? await store.get<TenantDoc>(P.tenant(tenantId)) : null;
     const id = uuid();
     const at = nowIso();
-    const t: Ticket = {
-      tenantId,
-      memberId,
-      userId: u.id,
-      topic,
-      subject,
-      status: 'OPEN',
-      routedTo: route,
-      createdAt: at,
-      updatedAt: at,
-      messages: [{ id: uuid(), authorId: u.id, fromStaff: false, body: text, attachmentUrl: optStr(b, 'attachmentUrl', { max: 500 }) ?? null, createdAt: at }],
-    };
-    await c.var.deps.store.set(P.ticket(id), t);
+    const t = await store.tx(async (tx) => {
+      const seq = (await tx.get<{ n: number }>(P.ticketSeq))?.n ?? 1000;
+      const number = `GM-${seq + 1}`;
+      tx.set(P.ticketSeq, { n: seq + 1 });
+      const doc: Ticket = {
+        number,
+        role: accountRole(u) ?? null,
+        gymName: gym?.name ?? null,
+        tenantId,
+        memberId,
+        userId: u.id,
+        topic,
+        subject,
+        status: 'OPEN',
+        routedTo: 'GYMMANTRA',
+        createdAt: at,
+        updatedAt: at,
+        messages: [{ id: uuid(), authorId: u.id, fromStaff: false, body: text, attachmentUrl: null, createdAt: at }],
+      };
+      tx.create(P.ticket(id), doc);
+      return doc;
+    });
     return c.json({ id, ...t }, 201);
   });
 
   app.get('/api/v1/me/tickets', async (c) => {
     const u = await authenticate(c);
     const rows = await c.var.deps.store.query<Ticket>(P.tickets, [['userId', u.id]]);
-    return c.json(rows.map((r) => ({ id: r.id, ...r.data, messages: r.data.messages.slice(-1) })).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
+    return c.json(
+      rows
+        .map((r) => ({ id: r.id, ...r.data, waiting: !r.data.messages[r.data.messages.length - 1]?.fromStaff, messages: r.data.messages.slice(-1) }))
+        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+    );
   });
 
   app.get('/api/v1/me/tickets/:id', async (c) => {

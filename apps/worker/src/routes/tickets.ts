@@ -3,20 +3,28 @@ import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, optStr, str } from '../lib/validate';
 import type { Where } from '../store/store';
 
-/** Topics members pick in the app. App problems go to GymMantra, the rest to the gym. */
+/** Topics people pick in the app. Owner decision (Nov 2026): every ticket goes to GymMantra support (super admin). */
 export const TICKET_TOPICS: Record<string, 'GYM' | 'GYMMANTRA'> = {
-  membership: 'GYM',
-  payment: 'GYM',
-  checkin: 'GYM',
-  facility: 'GYM',
-  trainer: 'GYM',
-  other_gym: 'GYM',
+  app_problem: 'GYMMANTRA',
+  payment: 'GYMMANTRA',
+  checkin: 'GYMMANTRA',
+  account: 'GYMMANTRA',
+  other: 'GYMMANTRA',
+  // older topic names still accepted
+  membership: 'GYMMANTRA',
+  facility: 'GYMMANTRA',
+  trainer: 'GYMMANTRA',
+  other_gym: 'GYMMANTRA',
   app_login: 'GYMMANTRA',
   app_bug: 'GYMMANTRA',
   app_other: 'GYMMANTRA',
 };
+export const WAIT_FOR_REPLY = 'Please wait for our reply on this ticket. You can write again after GymMantra support answers.';
 
 export interface Ticket {
+  number?: string; // GM-1001, unique
+  role?: string | null; // MEMBER / OWNER / TRAINER of the person who raised it
+  gymName?: string | null;
   tenantId: string | null;
   memberId: string | null;
   userId: string;
@@ -34,8 +42,9 @@ export async function listTickets(c: C, where: Where) {
   const w: Where = status === 'OPEN' || status === 'RESOLVED' ? [...where, ['status', status]] : where;
   const rows = await c.var.deps.store.query<Ticket>(P.tickets, w);
   return rows
-    .map((r) => ({ id: r.id, ...r.data, messages: r.data.messages.slice(-1) }))
-    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+    .map((r) => ({ id: r.id, ...r.data, waiting: !r.data.messages[r.data.messages.length - 1]?.fromStaff, messages: r.data.messages.slice(-1) }))
+    // Tickets waiting for a reply first, then newest.
+    .sort((a, b) => (a.waiting !== b.waiting ? (a.waiting ? -1 : 1) : a.updatedAt < b.updatedAt ? 1 : -1))
     .slice(0, 200);
 }
 
@@ -49,6 +58,7 @@ export async function getTicket(c: C, id: string, allowed: (t: Ticket) => boolea
   return {
     id,
     ...t,
+    waiting: !t.messages[t.messages.length - 1]?.fromStaff,
     member: member ? { id: member.id, name: member.name, memberCode: member.memberCode, phone: member.phone } : null,
     authors: ids.map((uid, i) => ({ id: uid, name: users[i]?.name ?? 'User' })),
   };
@@ -62,8 +72,10 @@ export async function replyTicket(c: C, id: string, allowed: (t: Ticket) => bool
   await c.var.deps.store.tx(async (tx) => {
     const t = isUuid(id) ? await tx.get<Ticket>(P.ticket(id)) : null;
     if (!t || !allowed(t)) throw notFound('Ticket not found');
+    // The person waits for support's answer before writing again on the same ticket.
+    if (!fromStaff && !t.messages[t.messages.length - 1]?.fromStaff) throw bad(WAIT_FOR_REPLY);
     tx.set(P.ticket(id), { ...t, status: 'OPEN', updatedAt: msg.createdAt, messages: [...t.messages, msg].slice(-200) });
-    if (fromStaff) await notify(tx, t.userId, t.tenantId, 'New reply on your ticket', t.subject);
+    if (fromStaff) await notify(tx, t.userId, t.tenantId, `Reply on ticket ${t.number ?? ''}`.trim(), t.subject);
   });
   return msg;
 }
@@ -75,7 +87,7 @@ export async function resolveTicket(c: C, id: string, allowed: (t: Ticket) => bo
     if (t.status === 'RESOLVED') throw bad('Already resolved');
     const next = { ...t, status: 'RESOLVED' as const, updatedAt: nowIso() };
     tx.set(P.ticket(id), next);
-    await notify(tx, t.userId, t.tenantId, 'Ticket resolved', t.subject);
+    await notify(tx, t.userId, t.tenantId, `Ticket ${t.number ?? ''} closed`.replace('  ', ' '), t.subject);
     return { id, ...next };
   });
 }
@@ -104,12 +116,12 @@ export function ticketRoutes(app: App) {
     return c.json(await resolveTicket(c, c.req.param('id'), gymAllowed(g.tenantId)), 201);
   });
 
-  // GymMantra support sees only app-problem tickets.
-  const superAllowed = (t: Ticket) => t.routedTo === 'GYMMANTRA';
+  // GymMantra support (super admin) sees and answers every ticket.
+  const superAllowed = (_t: Ticket) => true;
   app.get('/api/v1/super/tickets', async (c) => {
     await authenticate(c);
     requireSuper(c);
-    return c.json(await listTickets(c, [['routedTo', 'GYMMANTRA']]));
+    return c.json(await listTickets(c, []));
   });
   app.get('/api/v1/super/tickets/:id', async (c) => {
     await authenticate(c);

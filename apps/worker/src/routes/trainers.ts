@@ -60,6 +60,7 @@ export async function listTrainers(r: Reader, tenantId: string, onlyVisible: boo
 
 export interface OfferDoc {
   id: string;
+  imageV?: number | null; // banner picture version
   title: string;
   details: string | null;
   validTill: string;
@@ -70,6 +71,9 @@ export interface OfferDoc {
   createdById: string;
   createdAt: string;
 }
+
+export const offerImageUrl = (tenantId: string, o: Pick<OfferDoc, 'id' | 'imageV'>) => (o.imageV ? `/api/v1/offers/${tenantId}/${o.id}/image?v=${o.imageV}` : null);
+const MAX_BANNER = 400 * 1024;
 
 /** Live offers of a gym for a member (with their membership status) or a trainer. */
 export async function offersFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', memberStatus?: string) {
@@ -91,7 +95,7 @@ export async function offersFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TR
       }
     })
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
-    .map((o) => ({ id: o.id, title: o.title, details: o.details, validTill: o.validTill }));
+    .map((o) => ({ id: o.id, title: o.title, details: o.details, validTill: o.validTill, imageUrl: offerImageUrl(tenantId, o) }));
 }
 
 function packagesFrom(v: unknown): PtPackage[] {
@@ -210,7 +214,7 @@ export function trainerRoutes(app: App) {
     const g = await gymOf(c);
     const rows = (await c.var.deps.store.query<OfferDoc>(P.offers(g.tenantId))).map((x) => x.data);
     const today = todayIST();
-    return c.json(rows.map((o) => ({ ...o, live: o.active && o.validTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
+    return c.json(rows.map((o) => ({ ...o, imageUrl: offerImageUrl(g.tenantId, o), live: o.active && o.validTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
   });
 
   const readOffer = (b: Record<string, unknown>, cur?: OfferDoc) => {
@@ -253,5 +257,67 @@ export function trainerRoutes(app: App) {
       return after;
     });
     return c.json(out);
+  });
+
+  app.delete('/api/v1/offers/:id', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    await c.var.deps.store.tx(async (t) => {
+      const before = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;
+      if (!before) throw notFound('Offer not found');
+      t.delete(P.offer(g.tenantId, id));
+      if (before.imageV) t.delete(P.offerImage(g.tenantId, id));
+      audit(t, g.tenantId, u.id, 'offer.delete', 'offer', id, before, null);
+    });
+    return c.json({ ok: true });
+  });
+
+  /** Banner picture for an offer (JPEG/PNG up to 400 KB). */
+  app.post('/api/v1/offers/:id/image', async (c) => {
+    await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    const b = body(await c.req.json().catch(() => null));
+    const mime = oneOf(b, 'mime', ['image/jpeg', 'image/png'] as const)!;
+    const b64 = str(b, 'base64', { max: 560_000, label: 'the picture' });
+    if (Math.floor((b64.length * 3) / 4) > MAX_BANNER) throw bad('Banner must be smaller than 400 KB');
+    const v = Date.now();
+    const out = await c.var.deps.store.tx(async (t) => {
+      const o = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;
+      if (!o) throw notFound('Offer not found');
+      t.set(P.offerImage(g.tenantId, id), { mime, b64 });
+      const next = { ...o, imageV: v };
+      t.set(P.offer(g.tenantId, id), next);
+      return next;
+    });
+    return c.json({ ...out, imageUrl: offerImageUrl(g.tenantId, out) }, 201);
+  });
+
+  app.delete('/api/v1/offers/:id/image', async (c) => {
+    await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    const out = await c.var.deps.store.tx(async (t) => {
+      const o = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;
+      if (!o) throw notFound('Offer not found');
+      t.delete(P.offerImage(g.tenantId, id));
+      const next = { ...o, imageV: null };
+      t.set(P.offer(g.tenantId, id), next);
+      return next;
+    });
+    return c.json({ ...out, imageUrl: null });
+  });
+
+  /** Offer banners are not private (members and trainers of the gym see them); cached by the phone. */
+  app.get('/api/v1/offers/:tenantId/:id/image', async (c) => {
+    const tid = c.req.param('tenantId');
+    const id = c.req.param('id');
+    const img = isUuid(id) && isUuid(tid) ? await c.var.deps.store.get<{ mime: string; b64: string }>(P.offerImage(tid, id)) : null;
+    if (!img) throw notFound('No image');
+    const bin = atob(img.b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Response(bytes, { headers: { 'content-type': img.mime, 'cache-control': 'public, max-age=604800' } });
   });
 }

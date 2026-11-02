@@ -100,7 +100,7 @@ class TrainerHomeScreen extends ConsumerWidget {
                     for (final n in ((g['notices'] as List?) ?? const []).cast<Map>())
                       NoticeBanner(title: n['title'] as String, message: n['message'] as String, gym: g['name'] as String?, date: n['createdAt'] as String?),
                     for (final o in (g['offers'] as List).cast<Map>())
-                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?),
+                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?, imageUrl: o['imageUrl'] as String?),
                     Panel(
                       onTap: () => context.push('/checkin'),
                       child: Row(children: [

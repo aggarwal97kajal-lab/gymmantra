@@ -9,6 +9,7 @@ import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
+import 'legal.dart' show AgreeLine;
 
 /// Label above a text field, as on the designs.
 class LabeledField extends StatelessWidget {
@@ -322,7 +323,9 @@ class _LoginState extends ConsumerState<LoginScreen> with _Busy {
           GoogleButton(label: context.t('Continue with Google'), onPressed: busy ? null : () => run(() => s.google(signup: false))),
           Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Muted(context.t('Google log-in works after you sign up with Google.'), size: 12, align: TextAlign.center))),
         ],
-        const SizedBox(height: 22),
+        const SizedBox(height: 16),
+        const AgreeLine(prefix: 'By logging in you agree to our'),
+        const SizedBox(height: 10),
         Center(
           child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
             Muted(context.t('New here?'), size: 14),
@@ -347,6 +350,7 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
   final pw = TextEditingController();
   final pw2 = TextEditingController();
   bool hide = true;
+  bool agreed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -369,10 +373,11 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
           suffix: IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20), onPressed: () => setState(() => hide = !hide)),
         ),
         LabeledField(label: context.t('Confirm password'), controller: pw2, icon: Icons.lock_outline_rounded, obscure: hide),
+        AgreeLine(value: agreed, onChanged: (v) => setState(() => agreed = v)),
         ErrorText(error),
         const SizedBox(height: 10),
         FilledButton(
-          onPressed: busy
+          onPressed: busy || !agreed
               ? null
               : () {
                   final mismatch = context.t('Passwords do not match');
@@ -385,7 +390,7 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
         ),
         if (s.googleClientId != null) ...[
           const _OrDivider(),
-          GoogleButton(label: context.t('Sign up with Google'), onPressed: busy ? null : () => run(() => s.google(signup: true, phone: phone.text))),
+          GoogleButton(label: context.t('Sign up with Google'), onPressed: busy || !agreed ? null : () => run(() => s.google(signup: true, phone: phone.text))),
           Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Muted(context.t('Fill in your mobile number above so your gym can find you.'), size: 12, align: TextAlign.center))),
         ],
         const SizedBox(height: 18),

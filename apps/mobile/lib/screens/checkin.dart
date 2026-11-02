@@ -213,15 +213,25 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
     }
   }
 
+  /// Saves the gym's exact spot: takes several GPS readings for up to ~20 s and keeps the most
+  /// accurate one (aim: within 15 m), so check-in works only inside the gym.
   Future<void> setLocation() async {
-    final ok = context.t('Gym location saved. Check-in now works only near the gym');
     setState(() => busy = true);
+    final ok = context.t('Gym location saved');
     try {
-      final pos = await currentPosition(context, ask: true);
-      if (pos == null) return;
-      await Api.instance.put('/gym/location', {'lat': pos.latitude, 'lng': pos.longitude});
+      final first = await currentPosition(context, ask: true);
+      if (first == null) return;
+      var best = first;
+      if (mounted) toast(context, context.t('Finding the exact spot… stay inside the gym'));
+      for (var i = 0; i < 6 && best.accuracy > 12; i++) {
+        try {
+          final p = await Geolocator.getCurrentPosition(locationSettings: const LocationSettings(accuracy: LocationAccuracy.best, timeLimit: Duration(seconds: 4)));
+          if (p.accuracy < best.accuracy) best = p;
+        } catch (_) {}
+      }
+      await Api.instance.put('/gym/location', {'lat': best.latitude, 'lng': best.longitude});
       ref.invalidate(gymQrProvider);
-      if (mounted) toast(context, ok);
+      if (mounted) toast(context, '$ok (±${best.accuracy.round()} m)');
     } catch (e) {
       if (mounted) toast(context, e.toString());
     } finally {
@@ -344,7 +354,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                       Text(d['locationSet'] == true ? context.t('Gym location set ✓') : context.t('Gym location not set'), style: const TextStyle(fontWeight: FontWeight.w800)),
                       Muted(
                         d['locationSet'] == true
-                            ? context.t('Check-in works only within {m} m of the gym', {'m': d['radiusM'] ?? 200})
+                            ? context.t('Check-in works only within {m} m of the gym', {'m': d['radiusM'] ?? 20})
                             : context.t('Stand inside the gym and tap Set, so nobody can check in from home with a photo of the QR'),
                         size: 12,
                       ),

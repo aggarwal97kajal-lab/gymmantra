@@ -25,7 +25,7 @@ export interface TrainerDaysDoc {
   days: string[]; // recent days (newest first)
 }
 
-const RADIUS_M = 200;
+const RADIUS_M = 20; // owner decision: only inside the gym (10–20 m)
 const newKey = () => uuid().replace(/-/g, '').slice(0, 16);
 export const checkinText = (tenantId: string, key: string) => `gymmantra-checkin:${tenantId}:${key}`;
 
@@ -53,7 +53,7 @@ export function checkinRoutes(app: App) {
       t.set(P.checkin(g.tenantId), fresh);
       return fresh;
     });
-    return c.json({ text: checkinText(g.tenantId, doc.key), joinText: `gymmantra-join:${g.tenant.gymCode}`, gymCode: g.tenant.gymCode, locationSet: doc.lat != null, radiusM: doc.radiusM });
+    return c.json({ text: checkinText(g.tenantId, doc.key), joinText: `gymmantra-join:${g.tenant.gymCode}`, gymCode: g.tenant.gymCode, locationSet: doc.lat != null, radiusM: RADIUS_M });
   });
 
   /** Owner: make a new check-in QR (old printouts stop working). */
@@ -67,7 +67,7 @@ export function checkinRoutes(app: App) {
       audit(t, g.tenantId, u.id, 'checkin.rotate', 'tenant', g.tenantId);
       return next;
     });
-    return c.json({ text: checkinText(g.tenantId, doc.key), locationSet: doc.lat != null, radiusM: doc.radiusM });
+    return c.json({ text: checkinText(g.tenantId, doc.key), locationSet: doc.lat != null, radiusM: RADIUS_M });
   });
 
   /** Owner: save the gym's location (taken from the phone while standing in the gym), or clear it. */
@@ -81,7 +81,7 @@ export function checkinRoutes(app: App) {
     if (!clear && (lat == null || lng == null)) throw bad('Location is not valid');
     await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<CheckinDoc>(P.checkin(g.tenantId))) ?? { key: newKey(), lat: null, lng: null, radiusM: RADIUS_M, updatedAt: nowIso() };
-      t.set(P.checkin(g.tenantId), { ...cur, lat: clear ? null : lat, lng: clear ? null : lng, updatedAt: nowIso() });
+      t.set(P.checkin(g.tenantId), { ...cur, lat: clear ? null : lat, lng: clear ? null : lng, radiusM: RADIUS_M, updatedAt: nowIso() });
       audit(t, g.tenantId, u.id, 'checkin.location', 'tenant', g.tenantId, null, { lat, lng });
     });
     return c.json({ locationSet: !clear, radiusM: RADIUS_M });
@@ -108,8 +108,9 @@ export function checkinRoutes(app: App) {
       const lng = coord(b.lng, 180);
       if (lat == null || lng == null) throw bad('Turn on location so we can check that you are at the gym');
       const d = distanceM({ lat: cfg.lat, lng: cfg.lng }, { lat, lng });
-      const acc = typeof b.accuracy === 'number' && b.accuracy > 0 ? Math.min(b.accuracy, 100) : 0;
-      if (d > cfg.radiusM + acc) throw forbidden(`You are ${d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`} away from ${tenant.name}. Check in from inside the gym`);
+      // Phone GPS indoors is often 10–30 m off, so the reported accuracy (up to 30 m) is allowed on top.
+      const acc = typeof b.accuracy === 'number' && b.accuracy > 0 ? Math.min(b.accuracy, 30) : 0;
+      if (d > RADIUS_M + acc) throw forbidden(`You are ${d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`} away from ${tenant.name}. Check in from inside the gym`);
     }
     const gym = { id: tenantId, name: tenant.name, whatsappNumber: tenant.whatsappNumber, phone: tenant.phone };
     if (memberId) {

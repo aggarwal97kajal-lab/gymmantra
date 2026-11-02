@@ -202,7 +202,7 @@ class HomeScreen extends ConsumerWidget {
                       NoticeBanner(title: n['title'] as String, message: n['message'] as String, gym: m['gym']['name'] as String?, date: n['createdAt'] as String?),
                   for (final m in list)
                     for (final o in ((m['offers'] as List?) ?? const []).cast<Map>())
-                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?),
+                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?, imageUrl: o['imageUrl'] as String?),
                   for (final m in list)
                     if (((m['due'] as num?) ?? 0) > 0) ...[_DueBanner(m), const SizedBox(height: 12)],
                   for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],

@@ -195,6 +195,8 @@ export const P = {
   audit: (t: string) => `tenants/${t}/audit`,
   tickets: 'tickets',
   ticket: (id: string) => `tickets/${id}`,
+  ticketSeq: 'settings/ticketSeq',
+  offerImage: (t: string, id: string) => `tenants/${t}/offerImages/${id}`,
   notes: (uid: string) => `notifications/${uid}`,
   photo: (uid: string) => `photos/${uid}`,
   saasPlans: 'saasPlans',

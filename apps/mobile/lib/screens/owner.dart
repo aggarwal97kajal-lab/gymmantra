@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../haptics.dart';
 import '../back.dart';
@@ -15,6 +17,7 @@ import 'pt.dart';
 import 'billing.dart';
 import 'auth.dart' show PhoneField;
 import 'dues.dart';
+import 'banner.dart';
 
 // ============================================================ shell
 
@@ -832,10 +835,71 @@ String audienceLabel(BuildContext context, Map o) {
   return parts.join(' + ');
 }
 
-class OwnerOffersScreen extends ConsumerWidget {
+class OwnerOffersScreen extends ConsumerStatefulWidget {
   const OwnerOffersScreen({super.key});
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<OwnerOffersScreen> createState() => _OwnerOffersState();
+}
+
+class _OwnerOffersState extends ConsumerState<OwnerOffersScreen> {
+  /// Switch changes shown at once, before the server answers.
+  final Map<String, bool> flips = {};
+  final Set<String> gone = {};
+
+  Future<void> toggle(Map o, bool on) async {
+    final id = o['id'] as String;
+    setState(() => flips[id] = on);
+    TapHaptics.buzz();
+    try {
+      await Api.instance.patch('/offers/$id', {'active': on});
+      ref.invalidate(offersProvider);
+    } catch (e) {
+      if (mounted) {
+        setState(() => flips.remove(id));
+        toast(context, e.toString());
+      }
+    }
+  }
+
+  Future<void> delete(Map o) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(context.t('Delete this offer?')),
+        content: Text(context.t('It will be removed from every dashboard.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: Text(context.t('Delete'), style: const TextStyle(color: C.red))),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final id = o['id'] as String;
+    setState(() => gone.add(id));
+    try {
+      await Api.instance.delete('/offers/$id');
+      ref.invalidate(offersProvider);
+    } catch (e) {
+      if (mounted) {
+        setState(() => gone.remove(id));
+        toast(context, e.toString());
+      }
+    }
+  }
+
+  Future<void> banner(Map o) async {
+    final bytes = await pickBanner(context);
+    if (bytes == null) return;
+    try {
+      await Api.instance.post('/offers/${o['id']}/image', {'mime': 'image/jpeg', 'base64': base64Encode(bytes)});
+      ref.invalidate(offersProvider);
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final v = ref.watch(offersProvider);
     final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
     return Scaffold(
@@ -860,7 +924,7 @@ class OwnerOffersScreen extends ConsumerWidget {
           value: v,
           onRetry: () => ref.invalidate(offersProvider),
           builder: (d) {
-            final list = (d as List).cast<Map>();
+            final list = (d as List).cast<Map>().where((o) => !gone.contains(o['id'])).toList();
             if (list.isEmpty) {
               return ListView(children: [
                 const SizedBox(height: 110),
@@ -871,37 +935,38 @@ class OwnerOffersScreen extends ConsumerWidget {
             }
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 90), children: [
               for (final o in list)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Opacity(
-                    opacity: o['live'] == true ? 1 : 0.5,
+                Builder(builder: (context) {
+                  final active = flips[o['id']] ?? (o['active'] == true);
+                  final live = active && ((o['validTill'] as String?) ?? '').compareTo(todayIst()) >= 0;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
                     child: Column(children: [
-                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: audienceLabel(context, o), validTill: o['validTill'] as String?),
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 150),
+                        opacity: live ? 1 : 0.5,
+                        child: OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: audienceLabel(context, o), validTill: o['validTill'] as String?, imageUrl: o['imageUrl'] as String?),
+                      ),
                       if (owner)
                         Row(children: [
-                          Expanded(child: Muted(o['live'] == true ? context.t('Showing now') : context.t('Not showing'), size: 12.5)),
-                          Switch(
-                            value: o['active'] == true,
-                            activeTrackColor: context.c.primary,
-                            onChanged: (on) async {
-                              try {
-                                await Api.instance.patch('/offers/${o['id']}', {'active': on});
-                                ref.invalidate(offersProvider);
-                              } catch (e) {
-                                if (context.mounted) toast(context, e.toString());
-                              }
-                            },
-                          ),
+                          Expanded(child: Muted(live ? context.t('Showing now') : context.t('Not showing'), size: 12.5)),
+                          IconButton(tooltip: context.t('Banner picture'), onPressed: () => banner(o), icon: Icon(Icons.image_outlined, color: context.c.mut)),
+                          IconButton(tooltip: context.t('Delete'), onPressed: () => delete(o), icon: const Icon(Icons.delete_outline_rounded, color: C.red)),
+                          Switch(value: active, activeTrackColor: context.c.primary, onChanged: (on) => toggle(o, on)),
                         ]),
                     ]),
-                  ),
-                ),
+                  );
+                }),
             ]);
           },
         ),
       ),
     );
   }
+}
+
+String todayIst() {
+  final n = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  return '${n.year}-${n.month.toString().padLeft(2, '0')}-${n.day.toString().padLeft(2, '0')}';
 }
 
 class NewOfferScreen extends ConsumerStatefulWidget {
@@ -919,6 +984,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
   String filter = 'ALL';
   bool busy = false;
   String? error;
+  Uint8List? bannerBytes;
 
   String get ymd => '${till.year}-${till.month.toString().padLeft(2, '0')}-${till.day.toString().padLeft(2, '0')}';
 
@@ -975,14 +1041,32 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
             pick(context.t('Expired members'), filter == 'EXPIRED', () => setState(() => filter = 'EXPIRED')),
           ]),
         ],
-        const SizedBox(height: 10),
-        Muted(context.t('Preview'), size: 12.5),
+        const SizedBox(height: 12),
+        Text(context.t('Banner picture (optional)'), style: const TextStyle(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Muted(context.t('A wide picture (2:1) looks best. You see the live preview below.'), size: 12),
+        const SizedBox(height: 8),
+        BannerPickerBox(
+          has: bannerBytes != null,
+          onPick: () async {
+            final b = await pickBanner(context);
+            if (b != null) setState(() => bannerBytes = b);
+          },
+          onRemove: () => setState(() => bannerBytes = null),
+        ),
+        const SizedBox(height: 14),
+        Row(children: [
+          Container(width: 8, height: 8, decoration: const BoxDecoration(color: C.ok, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Muted(context.t('Live preview — this is how members see it'), size: 12.5),
+        ]),
         const SizedBox(height: 6),
         OfferBanner(
           title: title.text.trim().isEmpty ? context.t('Your offer name') : title.text.trim(),
           details: details.text.trim(),
           who: audienceLabel(context, preview),
           validTill: ymd,
+          local: bannerBytes,
         ),
         ErrorText(error),
         const SizedBox(height: 12),
@@ -995,7 +1079,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
                     error = null;
                   });
                   try {
-                    await Api.instance.post('/offers', {
+                    final o = await Api.instance.post('/offers', {
                       'title': title.text.trim(),
                       'details': details.text.trim(),
                       'validTill': ymd,
@@ -1003,6 +1087,9 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
                       'forTrainers': forTrainers,
                       'memberFilter': filter,
                     });
+                    if (bannerBytes != null) {
+                      await Api.instance.post('/offers/${o['id']}/image', {'mime': 'image/jpeg', 'base64': base64Encode(bannerBytes!)});
+                    }
                     if (context.mounted) context.pop();
                   } catch (e) {
                     setState(() => error = e.toString());

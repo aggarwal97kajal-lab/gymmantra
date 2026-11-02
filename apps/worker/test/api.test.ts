@@ -323,17 +323,15 @@ describe('member app', () => {
     expect((await h.api.get('/me/gyms', mem.token)).body.memberships).toHaveLength(1);
   });
 
-  it('routes tickets: gym topics to the gym, app problems to GymMantra', async () => {
+  it('member tickets go to GymMantra, not to the gym', async () => {
     const owner = await h.ownerWithGym('Ticket Gym');
     const mem = await h.signup('Ticket Member');
     await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
     const reqs = await h.api.get('/join-requests', owner.token);
-    const m = await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
-    await h.api.post('/me/tickets', { topic: 'membership', subject: 'Renewal date wrong', body: 'Please check', memberId: m.body.id }, mem.token);
-    await h.api.post('/me/tickets', { topic: 'app_bug', subject: 'App crashed', body: 'On QR screen' }, mem.token);
-    const gymT = await h.api.get('/tickets', owner.token);
-    expect(gymT.body.map((t: any) => t.subject)).toEqual(['Renewal date wrong']);
-    expect((await h.api.post(`/tickets/${gymT.body[0].id}/messages`, { body: 'Fixed' }, owner.token)).status).toBe(201);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    const t = await h.api.post('/me/tickets', { topic: 'membership', subject: 'Renewal date wrong', body: 'Please check' }, mem.token);
+    expect(t.body).toMatchObject({ routedTo: 'GYMMANTRA', gymName: 'Ticket Gym', role: 'MEMBER' });
+    expect((await h.api.get('/tickets', owner.token)).body).toHaveLength(0);
     expect((await h.api.get('/super/tickets', owner.token)).status).toBe(403);
   });
 
@@ -682,7 +680,8 @@ describe('dues, check-in QR, leads, PDFs, reports', () => {
     await h.api.post(`/members/${id2}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, A.token);
     expect((await h.api.post('/me/checkin', { code: qr.body.text }, mem2.token)).status).toBe(400);
     expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.70, lng: 77.10 }, mem2.token)).status).toBe(403);
-    expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.5925, lng: 77.0462 }, mem2.token)).status).toBe(201);
+    expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.5925, lng: 77.0462 }, mem2.token)).status).toBe(403); // ~45 m away
+    expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.59215, lng: 77.04603, accuracy: 8 }, mem2.token)).status).toBe(201);
     // rotating the key stops old printouts
     const rot = await h.api.post('/gym/checkin-qr/rotate', {}, A.token);
     expect(rot.body.text).not.toBe(qr.body.text);
@@ -716,6 +715,45 @@ describe('dues, check-in QR, leads, PDFs, reports', () => {
     expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, other.token)).status).toBe(403);
     expect((await h.api.del(`/programs/${memberId}/pdf/diet?tenantId=${A.gym.id}`, A.token)).status).toBe(200);
     expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, mem.token)).status).toBe(404);
+  });
+});
+
+describe('tickets, deletes and offer banners', () => {
+  it('every ticket goes to GymMantra with a number; the person waits for a reply', async () => {
+    const owner = await h.ownerWithGym('Ticket Gym');
+    const r = await h.api.post('/me/tickets', { topic: 'payment', subject: 'Paid but due shows', body: 'I paid by UPI yesterday' }, owner.token);
+    expect(r.status).toBe(201);
+    expect(r.body.number).toBe('GM-1001');
+    expect(r.body.routedTo).toBe('GYMMANTRA');
+    const r2 = await h.api.post('/me/tickets', { topic: 'other', subject: 'Second one', body: 'Another question here' }, owner.token);
+    expect(r2.body.number).toBe('GM-1002');
+    expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'any update?' }, owner.token)).status).toBe(400);
+    // gym staff cannot see it; super admin can and replies
+    expect((await h.api.get('/tickets', owner.token)).body).toHaveLength(0);
+    const boss = await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const list = await h.api.get('/super/tickets', boss.body.token);
+    expect(list.body.map((t: any) => t.number).sort()).toEqual(['GM-1001', 'GM-1002']);
+    expect((await h.api.post(`/super/tickets/${r.body.id}/messages`, { body: 'Fixed now' }, boss.body.token)).status).toBe(201);
+    const mine = await h.api.get(`/me/tickets/${r.body.id}`, owner.token);
+    expect(mine.body.waiting).toBe(false);
+    expect((await h.api.post(`/me/tickets/${r.body.id}/messages`, { body: 'Thanks!' }, owner.token)).status).toBe(201);
+  });
+
+  it('owner deletes offers, unused plans and empty branches; offers can have a banner', async () => {
+    const owner = await h.ownerWithGym('Delete Gym');
+    const o = await h.api.post('/offers', { title: 'Diwali 20% off', validTill: '2099-01-01', forMembers: true }, owner.token);
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    const img = await h.api.post(`/offers/${o.body.id}/image`, { mime: 'image/png', base64: png }, owner.token);
+    expect(img.status).toBe(201);
+    expect(img.body.imageUrl).toContain(`/offers/${owner.gym.id}/${o.body.id}/image`);
+    expect((await h.api.del(`/offers/${o.body.id}`, owner.token)).status).toBe(200);
+    expect((await h.api.get('/offers', owner.token)).body).toHaveLength(0);
+    const plan = (await h.api.post('/plans', { name: 'Monthly', months: 1, price: 1000 }, owner.token)).body;
+    expect((await h.api.del(`/plans/${plan.id}`, owner.token)).status).toBe(200);
+    const plan2 = (await h.api.post('/plans', { name: 'Yearly', months: 12, price: 9000 }, owner.token)).body;
+    const m = (await h.api.post('/members', { name: 'Ravi', phone: h.nextPhone() }, owner.token)).body;
+    await h.api.post(`/members/${m.id}/memberships`, { planId: plan2.id, paymentMode: 'CASH' }, owner.token);
+    expect((await h.api.del(`/plans/${plan2.id}`, owner.token)).status).toBe(400);
   });
 });
 

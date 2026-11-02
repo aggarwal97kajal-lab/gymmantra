@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'haptics.dart';
@@ -10,7 +11,7 @@ import 'api.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/billing.dart';
-import 'screens/help.dart' show TicketScreen;
+import 'screens/help.dart' show TicketScreen, TicketTile;
 import 'screens/home.dart' show openUrl;
 import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, ProfileDetailsScreen, ChangePasswordScreen;
 import 'session.dart';
@@ -742,11 +743,10 @@ class AdminAds extends ConsumerWidget {
                           Muted('👁 ${sum(a['views'] as Map?)}  ·  👆 ${sum(a['clicks'] as Map?)}', size: 11.5),
                         ]),
                       ),
-                      Switch(
+                      _QuickSwitch(
                         value: a['active'] == true,
-                        activeTrackColor: context.c.primary,
                         onChanged: (on) async {
-                          await Api.instance.patch('/super/ads/${a['id']}', {'active': on}).catchError((_) => null);
+                          await Api.instance.patch('/super/ads/${a['id']}', {'active': on});
                           ref.invalidate(_ads);
                         },
                       ),
@@ -759,6 +759,41 @@ class AdminAds extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Switch that flips at once and goes back only if saving fails.
+class _QuickSwitch extends StatefulWidget {
+  const _QuickSwitch({required this.value, required this.onChanged});
+  final bool value;
+  final Future<void> Function(bool) onChanged;
+  @override
+  State<_QuickSwitch> createState() => _QuickSwitchState();
+}
+
+class _QuickSwitchState extends State<_QuickSwitch> {
+  bool? v;
+  @override
+  void didUpdateWidget(_QuickSwitch old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) v = null;
+  }
+
+  @override
+  Widget build(BuildContext context) => Switch(
+        value: v ?? widget.value,
+        activeTrackColor: context.c.primary,
+        onChanged: (on) async {
+          setState(() => v = on);
+          try {
+            await widget.onChanged(on);
+          } catch (e) {
+            if (mounted) {
+              setState(() => v = null);
+              toast(context, e.toString());
+            }
+          }
+        },
+      );
 }
 
 Color _hex(String? h) => Color(int.tryParse('FF${(h ?? '#2563EB').replaceFirst('#', '')}', radix: 16) ?? 0xFF2563EB);
@@ -788,6 +823,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
   late String color = widget.ad?['color'] as String? ?? '#2563EB';
   late DateTime ends = DateTime.tryParse(widget.ad?['endsOn'] as String? ?? '') ?? DateTime.now().add(const Duration(days: 30));
   String? imageUrl;
+  Uint8List? localImage; // picked now, shown in the live preview, uploaded on Save
   bool busy = false;
   String? error;
   static const colors = ['#2563EB', '#E11D48', '#F59E0B', '#7C3AED', '#059669', '#0F172A'];
@@ -828,16 +864,14 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
       uiSettings: [AndroidUiSettings(toolbarTitle: 'Ad banner', toolbarColor: C.night, toolbarWidgetColor: Colors.white, activeControlsWidgetColor: C.indigo, initAspectRatio: CropAspectRatioPreset.ratio16x9, lockAspectRatio: true, aspectRatioPresets: [CropAspectRatioPreset.ratio16x9])],
     );
     if (c == null) return;
-    setState(() => busy = true);
-    try {
-      final id = widget.ad?['id'] as String? ?? await save();
-      final r = await Api.instance.post('/super/ads/$id/image', {'mime': 'image/jpeg', 'base64': base64Encode(await c.readAsBytes())});
-      setState(() => imageUrl = r['imageUrl'] as String?);
-      if (widget.ad == null && mounted) context.pop();
-    } catch (e) {
-      setState(() => error = e.toString());
-    } finally {
-      if (mounted) setState(() => busy = false);
+    final bytes = await c.readAsBytes();
+    if (mounted) setState(() => localImage = bytes);
+  }
+
+  Future<void> saveAll() async {
+    final id = await save() ?? widget.ad?['id'] as String?;
+    if (localImage != null && id != null) {
+      await Api.instance.post('/super/ads/$id/image', {'mime': 'image/jpeg', 'base64': base64Encode(localImage!)});
     }
   }
 
@@ -848,15 +882,52 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
           child: FilterChip(label: SizedBox(width: double.infinity, child: Text(label, textAlign: TextAlign.center)), selected: v, onSelected: on),
         );
     return Scaffold(
-      appBar: AppBar(title: Text(widget.ad == null ? context.t('New ad') : context.t('Edit ad'))),
+      appBar: AppBar(
+        title: Text(widget.ad == null ? context.t('New ad') : context.t('Edit ad')),
+        actions: [
+          if (widget.ad != null)
+            IconButton(
+              tooltip: context.t('Delete'),
+              icon: const Icon(Icons.delete_outline_rounded, color: C.red),
+              onPressed: () async {
+                final yes = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: Text(context.t('Delete this ad?')),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: Text(context.t('Cancel'))),
+                      TextButton(onPressed: () => Navigator.pop(c, true), child: Text(context.t('Delete'), style: const TextStyle(color: C.red))),
+                    ],
+                  ),
+                );
+                if (yes != true) return;
+                try {
+                  await Api.instance.delete('/super/ads/${widget.ad!['id']}');
+                  if (context.mounted) context.pop();
+                } catch (e) {
+                  if (context.mounted) toast(context, e.toString());
+                }
+              },
+            ),
+        ],
+      ),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-        // preview
+        Row(children: [
+          Container(width: 8, height: 8, decoration: const BoxDecoration(color: C.ok, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Muted(context.t('Live preview'), size: 12.5),
+        ]),
+        const SizedBox(height: 6),
+        // live preview
         Container(
           height: 130,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(color: _hex(color), borderRadius: BorderRadius.circular(18)),
           child: Stack(children: [
-            if (imageUrl != null) Positioned.fill(child: Image.network(Api.instance.url(imageUrl!), fit: BoxFit.cover)),
+            if (localImage != null)
+              Positioned.fill(child: Image.memory(localImage!, fit: BoxFit.cover))
+            else if (imageUrl != null)
+              Positioned.fill(child: Image.network(Api.instance.url(imageUrl!), fit: BoxFit.cover)),
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -951,7 +1022,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
                     error = null;
                   });
                   try {
-                    await save();
+                    await saveAll();
                     if (context.mounted) context.pop();
                   } catch (e) {
                     setState(() => error = e.toString());
@@ -1016,18 +1087,9 @@ class AdminTickets extends ConsumerWidget {
             final list = (d as List).cast<Map>();
             if (list.isEmpty) return ListView(children: [const SizedBox(height: 100), Muted(context.t('No tickets.'), align: TextAlign.center)]);
             return ListView(padding: const EdgeInsets.all(16), children: [
-              for (final t in list)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Panel(
-                    onTap: () => context.push('/a/ticket/${t['id']}'),
-                    padding: const EdgeInsets.all(14),
-                    child: Row(children: [
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t['subject'] as String, style: const TextStyle(fontWeight: FontWeight.w700)), Muted(fmtDateTime(t['updatedAt'] as String), size: 12)])),
-                      Text(t['status'] == 'OPEN' ? context.t('Open') : context.t('Resolved'), style: TextStyle(color: t['status'] == 'OPEN' ? C.warn : C.ok, fontWeight: FontWeight.w700, fontSize: 12)),
-                    ]),
-                  ),
-                ),
+              Muted(context.t('Waiting for your reply: {n}', {'n': list.where((t) => t['status'] == 'OPEN' && t['waiting'] == true).length}), size: 12.5),
+              const SizedBox(height: 10),
+              for (final t in list) TicketTile(t: t, admin: true, onTap: () => context.push('/a/ticket/${t['id']}')),
             ]);
           },
         ),

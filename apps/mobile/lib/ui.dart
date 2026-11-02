@@ -1,7 +1,9 @@
+import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'i18n.dart';
+import 'photo.dart';
 import 'theme.dart';
 
 const _monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -434,43 +436,127 @@ class _RingPainter extends CustomPainter {
 
 /// Purple-orange offer banner shown on member / trainer dashboards.
 class OfferBanner extends StatelessWidget {
-  const OfferBanner({super.key, required this.title, this.details, this.who, this.validTill});
+  const OfferBanner({super.key, required this.title, this.details, this.who, this.validTill, this.imageUrl, this.local});
   final String title;
   final String? details;
   final String? who;
   final String? validTill;
+
+  /// Banner picture uploaded by the owner (or a picture just picked, for the live preview).
+  final String? imageUrl;
+  final Uint8List? local;
+  @override
+  Widget build(BuildContext context) {
+    if (imageUrl != null || local != null) return _ImageOffer(banner: this);
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFC026D3), C.orange], stops: [0, 0.55, 1], begin: Alignment.topLeft, end: Alignment.bottomRight),
+      ),
+      child: Stack(clipBehavior: Clip.none, children: [
+        Positioned(right: -14, bottom: -26, child: Icon(Icons.local_offer_outlined, size: 96, color: Colors.white.withAlpha(46))),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const _OfferTag(),
+            const Spacer(),
+            if (who != null) Flexible(child: Text(who!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 11))),
+          ]),
+          const SizedBox(height: 8),
+          Text(title, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
+          if (details != null && details!.isNotEmpty) ...[const SizedBox(height: 2), Text(details!, style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 12.5))],
+          if (validTill != null) ...[const SizedBox(height: 4), Text(context.t('Till {date}', {'date': fmtDate(validTill)}), style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11.5, fontWeight: FontWeight.w600))],
+        ]),
+      ]),
+    );
+  }
+}
+
+class _OfferTag extends StatelessWidget {
+  const _OfferTag();
   @override
   Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFC026D3), C.orange], stops: [0, 0.55, 1], begin: Alignment.topLeft, end: Alignment.bottomRight),
-        ),
-        child: Stack(clipBehavior: Clip.none, children: [
-          Positioned(right: -14, bottom: -26, child: Icon(Icons.local_offer_outlined, size: 96, color: Colors.white.withAlpha(46))),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                decoration: BoxDecoration(color: Colors.white.withAlpha(56), borderRadius: BorderRadius.circular(99)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.local_offer_rounded, size: 12, color: Colors.white),
-                  const SizedBox(width: 4),
-                  Text(context.t('OFFER'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11)),
-                ]),
-              ),
-              const Spacer(),
-              if (who != null) Flexible(child: Text(who!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 11))),
-            ]),
-            const SizedBox(height: 8),
-            Text(title, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
-            if (details != null && details!.isNotEmpty) ...[const SizedBox(height: 2), Text(details!, style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 12.5))],
-            if (validTill != null) ...[const SizedBox(height: 4), Text(context.t('Till {date}', {'date': fmtDate(validTill)}), style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11.5, fontWeight: FontWeight.w600))],
-          ]),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(color: Colors.white.withAlpha(56), borderRadius: BorderRadius.circular(99)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.local_offer_rounded, size: 12, color: Colors.white),
+          const SizedBox(width: 4),
+          Text(context.t('OFFER'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11)),
         ]),
       );
+}
+
+/// Offer with the owner's banner picture (2:1), title and date over a dark fade.
+class _ImageOffer extends StatefulWidget {
+  const _ImageOffer({required this.banner});
+  final OfferBanner banner;
+  @override
+  State<_ImageOffer> createState() => _ImageOfferState();
+}
+
+class _ImageOfferState extends State<_ImageOffer> {
+  Uint8List? bytes;
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_ImageOffer old) {
+    super.didUpdateWidget(old);
+    if (old.banner.imageUrl != widget.banner.imageUrl) _load();
+  }
+
+  void _load() {
+    final u = widget.banner.imageUrl;
+    if (u == null) return;
+    bytes = PhotoCache.get(u);
+    if (bytes == null) {
+      PhotoCache.load(u).then((b) {
+        if (mounted && widget.banner.imageUrl == u) setState(() => bytes = b);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.banner;
+    final img = b.local ?? bytes;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: context.c.surf2),
+      child: AspectRatio(
+        aspectRatio: 2,
+        child: Stack(fit: StackFit.expand, children: [
+          if (img != null) Image.memory(img, fit: BoxFit.cover, gaplessPlayback: true) else const Shimmer(child: Bone(height: 400, radius: 0)),
+          const DecoratedBox(
+            decoration: BoxDecoration(gradient: LinearGradient(colors: [Color(0x00000000), Color(0xB3000000)], begin: Alignment.center, end: Alignment.bottomCenter)),
+          ),
+          Positioned(left: 12, top: 10, child: const _OfferTag()),
+          Positioned(
+            left: 14,
+            right: 14,
+            bottom: 10,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(b.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800)),
+              if (b.validTill != null || b.who != null)
+                Text(
+                  [if (b.validTill != null) context.t('Till {date}', {'date': fmtDate(b.validTill)}), if (b.who != null) b.who!].join(' · '),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 11.5, fontWeight: FontWeight.w600),
+                ),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
 }
 
 /// Gym notice ("Gym closed tomorrow") from the owner, shown on dashboards.

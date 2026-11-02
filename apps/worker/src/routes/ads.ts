@@ -93,6 +93,20 @@ export function adRoutes(app: App) {
     return c.json(view(out));
   });
 
+  app.delete('/api/v1/super/ads/:id', async (c) => {
+    const u = await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    await c.var.deps.store.tx(async (t) => {
+      const before = isUuid(id) ? await t.get<AdDoc>(P.ad(id)) : null;
+      if (!before) throw notFound('Ad not found');
+      t.delete(P.ad(id));
+      if (before.imageV) t.delete(P.adImage(id));
+      audit(t, null, u.id, 'ad.delete', 'ad', id, before, null);
+    });
+    return c.json({ ok: true });
+  });
+
   app.post('/api/v1/super/ads/:id/image', async (c) => {
     await authenticate(c);
     requireSuper(c);

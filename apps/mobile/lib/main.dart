@@ -12,6 +12,7 @@ import 'screens/auth.dart';
 import 'screens/billing.dart';
 import 'screens/gym.dart';
 import 'screens/help.dart';
+import 'screens/legal.dart';
 import 'screens/home.dart';
 import 'screens/profile.dart';
 import 'screens/program.dart';
@@ -61,6 +62,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
       redirect: (context, state) {
         final loc = state.matchedLocation;
         if (!session.ready || !splashDone.value) return loc == '/splash' ? null : '/splash';
+        if (loc.startsWith('/legal')) return null; // Terms and Privacy open for everyone
         const open = ['/login', '/signup', '/forgot', '/start'];
         if (!session.loggedIn) {
           // First open: "Who are you?" comes before log-in.
@@ -94,6 +96,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/login', pageBuilder: (_, __) => const NoTransitionPage(child: LoginScreen())),
         GoRoute(path: '/signup', builder: (_, __) => const SignupScreen()),
         GoRoute(path: '/forgot', builder: (_, __) => const ForgotScreen()),
+        GoRoute(path: '/legal/:kind', builder: (_, s) => LegalScreen(privacy: s.pathParameters['kind'] == 'privacy')),
         ShellRoute(
           builder: (context, state, child) => HomeShell(location: state.matchedLocation, child: child),
           routes: [

@@ -626,6 +626,24 @@ class _PlanSheetState extends State<_PlanSheet> {
         ErrorText(error),
         const SizedBox(height: 14),
         FilledButton(onPressed: busy ? null : save, child: Text(context.t(busy ? 'Saving…' : 'Save plan'))),
+        if (p != null) ...[
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: busy
+                ? null
+                : () async {
+                    if (!await confirmDelete(context, context.t('Delete this plan?'))) return;
+                    try {
+                      await Api.instance.delete('/plans/${p!['id']}');
+                      if (context.mounted) Navigator.pop(context, true);
+                    } catch (e) {
+                      if (mounted) setState(() => error = e.toString());
+                    }
+                  },
+            icon: const Icon(Icons.delete_outline_rounded, color: C.red),
+            label: Text(context.t('Delete plan'), style: const TextStyle(color: C.red)),
+          ),
+        ],
       ]),
     );
   }
@@ -724,8 +742,11 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                   contentPadding: EdgeInsets.zero,
                   value: allowDue,
                   onChanged: owner ? (x) => setState(() => allowDue = x) : null,
-                  title: Text(context.t('"Not paid yet" members can enter by default'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                  subtitle: Text(context.t('Staff can still change it for each membership.'), style: TextStyle(color: context.c.mut, fontSize: 12)),
+                  title: Text(context.t('Let members in even if payment is pending'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Text(
+                    context.t('ON: a member who still owes money can check in (you are just warned). OFF: entry stops until they pay. This is the default for new memberships; you can change it for each one.'),
+                    style: TextStyle(color: context.c.mut, fontSize: 12),
+                  ),
                 ),
                 ErrorText(error),
                 const SizedBox(height: 10),
@@ -745,6 +766,22 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                     leading: const IconTile(Icons.place_rounded, size: 36),
                     title: Text(b['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700)),
                     subtitle: Text([b['address'], b['hours']].where((x) => x != null && '$x'.isNotEmpty).join(' · ').ifEmpty('—')),
+                    trailing: owner && branches.length > 1
+                        ? IconButton(
+                            tooltip: context.t('Delete'),
+                            icon: const Icon(Icons.delete_outline_rounded, color: C.red),
+                            onPressed: () async {
+                              final yes = await confirmDelete(context, context.t('Delete this branch?'));
+                              if (!yes) return;
+                              try {
+                                await Api.instance.delete('/gym/branches/${b['id']}');
+                                ref.invalidate(gymProvider);
+                              } catch (e) {
+                                if (context.mounted) toast(context, e.toString());
+                              }
+                            },
+                          )
+                        : null,
                   ),
                 if (owner)
                   ListTile(
@@ -797,6 +834,19 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
     );
   }
 }
+
+Future<bool> confirmDelete(BuildContext context, String title) async =>
+    await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: Text(context.t('Delete'), style: const TextStyle(color: C.red))),
+        ],
+      ),
+    ) ==
+    true;
 
 extension on String {
   String ifEmpty(String other) => isEmpty ? other : this;

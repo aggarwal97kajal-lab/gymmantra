@@ -1,4 +1,4 @@
-import { App, audit, authenticate, Branch, gymOf, isTrainer, P, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Branch, gymOf, isTrainer, P, Role, Roster, TenantDoc, UserDoc } from '../core';
 import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
@@ -175,6 +175,23 @@ export function gymRoutes(app: App) {
       audit(t, g.tenantId, u.id, 'branch.create', 'branch', branch.id, null, branch);
     });
     return c.json(branch, 201);
+  });
+
+  /** Delete a branch that has no members. */
+  app.delete('/api/v1/gym/branches/:id', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    await c.var.deps.store.tx(async (t) => {
+      const [cur, roster] = (await t.getMany<any>([P.tenant(g.tenantId), P.roster(g.tenantId)])) as [TenantDoc, Roster | null];
+      const br = cur.branches.find((b) => b.id === id);
+      if (!br) throw notFound('Branch not found');
+      if (cur.branches.length <= 1) throw bad('A gym needs at least one branch');
+      if (Object.values(roster?.members ?? {}).some((e) => e.branchId === id && !e.archived)) throw bad('Move the members of this branch first, then delete it');
+      t.set(P.tenant(g.tenantId), { ...cur, branches: cur.branches.filter((b) => b.id !== id) });
+      audit(t, g.tenantId, u.id, 'branch.delete', 'branch', id, br, null);
+    });
+    return c.json({ ok: true });
   });
 
   app.patch('/api/v1/gym/branches/:id', async (c) => {
