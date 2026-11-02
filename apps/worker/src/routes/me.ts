@@ -1,4 +1,4 @@
-import { App, authenticate, C, isDeskStaff, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { accountRole, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { freezeDaysLeft } from '../lib/status';
@@ -207,6 +207,10 @@ export function meRoutes(app: App) {
     const appRole = roleIn === 'NONE' ? null : roleIn;
     if (appRole === 'OWNER' && isTrainer(u)) throw bad('A trainer cannot be a gym owner');
     if (appRole === 'TRAINER' && isDeskStaff(u)) throw bad('A gym owner cannot be a trainer');
+    // Once the account is tied to a gym (member, trainer or owner) its role is fixed.
+    if (roleIn !== undefined && roleLocked(u) && appRole !== accountRole(u)) {
+      throw bad('Your account role is fixed because you are already linked to a gym. Make a new account for a different role');
+    }
     const next = await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       const n = { ...cur, ...parts, name: name ?? cur.name, language: language ?? cur.language, appRole: roleIn === undefined ? cur.appRole ?? null : appRole };

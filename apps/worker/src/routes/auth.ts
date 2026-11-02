@@ -1,9 +1,9 @@
 import { App, AuthUser, authenticate, C, clearSession, isMobile, issueSession, isWebOnly, P, UserDoc, WEB_ONLY_MESSAGE } from '../core';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
-import { body, optStr, str } from '../lib/validate';
+import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
-import { ADMIN_ONLY_MESSAGE, isAdminApp, isDeskStaff, isTrainer } from '../core';
+import { accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
 export const LOCK_MINUTES = 15;
@@ -65,7 +65,7 @@ const EMAIL_TAKEN = 'This email ID already exists. Please log in, or use a diffe
 export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phone.gymmantra.app`;
 
 /** Creates a password account in Firebase and the GymMantra user record. */
-export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string }) {
+export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string; appRole?: AppRole | null }) {
   const { store, identity, superAdminEmail } = c.var.deps;
   // The email and the mobile number must be free. Records of removed accounts do not count.
   if (input.email && (await store.query<UserDoc>('users', [['email', input.email]])).some((r) => !r.data.deleted)) throw conflict(EMAIL_TAKEN);
@@ -91,7 +91,7 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
     }
   }
   const uid = fb.uid;
-  const user = newUser(input.name, { email: input.email, authEmail, fbUid: uid, phone: input.phone }, !!input.email && input.email === superAdminEmail);
+  const user = newUser(input.name, { email: input.email, authEmail, fbUid: uid, phone: input.phone, appRole: input.appRole ?? null }, !!input.email && input.email === superAdminEmail);
   try {
     await store.tx(async (t) => {
       if (phoneRef) t.set(P.phone(input.phone), { uid });
@@ -109,6 +109,29 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
   return { uid, user };
 }
 
+const APP_ROLES = ['MEMBER', 'OWNER', 'TRAINER'] as const;
+/** The role picked on the app's first screen (mobile app only). */
+function chosenRole(c: C, b: Record<string, unknown>): AppRole | null {
+  if (!isMobile(c) || isAdminApp(c)) return null;
+  return oneOf(b as never, 'role', APP_ROLES, true) ?? null;
+}
+/**
+ * A login must match the account's role: a member's account cannot open the owner or trainer side.
+ * An account that has no role yet takes the one chosen now.
+ */
+async function enforceRole(c: C, uid: string, user: UserDoc, chose: AppRole | null): Promise<UserDoc> {
+  if (!chose || user.isSuperAdmin) return user;
+  const have = accountRole(user);
+  if (have && have !== chose) throw forbidden(wrongRoleMessage(have));
+  if (have) return user;
+  return c.var.deps.store.tx(async (t) => {
+    const u = (await t.get<UserDoc>(P.user(uid)))!;
+    const next = { ...u, appRole: chose };
+    t.set(P.user(uid), next);
+    return next;
+  });
+}
+
 export function authRoutes(app: App) {
   app.get('/api/v1/auth/config', (c) =>
     c.json({ googleClientId: c.var.deps.googleClientId, maxLoginAttempts: MAX_LOGIN_ATTEMPTS, lockMinutes: LOCK_MINUTES }),
@@ -122,7 +145,7 @@ export function authRoutes(app: App) {
     const phone = normalizePhone(str(b, 'phone', { label: 'your mobile number' }));
     if (!phone) throw bad('Enter a valid 10-digit mobile number');
     const password = str(b, 'password', { min: 8, max: 100, label: 'password' });
-    const { uid, user } = await createPasswordUser(c, { name, email, phone, password });
+    const { uid, user } = await createPasswordUser(c, { name, email, phone, password, appRole: chosenRole(c, b) });
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, user) }, 201);
   });
@@ -178,8 +201,9 @@ export function authRoutes(app: App) {
     });
     if (isMobile(c) && isWebOnly(fresh)) throw forbidden(WEB_ONLY_MESSAGE);
     if (isAdminApp(c) && !fresh.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
+    const checked = await enforceRole(c, uid, fresh, chosenRole(c, b));
     const token = await issueSession(c, uid);
-    return c.json({ token, user: publicUser(uid, fresh) });
+    return c.json({ token, user: publicUser(uid, checked) });
   });
 
   /** Google sign-up creates the account. */
@@ -197,7 +221,7 @@ export function authRoutes(app: App) {
     if (phoneIn && !phone) throw bad('Enter a valid 10-digit mobile number');
     const user = newUser(
       g.name || (g.email ? g.email.split('@')[0] : 'GymMantra user'),
-      { email: g.email, phone, googleSub: g.sub },
+      { email: g.email, phone, googleSub: g.sub, appRole: chosenRole(c, b) },
       !!g.email && g.email === superAdminEmail,
     );
     await store.tx(async (t) => {
@@ -224,8 +248,9 @@ export function authRoutes(app: App) {
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
     if (isMobile(c) && isWebOnly(user)) throw forbidden(WEB_ONLY_MESSAGE);
     if (isAdminApp(c) && !user.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
+    const checked = await enforceRole(c, uid, user, chosenRole(c, b));
     const token = await issueSession(c, uid);
-    return c.json({ token, user: publicUser(uid, user) });
+    return c.json({ token, user: publicUser(uid, checked) });
   });
 
   /** Forgot password: Firebase emails a reset link to the account's email. */

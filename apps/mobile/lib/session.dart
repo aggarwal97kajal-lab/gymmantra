@@ -86,11 +86,11 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> login(String identifier, String password) async =>
-      _done(await api.post('/auth/login', {'identifier': identifier.trim(), 'password': password}));
+      _done(await api.post('/auth/login', {'identifier': identifier.trim(), 'password': password, ..._roleBody}));
 
   Future<void> signup(String name, String email, String phone, String password) async {
     final lang = AppSettings.instance.lang;
-    await _done(await api.post('/auth/signup', {'name': name.trim(), 'email': email.trim(), 'phone': phone.trim(), 'password': password}));
+    await _done(await api.post('/auth/signup', {'name': name.trim(), 'email': email.trim(), 'phone': phone.trim(), 'password': password, ..._roleBody}));
     if (lang == 'hi') await setLanguage('hi');
   }
 
@@ -115,6 +115,7 @@ class Session extends ChangeNotifier {
     if (idToken == null) throw ApiException(400, 'Google did not return a sign-in token. Try again.');
     await _done(await api.post(signup ? '/auth/google/signup' : '/auth/google/login', {
       'idToken': idToken,
+      ..._roleBody,
       if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
     }));
   }
@@ -149,6 +150,9 @@ class Session extends ChangeNotifier {
     }
     return null;
   }
+
+  /// The server checks that the account really has the role picked on the first screen.
+  Map<String, dynamic> get _roleBody => pendingRole == null ? const {} : {'role': pendingRole};
 
   /// Role picked on the first screen (before log-in).
   String? get pendingRole => Prefs.getString('pendingRole');

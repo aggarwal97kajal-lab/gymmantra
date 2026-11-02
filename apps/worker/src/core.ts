@@ -305,6 +305,23 @@ export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isS
 export const isDeskStaff = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && DESK_ROLES.includes(s.role));
 /** True if the person is a trainer at any gym. */
 export const isTrainer = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && s.role === 'TRAINER');
+export type AppRole = 'MEMBER' | 'OWNER' | 'TRAINER';
+const ROLE_LABEL: Record<AppRole, string> = { MEMBER: 'Member', OWNER: 'Gym owner', TRAINER: 'Trainer' };
+const nonEmpty = (o?: Record<string, unknown>) => !!o && Object.keys(o).length > 0;
+/** The role this account belongs to, worked out from what it really is in gyms. null = not decided yet. */
+export function accountRole(u: UserDoc): AppRole | null {
+  if (isDeskStaff(u)) return 'OWNER';
+  if (isTrainer(u) || nonEmpty(u.trainerRequested)) return 'TRAINER';
+  if (u.appRole) return u.appRole;
+  if (nonEmpty(u.memberships) || nonEmpty(u.requested)) return 'MEMBER';
+  return null;
+}
+/** True when the account is tied to a gym, so its role can no longer change. */
+export const roleLocked = (u: UserDoc) =>
+  isDeskStaff(u) || isTrainer(u) || nonEmpty(u.trainerRequested) || nonEmpty(u.memberships) || nonEmpty(u.requested) || nonEmpty(u.staffOf);
+export const wrongRoleMessage = (have: AppRole) =>
+  `This account is registered as a ${ROLE_LABEL[have]}. Go back and choose "${ROLE_LABEL[have]}" to log in`;
+
 
 export function requireSuper(c: C) {
   if (!c.var.user.isSuperAdmin) throw forbidden('Super admin only');

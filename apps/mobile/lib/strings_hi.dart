@@ -624,4 +624,8 @@ const hindi = <String, String>{
   'Login details': 'लॉग इन जानकारी',
   'New password again': 'नया पासवर्ड दोबारा',
   'Change': 'बदलें',
+  'This account is registered as a Member. Go back and choose "Member" to log in': 'यह अकाउंट मेंबर के रूप में बना है। वापस जाकर "मेंबर" चुनें और लॉग इन करें',
+  'This account is registered as a Gym owner. Go back and choose "Gym owner" to log in': 'यह अकाउंट जिम मालिक के रूप में बना है। वापस जाकर "जिम मालिक" चुनें और लॉग इन करें',
+  'This account is registered as a Trainer. Go back and choose "Trainer" to log in': 'यह अकाउंट ट्रेनर के रूप में बना है। वापस जाकर "ट्रेनर" चुनें और लॉग इन करें',
+  'Your account role is fixed because you are already linked to a gym. Make a new account for a different role': 'आपका अकाउंट पहले से एक जिम से जुड़ा है, इसलिए रोल नहीं बदल सकता। दूसरे रोल के लिए नया अकाउंट बनाएं',
 };

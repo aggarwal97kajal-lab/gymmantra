@@ -21,6 +21,32 @@ describe('auth', () => {
     if (!EMULATOR) expect(h.identity.accounts.has(u.email)).toBe(true);
   });
 
+  it('refuses a login with a role the account does not have', async () => {
+    const M = { 'x-gm-client': 'mobile' };
+    const owner = await h.ownerWithGym('Role Gym');
+    // A new member account signs up from the Member screen.
+    const ph = h.nextPhone();
+    const s = await h.api.post('/auth/signup', { name: 'Role Member', email: `r${ph}@test.in`, phone: ph, password: 'secret123', role: 'MEMBER' }, undefined, M);
+    expect(s.status).toBe(201);
+    expect(s.body.user.appRole).toBe('MEMBER');
+    const asOwner = await h.api.post('/auth/login', { identifier: ph, password: 'secret123', role: 'OWNER' }, undefined, M);
+    expect(asOwner.status).toBe(403);
+    expect(asOwner.body.error ?? asOwner.body.message ?? JSON.stringify(asOwner.body)).toContain('registered as a Member');
+    expect((await h.api.post('/auth/login', { identifier: ph, password: 'secret123', role: 'TRAINER' }, undefined, M)).status).toBe(403);
+    expect((await h.api.post('/auth/login', { identifier: ph, password: 'secret123', role: 'MEMBER' }, undefined, M)).status).toBe(200);
+    // The gym owner cannot open the member side either.
+    expect((await h.api.post('/auth/login', { identifier: owner.phone, password: 'secret123', role: 'MEMBER' }, undefined, M)).status).toBe(403);
+    expect((await h.api.post('/auth/login', { identifier: owner.phone, password: 'secret123', role: 'OWNER' }, undefined, M)).status).toBe(200);
+    // An old account without a role takes the one chosen at log-in, and keeps it.
+    const old = await h.signup('Old User');
+    expect((await h.api.post('/auth/login', { identifier: old.phone, password: 'secret123', role: 'TRAINER' }, undefined, M)).body.user.appRole).toBe('TRAINER');
+    expect((await h.api.post('/auth/login', { identifier: old.phone, password: 'secret123', role: 'OWNER' }, undefined, M)).status).toBe(403);
+    // Once linked to a gym, the role cannot be switched in the profile.
+    const tok = (await h.api.post('/auth/login', { identifier: ph, password: 'secret123', role: 'MEMBER' }, undefined, M)).body.token;
+    expect((await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, tok)).status).toBe(201);
+    expect((await h.api.patch('/me/profile', { appRole: 'OWNER' }, tok)).status).toBe(400);
+  });
+
   it('rejects a duplicate signup', async () => {
     const u = await h.signup();
     expect((await h.api.post('/auth/signup', { name: 'Dup User', email: u.email, phone: h.nextPhone(), password: 'secret123' })).status).toBe(409);
