@@ -72,6 +72,7 @@ export function setup() {
     get: (p: string, token?: string, headers?: Record<string, string>) => call('GET', p, { token, headers }),
     post: (p: string, body: unknown, token?: string, headers?: Record<string, string>) => call('POST', p, { body, token, headers }),
     patch: (p: string, body: unknown, token?: string) => call('PATCH', p, { body, token }),
+    put: (p: string, body: unknown, token?: string) => call('PUT', p, { body, token }),
     del: (p: string, token?: string) => call('DELETE', p, { token }),
   };
 

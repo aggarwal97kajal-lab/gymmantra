@@ -156,6 +156,7 @@ export const P = {
   trainers: (t: string) => `tenants/${t}/trainers`,
   trainer: (t: string, uid: string) => `tenants/${t}/trainers/${uid}`,
   offers: (t: string) => `tenants/${t}/offers`,
+  program: (t: string, memberId: string) => `tenants/${t}/programs/${memberId}`,
   pts: (t: string) => `tenants/${t}/pt`,
   pt: (t: string, id: string) => `tenants/${t}/pt/${id}`,
   payouts: (t: string) => `tenants/${t}/ptPayouts`,

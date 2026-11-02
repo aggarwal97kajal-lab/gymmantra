@@ -470,5 +470,23 @@ describe('personal training', () => {
     expect((await h.api.get('/pt-accounts', A.token)).body.trainers[0].due).toBe(1000);
     expect((await h.api.get('/trainer/payouts', tr.token)).body[0].amount).toBe(2000);
     expect((await h.api.get('/pt-accounts', tr.token)).status).toBe(403);
+    // trainer writes the diet chart and workout; member sees it; others cannot
+    const memberId = my.body[0].memberId;
+    const put = await h.api.put(`/programs/${memberId}`, {
+      tenantId: A.gym.id,
+      diet: { kcal: 1850, protein: 140, meals: [{ name: 'Breakfast', time: '8:00 am', items: '4 egg whites, 2 toast' }] },
+      workout: { days: [{ day: 'Wed', title: 'Legs', exercises: [{ name: 'Squats', sets: '4 x 10', weight: '60 kg' }] }] },
+    }, tr.token);
+    expect(put.status).toBe(200);
+    const prog = await h.api.get('/me/program', mem.token);
+    expect(prog.body[0].diet.meals[0].items).toBe('4 egg whites, 2 toast');
+    expect(prog.body[0].workout.days[0].exercises[0].name).toBe('Squats');
+    expect((await h.api.get('/me/notifications', mem.token)).body[0].title).toBe('Your plan is updated');
+    const tr2 = await h.signup('Other Trainer');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode, as: 'TRAINER' }, tr2.token);
+    const j2 = (await h.api.get('/join-requests', A.token)).body[0];
+    await h.api.post(`/join-requests/${j2.id}/approve`, {}, A.token);
+    expect((await h.api.put(`/programs/${memberId}`, { tenantId: A.gym.id, diet: null }, tr2.token)).status).toBe(403);
+    expect((await h.api.get(`/programs/${memberId}?tenantId=${A.gym.id}`, A.token)).status).toBe(200);
   });
 });
