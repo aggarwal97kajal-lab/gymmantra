@@ -1,28 +1,23 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import '../api.dart';
+import '../i18n.dart';
+import '../photo.dart';
+import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 
-class Avatar extends StatelessWidget {
-  const Avatar({super.key, required this.name, this.url, this.size = 88});
-  final String name;
-  final String? url;
-  final double size;
+class _Ratio4x5 implements CropAspectRatioPresetData {
   @override
-  Widget build(BuildContext context) {
-    final initials = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).take(2).map((w) => w[0].toUpperCase()).join();
-    return CircleAvatar(
-      radius: size / 2,
-      backgroundColor: C.card2,
-      foregroundImage: url == null ? null : NetworkImage(Api.instance.url(url!), headers: Api.instance.authHeaders),
-      child: Text(initials, style: TextStyle(fontSize: size / 3, fontWeight: FontWeight.w800, color: C.fg)),
-    );
-  }
+  (int, int)? get data => (4, 5);
+  @override
+  String get name => '4:5';
 }
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -33,6 +28,8 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileState extends ConsumerState<ProfileScreen> {
   bool busy = false;
+  bool uploading = false;
+  Uint8List? localPhoto;
 
   Future<void> run(Future<void> Function() fn, {String? done}) async {
     setState(() => busy = true);
@@ -46,37 +43,131 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> pickPhoto(ImageSource source) => run(() async {
-        final file = await ImagePicker().pickImage(source: source, maxWidth: 600, maxHeight: 600, imageQuality: 80, preferredCameraDevice: CameraDevice.front);
-        if (file == null) return;
-        final bytes = await file.readAsBytes();
-        await Api.instance.post('/me/photo', {'mime': 'image/jpeg', 'base64': base64Encode(bytes)});
-        await ref.read(sessionProvider).refreshUser();
-      }, done: 'Photo updated');
+  /// Pick → crop (any shape) → show at once → upload in the background.
+  Future<void> pickPhoto(ImageSource source, bool circle) async {
+    final cropTitle = context.t('Crop photo');
+    final doneMsg = context.t('Photo updated');
+    final XFile? file;
+    try {
+      file = await ImagePicker().pickImage(source: source, maxWidth: 1600, maxHeight: 1600, imageQuality: 92, preferredCameraDevice: CameraDevice.front);
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+      return;
+    }
+    if (file == null) return;
+    final cropped = await ImageCropper().cropImage(
+      sourcePath: file.path,
+      maxWidth: 720,
+      maxHeight: 720,
+      compressQuality: 82,
+      compressFormat: ImageCompressFormat.jpg,
+      uiSettings: [
+        AndroidUiSettings(
+          toolbarTitle: cropTitle,
+          toolbarColor: C.night,
+          statusBarColor: C.night,
+          toolbarWidgetColor: Colors.white,
+          backgroundColor: Colors.black,
+          activeControlsWidgetColor: C.orange,
+          dimmedLayerColor: const Color(0xAA000000),
+          cropFrameColor: Colors.white,
+          initAspectRatio: CropAspectRatioPreset.square,
+          lockAspectRatio: false,
+          cropStyle: circle ? CropStyle.circle : CropStyle.rectangle,
+          aspectRatioPresets: [
+            CropAspectRatioPreset.original,
+            CropAspectRatioPreset.square,
+            _Ratio4x5(),
+            CropAspectRatioPreset.ratio16x9,
+          ],
+        ),
+        IOSUiSettings(title: cropTitle, cropStyle: circle ? CropStyle.circle : CropStyle.rectangle),
+      ],
+    );
+    if (cropped == null) return;
+    final bytes = await cropped.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      localPhoto = bytes;
+      uploading = true;
+    });
+    try {
+      final r = await Api.instance.post('/me/photo', {'mime': 'image/jpeg', 'base64': base64Encode(bytes)});
+      final url = r['photoUrl'] as String;
+      PhotoCache.put(url, bytes);
+      ref.read(sessionProvider).patchUser({'photoUrl': url});
+      if (mounted) toast(context, doneMsg);
+    } catch (e) {
+      if (mounted) toast(context, e.toString());
+    } finally {
+      if (mounted) {
+        setState(() {
+          uploading = false;
+          localPhoto = null;
+        });
+      }
+    }
+  }
 
   void photoSheet(bool hasPhoto) {
+    var circle = Prefs.getString('cropShape') != 'free';
     showModalBottomSheet(
       context: context,
-      backgroundColor: C.card,
-      builder: (_) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Take photo'), onTap: () {
-            Navigator.pop(context);
-            pickPhoto(ImageSource.camera);
-          }),
-          ListTile(leading: const Icon(Icons.photo_library), title: const Text('Choose from gallery'), onTap: () {
-            Navigator.pop(context);
-            pickPhoto(ImageSource.gallery);
-          }),
-          if (hasPhoto)
-            ListTile(leading: const Icon(Icons.delete_outline, color: C.red), title: const Text('Remove photo', style: TextStyle(color: C.red)), onTap: () {
-              Navigator.pop(context);
-              run(() async {
-                await Api.instance.delete('/me/photo');
-                await ref.read(sessionProvider).refreshUser();
-              }, done: 'Photo removed');
-            }),
-        ]),
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(context.t('Profile photo'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Muted(context.t('After choosing, crop it any way you like: square, 4:5, 16:9 or free. You can also rotate and zoom.'), size: 12.5),
+              const SizedBox(height: 14),
+              Muted(context.t('Crop shape'), size: 12),
+              const SizedBox(height: 6),
+              Seg<bool>(
+                value: circle,
+                items: [(true, context.t('Circle'), Icons.circle_outlined), (false, context.t('Rectangle'), Icons.crop_free_rounded)],
+                onChanged: (v) {
+                  setSheet(() => circle = v);
+                  Prefs.setString('cropShape', v ? 'circle' : 'free');
+                },
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const IconTile(Icons.photo_camera_rounded),
+                title: Text(context.t('Take photo')),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  pickPhoto(ImageSource.camera, circle);
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const IconTile(Icons.photo_library_rounded),
+                title: Text(context.t('Choose from gallery')),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  pickPhoto(ImageSource.gallery, circle);
+                },
+              ),
+              if (hasPhoto)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const IconTile(Icons.delete_outline_rounded, color: C.red),
+                  title: Text(context.t('Remove photo'), style: const TextStyle(color: C.red)),
+                  onTap: () {
+                    Navigator.pop(sheet);
+                    final s = ref.read(sessionProvider);
+                    run(() async {
+                      await Api.instance.delete('/me/photo');
+                      s.patchUser({'photoUrl': null});
+                    }, done: context.t('Photo removed'));
+                  },
+                ),
+            ]),
+          ),
+        ),
       ),
     );
   }
@@ -85,17 +176,21 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     final c = TextEditingController(text: current);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Your name'),
-        content: TextField(controller: c, textCapitalization: TextCapitalization.words),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save'))],
+      builder: (ctx) => AlertDialog(
+        title: Text(context.t('Your name')),
+        content: TextField(controller: c, autofocus: true, textCapitalization: TextCapitalization.words),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
+        ],
       ),
     );
-    if (ok == true) {
+    if (ok == true && mounted) {
+      final s = ref.read(sessionProvider);
       await run(() async {
         await Api.instance.patch('/me/profile', {'name': c.text.trim()});
-        await ref.read(sessionProvider).refreshUser();
-      }, done: 'Saved');
+        s.patchUser({'name': c.text.trim()});
+      }, done: context.t('Saved'));
     }
   }
 
@@ -104,37 +199,41 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
     final next = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text(hasPassword ? 'Change password' : 'Set a password'),
+      builder: (ctx) => AlertDialog(
+        title: Text(hasPassword ? context.t('Change password') : context.t('Set a password')),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          if (hasPassword) TextField(controller: cur, obscureText: true, decoration: const InputDecoration(labelText: 'Current password')),
+          if (hasPassword) TextField(controller: cur, obscureText: true, decoration: InputDecoration(labelText: context.t('Current password'))),
           const SizedBox(height: 10),
-          TextField(controller: next, obscureText: true, decoration: const InputDecoration(labelText: 'New password (8+ characters)')),
+          TextField(controller: next, obscureText: true, decoration: InputDecoration(labelText: context.t('New password (8+ characters)'))),
         ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')), TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Save'))),
+        ],
       ),
     );
-    if (ok == true) {
-      await run(() => Api.instance.post('/auth/change-password', {if (hasPassword) 'current': cur.text, 'next': next.text}), done: 'Password updated');
+    if (ok == true && mounted) {
+      await run(() => Api.instance.post('/auth/change-password', {if (hasPassword) 'current': cur.text, 'next': next.text}), done: context.t('Password updated'));
     }
   }
 
   Future<void> deleteAccount() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete account?'),
-        content: const Text('This removes your login and personal details. Your gym keeps its own records of your membership.'),
+      builder: (ctx) => AlertDialog(
+        title: Text(context.t('Delete account?')),
+        content: Text(context.t('This removes your login and personal details. Your gym keeps its own records of your membership.')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: C.red))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Delete'), style: const TextStyle(color: C.red))),
         ],
       ),
     );
-    if (ok == true) {
+    if (ok == true && mounted) {
+      final s = ref.read(sessionProvider);
       await run(() async {
         await Api.instance.delete('/me');
-        await ref.read(sessionProvider).logout();
+        await s.logout();
       });
     }
   }
@@ -142,60 +241,115 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(sessionProvider);
+    final settings = AppSettings.instance;
     final u = s.user ?? {};
     final name = (u['name'] as String?) ?? '';
+    final p = context.c;
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
+      appBar: AppBar(title: Text(context.t('Profile'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
         Center(
           child: GestureDetector(
-            onTap: busy ? null : () => photoSheet(u['photoUrl'] != null),
+            onTap: busy || uploading ? null : () => photoSheet(u['photoUrl'] != null),
             child: Stack(children: [
-              Avatar(name: name, url: u['photoUrl'] as String?),
-              Positioned(right: 0, bottom: 0, child: CircleAvatar(radius: 15, backgroundColor: C.lime, child: busy ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: C.ink)) : const Icon(Icons.camera_alt, size: 16, color: C.ink))),
+              Avatar(name: name, url: u['photoUrl'] as String?, local: localPhoto, size: 96, ring: true),
+              if (uploading)
+                const Positioned.fill(
+                  child: Padding(padding: EdgeInsets.all(3), child: CircularProgressIndicator(strokeWidth: 3, color: C.orange)),
+                ),
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(color: C.orange, shape: BoxShape.circle, border: Border.all(color: p.bg, width: 3)),
+                  child: const Icon(Icons.photo_camera_rounded, size: 15, color: Colors.white),
+                ),
+              ),
             ]),
           ),
         ),
-        const SizedBox(height: 10),
-        Center(child: Text(name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))),
-        Center(child: Muted([u['phone'], u['email']].where((x) => x != null).join(' · '))),
+        const SizedBox(height: 12),
+        Center(child: Text(name, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
+        const SizedBox(height: 2),
+        Center(child: Muted([u['phone'], u['email']].where((x) => x != null).join(' · '), align: TextAlign.center)),
         const SizedBox(height: 20),
         Panel(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(children: [
-            ListTile(leading: const Icon(Icons.edit_outlined), title: const Text('Edit name'), onTap: () => editName(name)),
-            ListTile(
-              leading: const Icon(Icons.translate),
-              title: const Text('Language'),
-              trailing: DropdownButton<String>(
-                value: (u['language'] as String?) ?? 'en',
-                underline: const SizedBox.shrink(),
-                items: const [DropdownMenuItem(value: 'en', child: Text('English')), DropdownMenuItem(value: 'hi', child: Text('हिन्दी'))],
-                onChanged: (v) => run(() async {
-                  await Api.instance.patch('/me/profile', {'language': v});
-                  await s.refreshUser();
-                }),
-              ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _Label(Icons.dark_mode_outlined, context.t('Theme')),
+            Seg<ThemeMode>(
+              value: settings.themeMode,
+              items: [
+                (ThemeMode.light, context.t('Light'), Icons.light_mode_rounded),
+                (ThemeMode.dark, context.t('Dark'), Icons.dark_mode_rounded),
+                (ThemeMode.system, context.t('Auto'), Icons.phone_android_rounded),
+              ],
+              onChanged: settings.setTheme,
             ),
-            ListTile(leading: const Icon(Icons.notifications_none), title: const Text('Notifications'), onTap: () => context.push('/notifications')),
-            ListTile(leading: const Icon(Icons.lock_outline), title: Text(u['hasPassword'] == true ? 'Change password' : 'Set a password'), onTap: () => changePassword(u['hasPassword'] == true)),
+            const SizedBox(height: 16),
+            _Label(Icons.translate_rounded, 'Language / भाषा'),
+            Seg<String>(
+              value: settings.lang,
+              items: const [('en', 'English', null), ('hi', 'हिन्दी', null)],
+              onChanged: (v) => s.setLanguage(v),
+            ),
           ]),
         ),
         const SizedBox(height: 12),
         Panel(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
-            ListTile(leading: const Icon(Icons.support_agent), title: const Text('Help & Support'), onTap: () => context.go('/help')),
-            ListTile(leading: const Icon(Icons.delete_outline, color: C.red), title: const Text('Delete my account', style: TextStyle(color: C.red)), onTap: deleteAccount),
+            _Row(Icons.edit_outlined, context.t('Edit name'), () => editName(name)),
+            _Row(Icons.notifications_none_rounded, context.t('Notifications'), () => context.push('/notifications')),
+            _Row(Icons.key_outlined, u['hasPassword'] == true ? context.t('Change password') : context.t('Set a password'), () => changePassword(u['hasPassword'] == true)),
+            _Row(Icons.help_outline_rounded, context.t('Help & Support'), () => context.go('/help')),
+            _Row(Icons.delete_outline_rounded, context.t('Delete my account'), deleteAccount, color: C.red, last: true),
           ]),
         ),
         const SizedBox(height: 16),
-        OutlinedButton.icon(onPressed: () => s.logout(), icon: const Icon(Icons.logout), label: const Text('Log out')),
-        const SizedBox(height: 20),
-        const Center(child: Muted('GymMantra · Fitness ka sahi mantra.', size: 12)),
+        OutlinedButton.icon(onPressed: () => s.logout(), icon: const Icon(Icons.logout_rounded), label: Text(context.t('Log out'))),
+        const SizedBox(height: 22),
+        Center(
+          child: Column(children: [
+            Opacity(opacity: 0.6, child: Logo(size: 30, mark: p.fg)),
+            const SizedBox(height: 4),
+            Muted('GymMantra · ${context.t('Fitness ka sahi mantra.')}', size: 12),
+          ]),
+        ),
       ]),
     );
   }
+}
+
+class _Label extends StatelessWidget {
+  const _Label(this.icon, this.text);
+  final IconData icon;
+  final String text;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(children: [Icon(icon, size: 18, color: context.c.primary), const SizedBox(width: 8), Text(text, style: const TextStyle(fontWeight: FontWeight.w700))]),
+      );
+}
+
+class _Row extends StatelessWidget {
+  const _Row(this.icon, this.text, this.onTap, {this.color, this.last = false});
+  final IconData icon;
+  final String text;
+  final VoidCallback onTap;
+  final Color? color;
+  final bool last;
+  @override
+  Widget build(BuildContext context) => Column(children: [
+        ListTile(
+          leading: IconTile(icon, color: color ?? context.c.fg, size: 36),
+          title: Text(text, style: TextStyle(fontWeight: FontWeight.w600, color: color)),
+          trailing: Icon(Icons.chevron_right_rounded, color: context.c.mut),
+          onTap: onTap,
+        ),
+        if (!last) const Divider(indent: 68, endIndent: 16),
+      ]);
 }
 
 class NotificationsScreen extends ConsumerStatefulWidget {
@@ -215,36 +369,52 @@ class _NotificationsState extends ConsumerState<NotificationsScreen> {
   Widget build(BuildContext context) {
     final v = ref.watch(notificationsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Notifications')),
-      body: AsyncBody(
-        value: v,
-        onRetry: () => ref.invalidate(notificationsProvider),
-        builder: (d) {
-          final list = (d as List).cast<Map>();
-          if (list.isEmpty) return const Center(child: Muted('No notifications yet.'));
-          return ListView.separated(
-            padding: const EdgeInsets.all(16),
-            itemCount: list.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, i) {
-              final n = list[i];
-              return Panel(
-                padding: const EdgeInsets.all(14),
-                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Icon(Icons.circle, size: 10, color: n['readAt'] == null ? C.lime : Colors.transparent),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(n['title'], style: const TextStyle(fontWeight: FontWeight.w700)),
-                    const SizedBox(height: 2),
-                    Text(n['body'], style: const TextStyle(color: C.mut)),
-                    const SizedBox(height: 4),
-                    Text(fmtDateTime(n['createdAt']), style: const TextStyle(fontSize: 11, color: C.mut)),
-                  ])),
-                ]),
-              );
-            },
-          );
-        },
+      appBar: AppBar(title: Text(context.t('Notifications'))),
+      body: RefreshIndicator(
+        color: context.c.primary,
+        onRefresh: () async => ref.invalidate(notificationsProvider),
+        child: AsyncBody(
+          value: v,
+          onRetry: () => ref.invalidate(notificationsProvider),
+          builder: (d) {
+            final list = (d as List).cast<Map>();
+            if (list.isEmpty) {
+              return ListView(children: [
+                const SizedBox(height: 120),
+                Icon(Icons.notifications_off_outlined, size: 54, color: context.c.mut),
+                const SizedBox(height: 10),
+                Muted(context.t('No notifications yet.'), align: TextAlign.center, size: 14),
+              ]);
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final n = list[i];
+                return Panel(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const IconTile(Icons.notifications_rounded, size: 38),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Expanded(child: Text(n['title'], style: const TextStyle(fontWeight: FontWeight.w700))),
+                          if (n['readAt'] == null) Container(width: 8, height: 8, decoration: const BoxDecoration(color: C.orange, shape: BoxShape.circle)),
+                        ]),
+                        const SizedBox(height: 2),
+                        Text(n['body'], style: TextStyle(color: context.c.mut, height: 1.35)),
+                        const SizedBox(height: 6),
+                        Muted(fmtDateTime(n['createdAt']), size: 11),
+                      ]),
+                    ),
+                  ]),
+                );
+              },
+            );
+          },
+        ),
       ),
     );
   }

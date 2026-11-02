@@ -1,9 +1,11 @@
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'prefs.dart';
 
 /// Server address. Set at build time with --dart-define=API_BASE=...,
 /// and can be changed in the app (long-press the logo on the login screen).
-const String defaultApiBase = String.fromEnvironment('API_BASE', defaultValue: 'https://gymmantra.onrender.com');
+const String defaultApiBase = String.fromEnvironment('API_BASE', defaultValue: 'https://gymmantra.aggarwal97kajal.workers.dev');
 
 class ApiException implements Exception {
   ApiException(this.status, this.message);
@@ -22,14 +24,16 @@ class Api {
   String? token;
 
   late final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 60), // free servers can take a while to wake up
-    receiveTimeout: const Duration(seconds: 60),
+    connectTimeout: const Duration(seconds: 20),
+    receiveTimeout: const Duration(seconds: 30),
     validateStatus: (_) => true,
     headers: {'x-gm-client': 'mobile'},
   ));
 
   Future<void> load() async {
-    base = await storage.read(key: 'api_base') ?? defaultApiBase;
+    final saved = await storage.read(key: 'api_base');
+    // Old test builds pointed at a server that no longer exists.
+    base = (saved == null || saved.contains('onrender.com')) ? defaultApiBase : saved;
     token = await storage.read(key: 'token');
   }
 
@@ -81,4 +85,34 @@ class Api {
   }
 
   void Function()? onLoggedOut;
+
+  /// Downloads a file the app shows (profile photo) with the login attached.
+  Future<Uint8List> bytes(String path) async {
+    final r = await _dio.get<List<int>>(url(path), options: Options(responseType: ResponseType.bytes, headers: authHeaders));
+    final data = r.data;
+    if (r.statusCode != 200 || data == null) throw ApiException(r.statusCode ?? 0, 'Photo not available');
+    return Uint8List.fromList(data);
+  }
+
+  /// Last answer for each path, kept in memory and on the phone.
+  final Map<String, dynamic> _mem = {};
+
+  dynamic cached(String path) => _mem[path] ?? Prefs.getJson('c:$path');
+
+  void forget() => _mem.clear();
+
+  /// Gives the saved copy first (instant), then the fresh answer from the server.
+  /// If the server can't be reached but a saved copy exists, the saved copy stays.
+  Stream<dynamic> cachedGet(String path) async* {
+    final old = cached(path);
+    if (old != null) yield old;
+    try {
+      final fresh = await get(path);
+      _mem[path] = fresh;
+      Prefs.setJson('c:$path', fresh);
+      yield fresh;
+    } catch (e) {
+      if (old == null) rethrow;
+    }
+  }
 }

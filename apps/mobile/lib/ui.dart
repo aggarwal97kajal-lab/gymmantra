@@ -1,25 +1,34 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'i18n.dart';
 import 'theme.dart';
 
-const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const _monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const _monthsHi = ['जन', 'फ़र', 'मार्च', 'अप्रै', 'मई', 'जून', 'जुल', 'अग', 'सित', 'अक्टू', 'नव', 'दिस'];
+
+List<String> _months() => AppLang.current == 'hi' ? _monthsHi : _monthsEn;
+
+DateTime _parse(String s) => s.length == 10 ? DateTime.parse('${s}T00:00:00Z') : DateTime.parse(s).toUtc().add(const Duration(hours: 5, minutes: 30));
 
 /// '2026-11-07' or an ISO timestamp -> '7 Nov 2026' (India time for timestamps).
 String fmtDate(String? s) {
   if (s == null || s.isEmpty) return '—';
-  DateTime d;
-  if (s.length == 10) {
-    d = DateTime.parse('${s}T00:00:00Z');
-  } else {
-    d = DateTime.parse(s).toUtc().add(const Duration(hours: 5, minutes: 30));
-  }
-  return '${d.day} ${_months[d.month - 1]} ${d.year}';
+  final d = _parse(s);
+  return '${d.day} ${_months()[d.month - 1]} ${d.year}';
 }
 
 String fmtDateTime(String s) {
-  final d = DateTime.parse(s).toUtc().add(const Duration(hours: 5, minutes: 30));
+  final d = _parse(s);
   final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-  return '${d.day} ${_months[d.month - 1]}, $h:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'am' : 'pm'}';
+  return '${d.day} ${_months()[d.month - 1]}, $h:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'am' : 'pm'}';
+}
+
+/// Days between an ISO timestamp and today in India (0 = today).
+int daysAgo(String iso) {
+  final now = DateTime.now().toUtc().add(const Duration(hours: 5, minutes: 30));
+  final d = _parse(iso);
+  return DateTime.utc(now.year, now.month, now.day).difference(DateTime.utc(d.year, d.month, d.day)).inDays;
 }
 
 String rupees(num? n) {
@@ -44,54 +53,109 @@ String rupees(num? n) {
 
 String plural(num n, String w) => '$n $w${n == 1 ? '' : 's'}';
 
+String initialsOf(String name) => name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).take(2).map((w) => w.characters.first.toUpperCase()).join();
+
+// ---------------------------------------------------------------- building blocks
+
 class Panel extends StatelessWidget {
-  const Panel({super.key, required this.child, this.padding = const EdgeInsets.all(18), this.color, this.onTap});
+  const Panel({super.key, required this.child, this.padding = const EdgeInsets.all(16), this.color, this.onTap, this.radius = 18});
   final Widget child;
   final EdgeInsets padding;
   final Color? color;
   final VoidCallback? onTap;
+  final double radius;
   @override
   Widget build(BuildContext context) {
-    final box = Container(
-      width: double.infinity,
-      padding: padding,
-      decoration: BoxDecoration(color: color ?? C.card, borderRadius: BorderRadius.circular(18), border: Border.all(color: C.line)),
-      child: child,
-    );
-    if (onTap == null) return box;
-    return InkWell(borderRadius: BorderRadius.circular(18), onTap: onTap, child: box);
-  }
-}
-
-const statusInfo = {
-  'ACTIVE': ('Active', C.lime),
-  'ENDING_SOON': ('Ending soon', C.org),
-  'FROZEN': ('Frozen', C.blue),
-  'EXPIRED': ('Expired', C.red),
-  'NO_PLAN': ('No plan', C.mut),
-  'UPCOMING': ('Starts later', C.blue),
-};
-
-class StatusChip extends StatelessWidget {
-  const StatusChip(this.status, {super.key});
-  final String status;
-  @override
-  Widget build(BuildContext context) {
-    final (label, color) = statusInfo[status] ?? (status, C.mut);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: color.withAlpha(36), borderRadius: BorderRadius.circular(99)),
-      child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
+    final p = context.c;
+    return Material(
+      color: color ?? p.surf,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius), side: BorderSide(color: p.line)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(onTap: onTap, child: Padding(padding: padding, child: SizedBox(width: double.infinity, child: child))),
     );
   }
 }
 
 class Muted extends StatelessWidget {
-  const Muted(this.text, {super.key, this.size = 13});
+  const Muted(this.text, {super.key, this.size = 13, this.align, this.maxLines});
   final String text;
   final double size;
+  final TextAlign? align;
+  final int? maxLines;
   @override
-  Widget build(BuildContext context) => Text(text, style: TextStyle(color: C.mut, fontSize: size));
+  Widget build(BuildContext context) =>
+      Text(text, textAlign: align, maxLines: maxLines, overflow: maxLines == null ? null : TextOverflow.ellipsis, style: TextStyle(color: context.c.mut, fontSize: size, height: 1.35));
+}
+
+class SectionTitle extends StatelessWidget {
+  const SectionTitle(this.text, {super.key, this.trailing});
+  final String text;
+  final Widget? trailing;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(2, 6, 2, 10),
+        child: Row(children: [Expanded(child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800))), if (trailing != null) trailing!]),
+      );
+}
+
+/// Rounded square with an icon, used in lists and quick actions.
+class IconTile extends StatelessWidget {
+  const IconTile(this.icon, {super.key, this.color, this.size = 40});
+  final IconData icon;
+  final Color? color;
+  final double size;
+  @override
+  Widget build(BuildContext context) {
+    final col = color ?? context.c.primary;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: col.withAlpha(context.c.dark ? 40 : 28), borderRadius: BorderRadius.circular(size * 0.3)),
+      child: Icon(icon, color: col, size: size * 0.5),
+    );
+  }
+}
+
+const statusColors = {
+  'ACTIVE': C.ok,
+  'ENDING_SOON': C.warn,
+  'FROZEN': C.blue,
+  'EXPIRED': C.red,
+  'NO_PLAN': Color(0xFF8B95A5),
+  'UPCOMING': C.blue,
+};
+
+String statusLabel(BuildContext context, String s) => switch (s) {
+      'ACTIVE' => context.t('Active'),
+      'ENDING_SOON' => context.t('Ending soon'),
+      'FROZEN' => context.t('Frozen'),
+      'EXPIRED' => context.t('Expired'),
+      'NO_PLAN' => context.t('No plan'),
+      'UPCOMING' => context.t('Starts later'),
+      _ => s,
+    };
+
+class StatusChip extends StatelessWidget {
+  const StatusChip(this.status, {super.key, this.onColor = false, this.extra});
+  final String status;
+
+  /// White chip for use on the orange card.
+  final bool onColor;
+  final String? extra;
+  @override
+  Widget build(BuildContext context) {
+    final color = statusColors[status] ?? context.c.mut;
+    final label = statusLabel(context, status) + (extra == null ? '' : ' · $extra');
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(color: onColor ? Colors.white.withAlpha(46) : color.withAlpha(36), borderRadius: BorderRadius.circular(99)),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 7, height: 7, decoration: BoxDecoration(color: onColor ? Colors.white : color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(color: onColor ? Colors.white : color, fontWeight: FontWeight.w700, fontSize: 12)),
+      ]),
+    );
+  }
 }
 
 class ErrorText extends StatelessWidget {
@@ -102,53 +166,268 @@ class ErrorText extends StatelessWidget {
     if (error == null) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(top: 8),
+      margin: const EdgeInsets.only(top: 10),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: C.red.withAlpha(36), borderRadius: BorderRadius.circular(12), border: Border.all(color: C.red.withAlpha(64))),
-      child: Text(error!, style: const TextStyle(color: Color(0xFFFFB3B3))),
+      decoration: BoxDecoration(color: C.red.withAlpha(28), borderRadius: BorderRadius.circular(12), border: Border.all(color: C.red.withAlpha(70))),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Icon(Icons.error_outline, color: C.red, size: 18),
+        const SizedBox(width: 8),
+        Expanded(child: Text(error!, style: TextStyle(color: context.c.dark ? const Color(0xFFFFB3B3) : const Color(0xFFB91C1C)))),
+      ]),
     );
   }
 }
 
-/// Shows loading / error / data for a FutureProvider value.
+/// Segmented control (Light / Dark / Auto, English / हिन्दी).
+class Seg<T> extends StatelessWidget {
+  const Seg({super.key, required this.value, required this.items, required this.onChanged});
+  final T value;
+  final List<(T, String, IconData?)> items;
+  final ValueChanged<T> onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final p = context.c;
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: p.surf2, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        for (final (v, label, icon) in items)
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => onChanged(v),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 9),
+                decoration: BoxDecoration(
+                  color: v == value ? p.surf : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: v == value && !p.dark ? const [BoxShadow(color: Color(0x14000000), blurRadius: 6, offset: Offset(0, 2))] : null,
+                ),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  if (icon != null) ...[Icon(icon, size: 16, color: v == value ? p.primary : p.mut), const SizedBox(width: 6)],
+                  Flexible(child: Text(label, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: v == value ? p.fg : p.mut))),
+                ]),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- loading
+
+/// Soft moving shine over grey boxes, shown while a screen loads for the first time.
+class Shimmer extends StatefulWidget {
+  const Shimmer({super.key, required this.child});
+  final Widget child;
+  @override
+  State<Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
+  late final AnimationController a = AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))..repeat();
+  @override
+  void dispose() {
+    a.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.c;
+    final base = p.dark ? const Color(0xFF1C2129) : const Color(0xFFE8EBF0);
+    final hi = p.dark ? const Color(0xFF2A303B) : const Color(0xFFF7F8FA);
+    return AnimatedBuilder(
+      animation: a,
+      builder: (_, child) => ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (r) => LinearGradient(
+          colors: [base, hi, base],
+          stops: const [0.35, 0.5, 0.65],
+          begin: Alignment(-2.2 + a.value * 4.4, -0.3),
+          end: Alignment(-1.2 + a.value * 4.4, 0.3),
+        ).createShader(r),
+        child: child,
+      ),
+      child: widget.child,
+    );
+  }
+}
+
+class Bone extends StatelessWidget {
+  const Bone({super.key, this.width = double.infinity, required this.height, this.radius = 14});
+  final double width, height, radius;
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: width, height: height, decoration: BoxDecoration(color: context.c.dark ? const Color(0xFF1C2129) : const Color(0xFFE8EBF0), borderRadius: BorderRadius.circular(radius)));
+}
+
+class ListSkeleton extends StatelessWidget {
+  const ListSkeleton({super.key, this.rows = 4, this.first = 150});
+  final int rows;
+  final double first;
+  @override
+  Widget build(BuildContext context) => Shimmer(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Bone(height: first, radius: 22),
+          const SizedBox(height: 12),
+          const Row(children: [Expanded(child: Bone(height: 74)), SizedBox(width: 12), Expanded(child: Bone(height: 74))]),
+          for (var i = 0; i < rows - 2; i++) ...[const SizedBox(height: 12), const Bone(height: 64)],
+        ]),
+      );
+}
+
+/// Shows loading / error / data for a provider value. Data saved on the phone
+/// shows straight away, so the skeleton appears only on the very first open.
 class AsyncBody<T> extends StatelessWidget {
-  const AsyncBody({super.key, required this.value, required this.builder, this.onRetry});
+  const AsyncBody({super.key, required this.value, required this.builder, this.onRetry, this.loading});
   final AsyncValue<T> value;
   final Widget Function(T data) builder;
   final VoidCallback? onRetry;
+  final Widget? loading;
   @override
   Widget build(BuildContext context) {
-    return value.when(
-      data: builder,
-      loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: C.lime))),
-      error: (e, _) => Center(
+    if (value.hasValue) return builder(value.value as T);
+    if (value.hasError) {
+      return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text(e.toString(), textAlign: TextAlign.center, style: const TextStyle(color: C.mut)),
-            if (onRetry != null) ...[const SizedBox(height: 12), OutlinedButton(onPressed: onRetry, child: const Text('Try again'))],
+            Icon(Icons.wifi_off_rounded, color: context.c.mut, size: 36),
+            const SizedBox(height: 10),
+            Text(value.error.toString(), textAlign: TextAlign.center, style: TextStyle(color: context.c.mut)),
+            if (onRetry != null) ...[const SizedBox(height: 14), SizedBox(width: 160, child: OutlinedButton(onPressed: onRetry, child: Text(context.t('Try again'))))],
           ]),
         ),
-      ),
-    );
+      );
+    }
+    return loading ?? const Padding(padding: EdgeInsets.all(16), child: ListSkeleton());
   }
 }
 
-void toast(BuildContext context, String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+void toast(BuildContext context, String msg) {
+  final m = ScaffoldMessenger.maybeOf(context);
+  m?.hideCurrentSnackBar();
+  m?.showSnackBar(SnackBar(content: Text(msg)));
+}
 
+// ---------------------------------------------------------------- brand
+
+/// Logo C: dumbbell with a heartbeat line, drawn in code so it is sharp at any size.
+/// [pulse] 0..1 draws the heartbeat line progressively (used by the splash).
 class Logo extends StatelessWidget {
-  const Logo({super.key, this.size = 64});
+  const Logo({super.key, this.size = 64, this.body = C.orange, this.mark, this.pulse = 1});
   final double size;
+  final Color body;
+  final Color? mark;
+  final double pulse;
   @override
-  Widget build(BuildContext context) => Image.asset('assets/mark.png', width: size, height: size);
+  Widget build(BuildContext context) => CustomPaint(size: Size.square(size), painter: LogoPainter(body: body, mark: mark ?? context.c.fg, pulse: pulse));
+}
+
+class LogoPainter extends CustomPainter {
+  LogoPainter({required this.body, required this.mark, this.pulse = 1});
+  final Color body, mark;
+  final double pulse;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final s = size.width / 120;
+    canvas.scale(s);
+    final fill = Paint()..color = body;
+    for (final r in const [Rect.fromLTWH(10, 34, 14, 52), Rect.fromLTWH(26, 24, 14, 72), Rect.fromLTWH(80, 24, 14, 72), Rect.fromLTWH(96, 34, 14, 52)]) {
+      canvas.drawRRect(RRect.fromRectAndRadius(r, const Radius.circular(5)), fill);
+    }
+    if (pulse <= 0) return;
+    final path = Path()
+      ..moveTo(40, 60)
+      ..lineTo(48, 60)
+      ..lineTo(54, 46)
+      ..lineTo(63, 74)
+      ..lineTo(69, 60)
+      ..lineTo(80, 60);
+    final stroke = Paint()
+      ..color = mark
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+    if (pulse >= 1) {
+      canvas.drawPath(path, stroke);
+    } else {
+      final m = path.computeMetrics().first;
+      canvas.drawPath(m.extractPath(0, m.length * pulse), stroke);
+    }
+  }
+
+  @override
+  bool shouldRepaint(LogoPainter old) => old.pulse != pulse || old.body != body || old.mark != mark;
 }
 
 class Wordmark extends StatelessWidget {
-  const Wordmark({super.key, this.size = 28});
+  const Wordmark({super.key, this.size = 28, this.color});
   final double size;
+  final Color? color;
   @override
   Widget build(BuildContext context) => Text.rich(TextSpan(children: [
-        TextSpan(text: 'Gym', style: TextStyle(fontSize: size, fontWeight: FontWeight.w900, color: C.fg, letterSpacing: -0.8)),
-        TextSpan(text: 'Mantra', style: TextStyle(fontSize: size, fontWeight: FontWeight.w900, color: C.lime, letterSpacing: -0.8)),
+        TextSpan(text: 'Gym', style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, color: color ?? context.c.fg, letterSpacing: -size * 0.03)),
+        TextSpan(text: 'Mantra', style: TextStyle(fontSize: size, fontWeight: FontWeight.w800, color: C.orange, letterSpacing: -size * 0.03)),
       ]));
+}
+
+/// Circular "days left" ring on the membership card.
+class DaysRing extends StatelessWidget {
+  const DaysRing({super.key, required this.days, required this.fraction, required this.label, this.size = 92});
+  final int days;
+  final double fraction;
+  final String label;
+  final double size;
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0.0, end: fraction.clamp(0.0, 1.0)),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        builder: (_, v, __) => SizedBox(
+          width: size,
+          height: size,
+          child: CustomPaint(
+            painter: _RingPainter(v),
+            child: Center(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Text('$days', style: TextStyle(fontSize: size * 0.28, fontWeight: FontWeight.w800, color: C.night, height: 1)),
+                const SizedBox(height: 2),
+                Text(label, style: TextStyle(fontSize: size * 0.11, color: const Color(0xFF64748B), fontWeight: FontWeight.w600)),
+              ]),
+            ),
+          ),
+        ),
+      );
+}
+
+class _RingPainter extends CustomPainter {
+  _RingPainter(this.v);
+  final double v;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    final r = size.width / 2;
+    canvas.drawCircle(c, r, Paint()..color = Colors.white);
+    final rect = Rect.fromCircle(center: c, radius: r - 9);
+    final track = Paint()
+      ..color = const Color(0xFFFFE1D4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7;
+    canvas.drawArc(rect, 0, math.pi * 2, false, track);
+    final arc = Paint()
+      ..color = C.orange
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = 7;
+    canvas.drawArc(rect, -math.pi / 2, math.pi * 2 * v, false, arc);
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter o) => o.v != v;
 }

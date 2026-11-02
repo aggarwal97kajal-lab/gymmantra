@@ -6,9 +6,9 @@ Read this first, then `docs/MVP_SPEC.md` (features and business rules). The owne
 
 | Part | Folder | Stack | Status |
 | --- | --- | --- | --- |
-| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 32 tests |
+| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 35 tests |
 | Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the Worker | Done |
-| Member app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v1), APK built by CI |
+| Member app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v2 design), APK built by CI |
 
 One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serves the admin panel and the 3D exercise videos as static assets. Firebase Authentication stores and checks passwords (via the Identity Toolkit REST API); Firestore is the database. The Worker reaches Firestore as the Firebase user `server@gymmantra.internal`, and `firestore.rules` lets only that user in. Apps never talk to Firebase directly. Setup: `docs/DEPLOY_FROM_PHONE.md`.
 
@@ -28,6 +28,9 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 - **Not paid yet:** the admin decides per membership whether the member may enter (`allowEntryWhileDue`), with a gym default (`tenants.allowEntryWhenDue`).
 - **Freeze:** in the MVP. Up to the plan's freeze days; blocks check-in; extends the end date; ending early returns unused days.
 - **WhatsApp:** each gym uses its own number. Messages open `wa.me` links on the staff phone with text ready.
+- **Member app is for members only:** gym staff and the super admin cannot log in to the app (`x-gm-client: mobile` + `isWebOnly`); they use the website.
+- **Look:** logo C (dumbbell + heartbeat), orange `#FF5A1F`, font Plus Jakarta Sans. App has Light/Dark/Auto theme and English/Hindi (`lib/strings_hi.dart`, English text is the key).
+- **Forgot password:** `POST /auth/forgot` sends the Firebase reset email (not for Google-only accounts).
 - **Pricing:** first 3 months free; Starter ₹399/₹3,990, Growth ₹799/₹7,990, Pro ₹1,399/₹13,990. Seed data only; the super admin edits plans in the panel.
 
 ## Rules that must not break
@@ -43,7 +46,7 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 
 ## Working in this sandbox
 
-npm and PyPI are blocked here; GitHub works. The `deps-snapshot` workflow installs `node_modules` on GitHub and pushes it to the `devdeps` branch as split tarballs; extract them to work offline. Tests and the local preview use `MemoryStore` and `FakeIdentity`, so no Firebase account is needed to develop. CI also runs the same tests with `FIREBASE_EMULATOR=1` against the Firebase emulators (real adapters + `firestore.rules`); the `devtools-snapshot` workflow puts firebase-tools and the Firestore emulator jar on the `devtools` branch for local use. `FirestoreStore.tx` does not use Firestore server transactions (real Firebase answers PERMISSION_DENIED to `beginTransaction` for a signed-in user over REST). It reads with `batchGet`, remembers each document's `updateTime`, and commits with those as preconditions, re-running on a clash. `/api/setup-check` on the live site tells which setup step is missing. Flutter is not available locally; the `mobile` workflow analyzes, tests, builds and publishes the APK as a GitHub release.
+npm and PyPI are blocked here; GitHub works. The `deps-snapshot` workflow installs `node_modules` on GitHub and pushes it to the `devdeps` branch as split tarballs; extract them to work offline. Tests and the local preview use `MemoryStore` and `FakeIdentity`, so no Firebase account is needed to develop. CI also runs the same tests with `FIREBASE_EMULATOR=1` against the Firebase emulators (real adapters + `firestore.rules`); the `devtools-snapshot` workflow puts firebase-tools and the Firestore emulator jar on the `devtools` branch for local use. `FirestoreStore.tx` does not use Firestore server transactions (real Firebase answers PERMISSION_DENIED to `beginTransaction` for a signed-in user over REST). It reads with `batchGet`, remembers each document's `updateTime`, and commits with those as preconditions, re-running on a clash. `/api/setup-check` on the live site tells which setup step is missing. Flutter is not available locally; the app keeps each screen's last data on the phone (`Api.cachedGet`) so screens open instantly, and the `mobile` workflow analyzes, tests, builds and publishes the APK as a GitHub release.
 
 ## Commands
 
@@ -59,6 +62,5 @@ npx wrangler deploy --dry-run --outdir /tmp/w   # check the Cloudflare bundle
 
 - Push notifications (FCM) for membership updates and ticket replies.
 - Workout tracker (sets, reps, rest timer) and assigned plans in the member app.
-- Hindi translations (the language choice is already stored).
 - Phone OTP login.
 - SaaS billing for gyms (card/UPI) after the free trial.

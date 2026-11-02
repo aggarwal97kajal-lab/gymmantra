@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../api.dart';
+import '../i18n.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -38,14 +39,14 @@ class _JoinState extends ConsumerState<JoinScreen> {
   Widget build(BuildContext context) {
     final branches = (gym?['branches'] as List?)?.cast<Map>() ?? [];
     return Scaffold(
-      appBar: AppBar(title: const Text('Join a gym')),
+      appBar: AppBar(title: Text(context.t('Join a gym'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
-        const Muted('Enter the gym code from the poster at your gym or ask the front desk.'),
+        Muted(context.t('Enter the gym code from the poster at your gym or ask the front desk.'), size: 14),
         const SizedBox(height: 14),
         TextField(
           controller: code,
           textCapitalization: TextCapitalization.characters,
-          decoration: const InputDecoration(labelText: 'Gym code', hintText: 'e.g. LIFE701'),
+          decoration: InputDecoration(labelText: context.t('Gym code'), hintText: 'LIFE701', prefixIcon: const Icon(Icons.storefront_rounded)),
           onChanged: (_) => setState(() => gym = null),
         ),
         const SizedBox(height: 12),
@@ -59,7 +60,7 @@ class _JoinState extends ConsumerState<JoinScreen> {
                     branchId = bs.length == 1 ? bs.first['id'] as String : null;
                   });
                 }),
-            child: const Text('Find gym'),
+            child: Text(context.t('Find gym')),
           )
         else ...[
           Panel(
@@ -70,14 +71,14 @@ class _JoinState extends ConsumerState<JoinScreen> {
           ),
           if (branches.length > 1) ...[
             const SizedBox(height: 12),
-            const Muted('Choose your branch'),
+            Muted(context.t('Choose your branch')),
             for (final b in branches)
               RadioListTile<String>(
                 value: b['id'] as String,
                 groupValue: branchId,
                 onChanged: (v) => setState(() => branchId = v),
                 title: Text(b['name']),
-                activeColor: C.lime,
+                activeColor: context.c.primary,
                 contentPadding: EdgeInsets.zero,
               ),
           ],
@@ -89,11 +90,11 @@ class _JoinState extends ConsumerState<JoinScreen> {
                       await Api.instance.post('/me/join', {'gymCode': code.text.trim(), if (branchId != null) 'branchId': branchId});
                       ref.invalidate(gymsProvider);
                       if (mounted) {
-                        toast(context, 'Request sent to ${gym!['name']}');
+                        toast(context, context.t('Request sent to {gym}', {'gym': gym!['name']}));
                         context.pop();
                       }
                     }),
-            child: const Text('Send join request'),
+            child: Text(context.t('Send join request')),
           ),
         ],
         ErrorText(error),
@@ -111,7 +112,7 @@ class MembershipScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final v = ref.watch(membershipProvider(memberId));
     return Scaffold(
-      appBar: AppBar(title: const Text('My membership')),
+      appBar: AppBar(title: Text(context.t('My membership'))),
       body: AsyncBody(
         value: v,
         onRetry: () => ref.invalidate(membershipProvider(memberId)),
@@ -123,45 +124,45 @@ class MembershipScreen extends ConsumerWidget {
           final phone = gym['phone'] as String?;
           final wa = gym['whatsappNumber'] as String?;
           return RefreshIndicator(
-            color: C.lime,
+            color: context.c.primary,
             onRefresh: () async => ref.invalidate(membershipProvider(memberId)),
             child: ListView(padding: const EdgeInsets.all(16), children: [
               Panel(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [Expanded(child: Text(gym['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800))), StatusChip(status)]),
-                  Muted('Member ID ${d['memberCode']}'),
+                  Muted('${context.t('Member ID')} ${d['memberCode']}'),
                   const SizedBox(height: 16),
                   if (cur != null) ...[
                     Text(cur['planName'], style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
                     const SizedBox(height: 4),
                     Text('${fmtDate(cur['startDate'])} – ${fmtDate(d['endsOn'])}', style: const TextStyle(fontWeight: FontWeight.w600)),
-                    if (d['daysLeft'] != null && (d['daysLeft'] as int) >= 0) Muted('${plural(d['daysLeft'] as int, 'day')} left'),
-                    if (d['frozenUntil'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('❄ Frozen until ${fmtDate(d['frozenUntil'])}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w600))),
+                    if (d['daysLeft'] != null && (d['daysLeft'] as int) >= 0) Muted(context.t('{n} days left', {'n': d['daysLeft']})),
+                    if (d['frozenUntil'] != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('❄ ${context.t('Frozen until {date}', {'date': fmtDate(d['frozenUntil'])})}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w600))),
                     const Divider(height: 28),
-                    _row('Amount', rupees(cur['total'])),
-                    if ((cur['discount'] as int) > 0) _row('Discount', rupees(cur['discount'])),
-                    _row('Paid', rupees(cur['paid'])),
-                    if ((d['due'] as int) > 0) _row('Due', rupees(d['due']), color: C.red),
-                    if ((cur['paymentModes'] as List).isNotEmpty) _row('Paid by', (cur['paymentModes'] as List).map((m) => _mode(m as String)).join(', ')),
-                    _row('Freeze days left', '${cur['freezeDaysLeft']}'),
+                    _row(context.t('Amount'), rupees(cur['total'])),
+                    if ((cur['discount'] as int) > 0) _row(context.t('Discount'), rupees(cur['discount'])),
+                    _row(context.t('Paid'), rupees(cur['paid'])),
+                    if ((d['due'] as int) > 0) _row(context.t('Due'), rupees(d['due']), color: C.red),
+                    if ((cur['paymentModes'] as List).isNotEmpty) _row(context.t('Paid by'), (cur['paymentModes'] as List).map((m) => context.t(_mode(m as String))).join(', ')),
+                    _row(context.t('Freeze days left'), '${cur['freezeDaysLeft']}'),
                     const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(10)),
-                      child: Row(children: [const Icon(Icons.verified, size: 18, color: C.lime), const SizedBox(width: 8), Expanded(child: Muted('Updated by your gym · ${cur['updatedBy']} · ${fmtDateTime(cur['updatedAt'])}', size: 12))]),
+                      decoration: BoxDecoration(color: context.c.surf2, borderRadius: BorderRadius.circular(12)),
+                      child: Row(children: [const Icon(Icons.verified_rounded, size: 18, color: C.ok), const SizedBox(width: 8), Expanded(child: Muted('${context.t('Updated by your gym')} · ${cur['updatedBy']} · ${fmtDateTime(cur['updatedAt'])}', size: 12))]),
                     ),
                   ] else
-                    Muted(status == 'EXPIRED' ? 'Your membership ended on ${fmtDate(d['endsOn'])}. Contact your gym to renew.' : 'No membership yet. Contact your gym to start one.'),
+                    Muted(status == 'EXPIRED' ? context.t('Your membership ended on {date}. Contact your gym to renew.', {'date': fmtDate(d['endsOn'])}) : context.t('No membership yet. Contact your gym to start one.')),
                 ]),
               ),
               const SizedBox(height: 12),
               Row(children: [
-                if (phone != null) Expanded(child: OutlinedButton.icon(onPressed: () => _open('tel:$phone'), icon: const Icon(Icons.call), label: const Text('Call gym'))),
+                if (phone != null) Expanded(child: OutlinedButton.icon(onPressed: () => _open('tel:$phone'), icon: const Icon(Icons.call), label: Text(context.t('Call gym')))),
                 if (phone != null && wa != null) const SizedBox(width: 10),
                 if (wa != null)
                   Expanded(
                     child: FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFF1F3B2A), foregroundColor: C.wa),
+                      style: FilledButton.styleFrom(backgroundColor: C.wa, foregroundColor: Colors.white),
                       onPressed: () => _open('https://wa.me/${wa.replaceAll(RegExp(r'[^0-9]'), '')}?text=${Uri.encodeComponent('Hi, I am ${d['memberCode']}. I want to renew my membership.')}'),
                       icon: const Icon(Icons.chat),
                       label: const Text('WhatsApp'),
@@ -169,10 +170,10 @@ class MembershipScreen extends ConsumerWidget {
                   ),
               ]),
               const SizedBox(height: 10),
-              OutlinedButton(onPressed: () => context.push('/plans/${gym['id']}'), child: const Text("See gym's plans")),
+              OutlinedButton(onPressed: () => context.push('/plans/${gym['id']}'), child: Text(context.t("See gym's plans"))),
               const SizedBox(height: 20),
               if (history.length > 1) ...[
-                const Text('History', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                SectionTitle(context.t('History')),
                 const SizedBox(height: 8),
                 for (final h in history)
                   Padding(
@@ -208,14 +209,14 @@ class PlansScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final v = ref.watch(plansProvider(tenantId));
     return Scaffold(
-      appBar: AppBar(title: const Text('Gym plans')),
+      appBar: AppBar(title: Text(context.t('Gym plans'))),
       body: AsyncBody(
         value: v,
         builder: (d) {
           final plans = (d as List).cast<Map>();
-          if (plans.isEmpty) return const Center(child: Muted('Your gym has not listed plans in the app yet.'));
+          if (plans.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('Your gym has not listed plans in the app yet.'), align: TextAlign.center)));
           return ListView(padding: const EdgeInsets.all(16), children: [
-            const Muted('To buy or renew, contact your gym. They will update your membership here.'),
+            Muted(context.t('To buy or renew, contact your gym. They will update your membership here.')),
             const SizedBox(height: 12),
             for (final p in plans) ...[
               Panel(
@@ -223,15 +224,15 @@ class PlansScreen extends ConsumerWidget {
                   Text(p['name'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 6),
                   Text.rich(TextSpan(children: [
-                    TextSpan(text: rupees(p['price']), style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: C.lime)),
-                    TextSpan(text: '  /  ${plural(p['months'] as int, 'month')}', style: const TextStyle(color: C.mut)),
+                    TextSpan(text: rupees(p['price']), style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: context.c.primary)),
+                    TextSpan(text: '  /  ${context.t('{n} months', {'n': p['months']})}', style: TextStyle(color: context.c.mut)),
                   ])),
-                  if ((p['joiningFee'] as int) > 0) Muted('+ ${rupees(p['joiningFee'])} joining fee for new members', size: 12),
-                  if ((p['freezeDays'] as int) > 0) Muted('${p['freezeDays']} freeze days', size: 12),
+                  if ((p['joiningFee'] as int) > 0) Muted(context.t('+ {fee} joining fee for new members', {'fee': rupees(p['joiningFee'])}), size: 12),
+                  if ((p['freezeDays'] as int) > 0) Muted(context.t('{n} freeze days', {'n': p['freezeDays']}), size: 12),
                   const SizedBox(height: 8),
                   Wrap(spacing: 6, runSpacing: 6, children: [
                     for (final f in (p['features'] as List))
-                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: C.card2, borderRadius: BorderRadius.circular(99)), child: Text('$f', style: const TextStyle(fontSize: 12))),
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: context.c.surf2, borderRadius: BorderRadius.circular(99)), child: Text('$f', style: const TextStyle(fontSize: 12))),
                   ]),
                 ]),
               ),

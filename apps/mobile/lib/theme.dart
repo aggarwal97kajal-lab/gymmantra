@@ -1,47 +1,143 @@
 import 'package:flutter/material.dart';
 
+/// Brand colours that are the same in light and dark mode.
 class C {
-  static const ink = Color(0xFF0F1110);
-  static const card = Color(0xFF161917);
-  static const card2 = Color(0xFF202421);
-  static const line = Color(0xFF262B27);
-  static const fg = Color(0xFFF3F6F1);
-  static const mut = Color(0xFF8C948D);
-  static const lime = Color(0xFFC8FF3E);
-  static const org = Color(0xFFFF7A2F);
-  static const red = Color(0xFFFF5A5A);
-  static const blue = Color(0xFF5BB9FF);
-  static const wa = Color(0xFF6EE59A);
+  static const orange = Color(0xFFFF5A1F);
+  static const orangeDeep = Color(0xFFF04E12);
+  static const orangeSoft = Color(0xFFFF8A4C);
+  static const ok = Color(0xFF22C55E);
+  static const warn = Color(0xFFF59E0B);
+  static const red = Color(0xFFEF4444);
+  static const blue = Color(0xFF3B82F6);
+  static const wa = Color(0xFF25D366);
+  static const night = Color(0xFF0D1015);
 }
 
-ThemeData buildTheme() {
-  final base = ThemeData(useMaterial3: true, brightness: Brightness.dark);
+/// Colours that change with the theme. Use `context.c.surf` etc.
+class Pal {
+  const Pal({required this.dark, required this.bg, required this.surf, required this.surf2, required this.line, required this.fg, required this.mut, required this.primary, required this.tint});
+  final bool dark;
+  final Color bg, surf, surf2, line, fg, mut, primary, tint;
+
+  static const darkPal = Pal(
+    dark: true,
+    bg: Color(0xFF0D1015),
+    surf: Color(0xFF161A21),
+    surf2: Color(0xFF1E232C),
+    line: Color(0xFF262C36),
+    fg: Color(0xFFF4F6FA),
+    mut: Color(0xFF8B95A5),
+    primary: C.orange,
+    tint: Color(0xFF2A1A12),
+  );
+  static const lightPal = Pal(
+    dark: false,
+    bg: Color(0xFFF5F6F8),
+    surf: Color(0xFFFFFFFF),
+    surf2: Color(0xFFF0F2F5),
+    line: Color(0xFFE3E7ED),
+    fg: Color(0xFF0F172A),
+    mut: Color(0xFF64748B),
+    primary: C.orangeDeep,
+    tint: Color(0xFFFFEDE5),
+  );
+}
+
+extension PalX on BuildContext {
+  Pal get c => Theme.of(this).brightness == Brightness.dark ? Pal.darkPal : Pal.lightPal;
+}
+
+const fontFamily = 'Jakarta';
+
+ThemeData buildTheme(Brightness b) {
+  final p = b == Brightness.dark ? Pal.darkPal : Pal.lightPal;
+  final base = ThemeData(useMaterial3: true, brightness: b, fontFamily: fontFamily);
+  final radius = BorderRadius.circular(14);
   return base.copyWith(
-    scaffoldBackgroundColor: C.ink,
-    colorScheme: base.colorScheme.copyWith(primary: C.lime, onPrimary: C.ink, surface: C.card, secondary: C.lime, error: C.red),
-    appBarTheme: const AppBarTheme(backgroundColor: C.ink, foregroundColor: C.fg, elevation: 0, centerTitle: false, scrolledUnderElevation: 0),
+    scaffoldBackgroundColor: p.bg,
+    canvasColor: p.bg,
+    colorScheme: base.colorScheme.copyWith(
+      primary: p.primary,
+      onPrimary: Colors.white,
+      secondary: p.primary,
+      onSecondary: Colors.white,
+      surface: p.surf,
+      onSurface: p.fg,
+      error: C.red,
+      outline: p.line,
+      surfaceContainerHighest: p.surf2,
+    ),
+    textTheme: base.textTheme.apply(bodyColor: p.fg, displayColor: p.fg, fontFamily: fontFamily),
+    appBarTheme: AppBarTheme(
+      backgroundColor: p.bg,
+      foregroundColor: p.fg,
+      elevation: 0,
+      centerTitle: false,
+      scrolledUnderElevation: 0,
+      titleTextStyle: TextStyle(fontFamily: fontFamily, fontSize: 22, fontWeight: FontWeight.w800, color: p.fg, letterSpacing: -0.4),
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: const Color(0xFF121413),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.line)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.line)),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: C.lime)),
-      labelStyle: const TextStyle(color: C.mut),
+      fillColor: p.surf,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+      border: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: p.line)),
+      enabledBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: p.line)),
+      focusedBorder: OutlineInputBorder(borderRadius: radius, borderSide: BorderSide(color: p.primary, width: 1.6)),
+      labelStyle: TextStyle(color: p.mut),
+      hintStyle: TextStyle(color: p.mut),
+      prefixIconColor: p.mut,
+      suffixIconColor: p.mut,
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(backgroundColor: C.lime, foregroundColor: C.ink, minimumSize: const Size.fromHeight(50), textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+      style: FilledButton.styleFrom(
+        backgroundColor: p.primary,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: p.primary.withAlpha(110),
+        disabledForegroundColor: Colors.white70,
+        minimumSize: const Size.fromHeight(52),
+        textStyle: const TextStyle(fontFamily: fontFamily, fontWeight: FontWeight.w700, fontSize: 15),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+      ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(foregroundColor: C.fg, minimumSize: const Size.fromHeight(48), side: const BorderSide(color: C.line), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: p.fg,
+        backgroundColor: p.surf,
+        minimumSize: const Size.fromHeight(50),
+        side: BorderSide(color: p.line),
+        textStyle: const TextStyle(fontFamily: fontFamily, fontWeight: FontWeight.w600, fontSize: 15),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(foregroundColor: p.primary, textStyle: const TextStyle(fontFamily: fontFamily, fontWeight: FontWeight.w700)),
     ),
     navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: const Color(0xFF0B0D0C),
-      indicatorColor: const Color(0x26C8FF3E),
-      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? C.lime : C.mut)),
-      labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(fontSize: 12, color: s.contains(WidgetState.selected) ? C.lime : C.mut, fontWeight: FontWeight.w600)),
+      backgroundColor: p.surf,
+      surfaceTintColor: Colors.transparent,
+      indicatorColor: p.primary.withAlpha(38),
+      height: 68,
+      iconTheme: WidgetStateProperty.resolveWith((s) => IconThemeData(color: s.contains(WidgetState.selected) ? p.primary : p.mut)),
+      labelTextStyle: WidgetStateProperty.resolveWith(
+        (s) => TextStyle(fontFamily: fontFamily, fontSize: 11.5, color: s.contains(WidgetState.selected) ? p.primary : p.mut, fontWeight: FontWeight.w600),
+      ),
     ),
-    dividerColor: C.line,
-    snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
+    dividerColor: p.line,
+    dividerTheme: DividerThemeData(color: p.line, space: 1, thickness: 1),
+    dialogTheme: DialogThemeData(backgroundColor: p.surf, surfaceTintColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+    bottomSheetTheme: BottomSheetThemeData(backgroundColor: p.surf, surfaceTintColor: Colors.transparent, showDragHandle: true),
+    listTileTheme: ListTileThemeData(iconColor: p.fg, textColor: p.fg),
+    progressIndicatorTheme: ProgressIndicatorThemeData(color: p.primary),
+    chipTheme: base.chipTheme.copyWith(selectedColor: p.primary.withAlpha(40), side: BorderSide(color: p.line)),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: p.dark ? const Color(0xFF2A303B) : const Color(0xFF1E293B),
+      contentTextStyle: const TextStyle(fontFamily: fontFamily, color: Colors.white),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    }),
   );
 }

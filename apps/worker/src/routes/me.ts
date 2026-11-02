@@ -33,7 +33,12 @@ export function meRoutes(app: App) {
     const u = await authenticate(c);
     const { store } = c.var.deps;
     const entries = Object.entries(u.memberships ?? {});
-    const [tenants, rosters] = await Promise.all([store.getMany<TenantDoc>(entries.map(([t]) => P.tenant(t))), Promise.all(entries.map(([t]) => readRoster(store, t)))]);
+    const [tenants, rosters, logs] = await Promise.all([
+      store.getMany<TenantDoc>(entries.map(([t]) => P.tenant(t))),
+      Promise.all(entries.map(([t]) => readRoster(store, t))),
+      store.getMany<ScanLog>(entries.map(([t, m]) => P.lastScan(t, m))),
+    ]);
+    const month = todayIST().slice(0, 7);
     const memberships = entries
       .map(([tid, mid], i) => {
         const tn = tenants[i];
@@ -48,6 +53,9 @@ export function meRoutes(app: App) {
           planName: st.current?.planName ?? st.upcoming?.planName ?? null,
           daysLeft: st.daysLeft,
           endsOn: st.endsOn,
+          startsOn: st.current?.startDate ?? st.upcoming?.startDate ?? null,
+          visitsThisMonth: logs[i]?.month === month ? logs[i]!.visits : 0,
+          lastVisitAt: logs[i]?.lastAllowedAt ?? null,
         };
       })
       .filter(Boolean);

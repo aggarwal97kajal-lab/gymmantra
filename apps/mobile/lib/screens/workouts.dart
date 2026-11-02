@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 import '../api.dart';
+import '../i18n.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -19,15 +20,29 @@ class _WorkoutsState extends ConsumerState<WorkoutsScreen> {
   Widget build(BuildContext context) {
     final v = ref.watch(exercisesProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('3D exercise guides')),
+      appBar: AppBar(title: Text(context.t('3D exercise guides'))),
       body: AsyncBody(
         value: v,
         onRetry: () => ref.invalidate(exercisesProvider),
+        loading: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Shimmer(
+            child: Column(children: [
+              const Bone(height: 50),
+              const SizedBox(height: 12),
+              for (var i = 0; i < 2; i++) ...[
+                const Row(children: [Expanded(child: Bone(height: 250)), SizedBox(width: 10), Expanded(child: Bone(height: 250))]),
+                const SizedBox(height: 10),
+              ],
+            ]),
+          ),
+        ),
         builder: (d) {
           final all = (d as List).cast<Map>();
           final list = all.where((e) => q.isEmpty || '${e['name']} ${e['muscle']}'.toLowerCase().contains(q.toLowerCase())).toList();
           return ListView(padding: const EdgeInsets.all(16), children: [
-            TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search exercise or muscle'), onChanged: (t) => setState(() => q = t)),
+            TextField(decoration: InputDecoration(prefixIcon: const Icon(Icons.search_rounded), hintText: context.t('Search exercise or muscle')), onChanged: (t) => setState(() => q = t)),
+            if (list.isEmpty) Padding(padding: const EdgeInsets.all(30), child: Muted(context.t('No exercise found.'), align: TextAlign.center)),
             const SizedBox(height: 12),
             GridView.builder(
               shrinkWrap: true,
@@ -36,19 +51,28 @@ class _WorkoutsState extends ConsumerState<WorkoutsScreen> {
               itemCount: list.length,
               itemBuilder: (_, i) {
                 final e = list[i];
-                return InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: () => context.push('/exercise', extra: e),
-                  child: Container(
-                    decoration: BoxDecoration(color: C.card, borderRadius: BorderRadius.circular(16), border: Border.all(color: C.line)),
-                    clipBehavior: Clip.antiAlias,
+                return Material(
+                  color: context.c.surf,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: context.c.line)),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => context.push('/exercise', extra: e),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Expanded(child: Image.network(Api.instance.url(e['stillUrl'] as String), fit: BoxFit.cover, width: double.infinity, errorBuilder: (_, __, ___) => const Center(child: Icon(Icons.fitness_center, color: C.mut)))),
+                      Expanded(
+                        child: Image.network(
+                          Api.instance.url(e['stillUrl'] as String),
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          cacheWidth: 400,
+                          frameBuilder: (_, child, frame, sync) => sync || frame != null ? child : Container(color: context.c.surf2),
+                          errorBuilder: (_, __, ___) => Center(child: Icon(Icons.fitness_center_rounded, color: context.c.mut)),
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.all(10),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text(e['name'], maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-                          Text(e['muscle'], style: const TextStyle(color: C.lime, fontSize: 12)),
+                          Text(e['muscle'], style: TextStyle(color: context.c.primary, fontSize: 12, fontWeight: FontWeight.w600)),
                         ]),
                       ),
                     ]),
@@ -105,14 +129,14 @@ class _ExerciseState extends State<ExerciseScreen> {
             aspectRatio: c.value.isInitialized ? c.value.aspectRatio : 9 / 16,
             child: c.value.isInitialized
                 ? GestureDetector(onTap: () => setState(() => c.value.isPlaying ? c.pause() : c.play()), child: VideoPlayer(c))
-                : Container(color: C.card, child: Center(child: error != null ? Muted(error!) : const CircularProgressIndicator(color: C.lime))),
+                : Container(color: context.c.surf, child: Center(child: error != null ? Muted(context.t(error!), align: TextAlign.center) : const CircularProgressIndicator(color: C.orange))),
           ),
         ),
         const SizedBox(height: 14),
         Text(e['name'], style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-        Text('Target: ${e['muscle']}', style: const TextStyle(color: C.lime, fontWeight: FontWeight.w600)),
+        Text('${context.t('Target')}: ${e['muscle']}', style: TextStyle(color: context.c.primary, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
-        const Muted('The highlighted muscle is the one this exercise works. Tap the video to pause.'),
+        Muted(context.t('The highlighted muscle is the one this exercise works. Tap the video to pause.')),
       ]),
     );
   }

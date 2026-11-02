@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../api.dart';
+import '../i18n.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -13,7 +14,7 @@ const faqs = [
   ('Check-in', 'How do I check in?', 'Open the Check-in tab and show the QR code at the front desk. It changes every 30 seconds.'),
   ('Check-in', 'The front desk says my QR is blocked.', 'Your membership may have ended, be frozen or have a payment due. Check My membership, or raise a ticket.'),
   ('Payments', 'Can I pay in the app?', 'Not yet. Pay at your gym. They record it and it shows in the app.'),
-  ('Account', 'I forgot my password.', 'Raise a ticket under "Login problem" from a friend\'s phone or ask your gym to contact GymMantra support.'),
+  ('Account', 'I forgot my password.', 'Log out, then tap "Forgot password?" on the login screen. We will email you a link to set a new password.'),
   ('Account', 'How do I change my photo?', 'Go to Profile and tap your photo.'),
 ];
 
@@ -42,30 +43,30 @@ class _HelpState extends ConsumerState<HelpScreen> {
     final tickets = ref.watch(ticketsProvider);
     final shown = faqs.where((f) => q.isEmpty || '${f.$2} ${f.$3}'.toLowerCase().contains(q.toLowerCase())).toList();
     return Scaffold(
-      appBar: AppBar(title: const Text('Help & Support')),
+      appBar: AppBar(title: Text(context.t('Help & Support'))),
       floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: C.lime,
-        foregroundColor: C.ink,
+        backgroundColor: context.c.primary,
+        foregroundColor: Colors.white,
         onPressed: () async {
           await context.push('/help/new');
           ref.invalidate(ticketsProvider);
         },
         icon: const Icon(Icons.add_comment),
-        label: const Text('Ask for help'),
+        label: Text(context.t('Ask for help')),
       ),
       body: RefreshIndicator(
-        color: C.lime,
+        color: context.c.primary,
         onRefresh: () async => ref.invalidate(ticketsProvider),
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 90), children: [
-          TextField(decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Search help'), onChanged: (t) => setState(() => q = t)),
+          TextField(decoration: InputDecoration(prefixIcon: const Icon(Icons.search_rounded), hintText: context.t('Search help')), onChanged: (t) => setState(() => q = t)),
           const SizedBox(height: 16),
-          const Text('My tickets', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          const SizedBox(height: 8),
+          SectionTitle(context.t('My tickets')),
           AsyncBody(
             value: tickets,
+            loading: const Shimmer(child: Column(children: [Bone(height: 64), SizedBox(height: 8), Bone(height: 64)])),
             builder: (d) {
               final list = (d as List).cast<Map>();
-              if (list.isEmpty) return const Muted('No tickets yet.');
+              if (list.isEmpty) return Muted(context.t('No tickets yet.'));
               return Column(children: [
                 for (final t in list)
                   Padding(
@@ -74,8 +75,8 @@ class _HelpState extends ConsumerState<HelpScreen> {
                       padding: const EdgeInsets.all(14),
                       onTap: () => context.push('/help/ticket/${t['id']}'),
                       child: Row(children: [
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t['subject'], style: const TextStyle(fontWeight: FontWeight.w700)), Muted('${topics[t['topic']] ?? t['topic']} · ${fmtDateTime(t['updatedAt'])}', size: 12)])),
-                        Text(t['status'] == 'OPEN' ? 'Open' : 'Resolved', style: TextStyle(color: t['status'] == 'OPEN' ? C.org : C.lime, fontWeight: FontWeight.w700, fontSize: 12)),
+                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(t['subject'], style: const TextStyle(fontWeight: FontWeight.w700)), Muted('${context.t(topics[t['topic']] ?? '${t['topic']}')} · ${fmtDateTime(t['updatedAt'])}', size: 12)])),
+                        Text(t['status'] == 'OPEN' ? context.t('Open') : context.t('Resolved'), style: TextStyle(color: t['status'] == 'OPEN' ? C.warn : C.ok, fontWeight: FontWeight.w700, fontSize: 12)),
                       ]),
                     ),
                   ),
@@ -83,17 +84,18 @@ class _HelpState extends ConsumerState<HelpScreen> {
             },
           ),
           const SizedBox(height: 16),
-          const Text('FAQ', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          SectionTitle(context.t('Common questions')),
           for (final f in shown)
             Theme(
               data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
               child: ExpansionTile(
                 tilePadding: EdgeInsets.zero,
-                title: Text(f.$2, style: const TextStyle(fontWeight: FontWeight.w600)),
-                subtitle: Text(f.$1, style: const TextStyle(color: C.mut, fontSize: 12)),
+                iconColor: context.c.primary,
+                title: Text(context.t(f.$2), style: const TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: Text(context.t(f.$1), style: TextStyle(color: context.c.mut, fontSize: 12)),
                 childrenPadding: const EdgeInsets.only(bottom: 12),
                 expandedAlignment: Alignment.centerLeft,
-                children: [Text(f.$3, style: const TextStyle(color: C.mut, height: 1.4))],
+                children: [Text(context.t(f.$3), style: TextStyle(color: context.c.mut, height: 1.45))],
               ),
             ),
         ]),
@@ -121,43 +123,44 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
     final gyms = ref.watch(gymsProvider);
     final isGym = !topic.startsWith('app_');
     return Scaffold(
-      appBar: AppBar(title: const Text('Ask for help')),
+      appBar: AppBar(title: Text(context.t('Ask for help'))),
       body: ListView(padding: const EdgeInsets.all(16), children: [
         DropdownButtonFormField<String>(
           value: topic,
-          decoration: const InputDecoration(labelText: 'Topic'),
-          items: [for (final e in topics.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+          decoration: InputDecoration(labelText: context.t('Topic')),
+          items: [for (final e in topics.entries) DropdownMenuItem(value: e.key, child: Text(context.t(e.value)))],
           onChanged: (v) => setState(() => topic = v!),
         ),
         const SizedBox(height: 6),
-        Muted(isGym ? 'This goes to your gym.' : 'This goes to the GymMantra team.', size: 12),
+        Muted(isGym ? context.t('This goes to your gym.') : context.t('This goes to the GymMantra team.'), size: 12),
         if (isGym) ...[
           const SizedBox(height: 12),
           gyms.maybeWhen(
             data: (d) {
               final list = (d['memberships'] as List).cast<Map>();
-              if (list.isEmpty) return const Muted('Join a gym first to ask your gym.');
+              if (list.isEmpty) return Muted(context.t('Join a gym first to ask your gym.'));
               memberId ??= list.first['memberId'] as String;
               return DropdownButtonFormField<String>(
                 value: memberId,
-                decoration: const InputDecoration(labelText: 'Gym'),
+                decoration: InputDecoration(labelText: context.t('Gym')),
                 items: [for (final m in list) DropdownMenuItem(value: m['memberId'] as String, child: Text(m['gym']['name']))],
                 onChanged: (v) => setState(() => memberId = v),
               );
             },
-            orElse: () => const LinearProgressIndicator(color: C.lime),
+            orElse: () => const LinearProgressIndicator(color: C.orange),
           ),
         ],
         const SizedBox(height: 12),
-        TextField(controller: subject, decoration: const InputDecoration(labelText: 'Subject')),
+        TextField(controller: subject, decoration: InputDecoration(labelText: context.t('Subject'))),
         const SizedBox(height: 12),
-        TextField(controller: body, maxLines: 5, decoration: const InputDecoration(labelText: 'Tell us what happened', alignLabelWithHint: true)),
+        TextField(controller: body, maxLines: 5, decoration: InputDecoration(labelText: context.t('Tell us what happened'), alignLabelWithHint: true)),
         ErrorText(error),
         const SizedBox(height: 16),
         FilledButton(
           onPressed: busy
               ? null
               : () async {
+                  final sentMsg = context.t('Sent. We will reply here.');
                   setState(() {
                     busy = true;
                     error = null;
@@ -165,7 +168,7 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
                   try {
                     await Api.instance.post('/me/tickets', {'topic': topic, 'subject': subject.text.trim(), 'body': body.text.trim(), if (isGym && memberId != null) 'memberId': memberId});
                     if (mounted) {
-                      toast(context, 'Sent. We will reply here.');
+                      toast(context, sentMsg);
                       context.pop();
                     }
                   } catch (e) {
@@ -174,7 +177,7 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
                     if (mounted) setState(() => busy = false);
                   }
                 },
-          child: Text(busy ? 'Sending…' : 'Send'),
+          child: Text(busy ? context.t('Sending…') : context.t('Send')),
         ),
       ]),
     );
@@ -197,7 +200,7 @@ class _TicketState extends ConsumerState<TicketScreen> {
     final t = ref.watch(ticketProvider(widget.id));
     final me = ref.watch(sessionProvider).user?['id'];
     return Scaffold(
-      appBar: AppBar(title: const Text('Ticket')),
+      appBar: AppBar(title: Text(context.t('Ticket'))),
       body: AsyncBody(
         value: t,
         builder: (d) {
@@ -207,7 +210,7 @@ class _TicketState extends ConsumerState<TicketScreen> {
               padding: const EdgeInsets.all(16),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(d['subject'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                Muted('${topics[d['topic']] ?? d['topic']} · ${d['status'] == 'OPEN' ? 'Open' : 'Resolved'}'),
+                Muted('${context.t(topics[d['topic']] ?? '${d['topic']}')} · ${d['status'] == 'OPEN' ? context.t('Open') : context.t('Resolved')}'),
               ]),
             ),
             Expanded(
@@ -219,13 +222,13 @@ class _TicketState extends ConsumerState<TicketScreen> {
                       constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(color: m['authorId'] == me ? const Color(0x26C8FF3E) : C.card2, borderRadius: BorderRadius.circular(14)),
+                      decoration: BoxDecoration(color: m['authorId'] == me ? context.c.primary.withAlpha(36) : context.c.surf2, borderRadius: BorderRadius.circular(14)),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(m['fromStaff'] == true ? 'Support' : 'You', style: const TextStyle(fontSize: 11, color: C.mut)),
+                        Text(m['fromStaff'] == true ? context.t('Support') : context.t('You'), style: TextStyle(fontSize: 11, color: context.c.mut)),
                         const SizedBox(height: 2),
                         Text(m['body']),
                         const SizedBox(height: 4),
-                        Text(fmtDateTime(m['createdAt']), style: const TextStyle(fontSize: 10, color: C.mut)),
+                        Text(fmtDateTime(m['createdAt']), style: TextStyle(fontSize: 10, color: context.c.mut)),
                       ]),
                     ),
                   ),
@@ -235,10 +238,10 @@ class _TicketState extends ConsumerState<TicketScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Row(children: [
-                  Expanded(child: TextField(controller: msg, decoration: const InputDecoration(hintText: 'Write a message'))),
+                  Expanded(child: TextField(controller: msg, decoration: InputDecoration(hintText: context.t('Write a message')))),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    style: IconButton.styleFrom(backgroundColor: C.lime, foregroundColor: C.ink),
+                    style: IconButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: Colors.white),
                     onPressed: busy
                         ? null
                         : () async {
