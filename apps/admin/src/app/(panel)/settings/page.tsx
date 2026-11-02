@@ -135,7 +135,7 @@ export default function Settings() {
             {qr && <img src={qr} alt={`QR code for gym code ${data!.gymCode}`} style={{ width: '70%', maxWidth: 280, margin: '18px auto', display: 'block' }} />}
             <div style={{ fontSize: 14 }}>or enter gym code</div>
             <div style={{ fontWeight: 900, fontSize: 34, letterSpacing: 2, marginTop: 4 }}>{data!.gymCode}</div>
-            <div style={{ marginTop: 14, fontSize: 13, color: '#4D7C0F', fontWeight: 700 }}>GymMantra · Fitness ka sahi mantra.</div>
+            <div style={{ marginTop: 14, fontSize: 13, color: '#F04E12', fontWeight: 700 }}>GymMantra · Fitness ka sahi mantra.</div>
           </div>
         </div>
       </div>

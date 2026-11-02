@@ -36,6 +36,9 @@ function LoginForm() {
         <Field label="Password">
           <input className="inp" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
         </Field>
+        <Link href="/forgot" className="small" style={{ justifySelf: 'end', fontWeight: 700 }}>
+          Forgot password?
+        </Link>
         <ErrorBox error={error} />
         <button className="btn block" disabled={busy}>
           {busy ? 'Logging in…' : 'Log in'}
