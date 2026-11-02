@@ -76,6 +76,7 @@ export interface TenantDoc {
   // GymMantra subscription
   planCycle?: 'MONTHLY' | 'ANNUAL' | null;
   planEndsAt?: string | null;
+  dueRemindedAt?: string | null; // last time the owner sent due reminders
 }
 
 export interface MemberDoc {
@@ -180,6 +181,12 @@ export const P = {
   payout: (t: string, id: string) => `tenants/${t}/ptPayouts/${id}`,
   offer: (t: string, id: string) => `tenants/${t}/offers/${id}`,
   notice: (t: string, id: string) => `tenants/${t}/notices/${id}`,
+  leads: (t: string) => `tenants/${t}/leads`,
+  lead: (t: string, id: string) => `tenants/${t}/leads/${id}`,
+  checkin: (t: string) => `tenants/${t}/private/checkin`,
+  trainerDays: (t: string, uid: string) => `tenants/${t}/trainerDays/${uid}`,
+  file: (t: string, id: string) => `tenants/${t}/files/${id}`,
+  filePart: (t: string, id: string, n: number) => `tenants/${t}/files/${id}/parts/${n}`,
   join: (t: string, j: string) => `tenants/${t}/joinRequests/${j}`,
   attendance: (t: string) => `tenants/${t}/attendance`,
   attendanceEv: (t: string, e: string) => `tenants/${t}/attendance/${e}`,

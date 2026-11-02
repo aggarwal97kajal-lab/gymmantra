@@ -46,6 +46,8 @@ export interface PayoutDoc {
 }
 
 const PAY_MODES = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'] as const;
+/** How many days back a trainer may still mark or change Done / Missed. */
+export const SESSION_EDIT_DAYS = 2;
 
 export function ptState(p: PtDoc, today = todayIST()) {
   const done = Object.values(p.log).filter((m) => m === 'DONE').length;
@@ -84,7 +86,7 @@ export function ptView(p: PtDoc, extra: Record<string, unknown> = {}) {
   };
 }
 
-async function ownerIds(r: Reader, tenantId: string) {
+export async function ownerIds(r: Reader, tenantId: string) {
   return (await r.query<{ role: string; active: boolean }>(P.staffCol(tenantId), [['role', 'OWNER']])).filter((x) => x.data.active).map((x) => x.id);
 }
 
@@ -335,7 +337,15 @@ export function ptRoutes(app: App) {
       if (role.role === 'FRONT_DESK') throw forbidden('Only the trainer or the owner can mark sessions');
       if (p.status !== 'ACTIVE') throw bad('PT is not active');
       if (p.startDate && date < p.startDate) throw bad('This date is before the PT started');
-      if (mark === 'DONE' && date > todayIST()) throw bad('A future session cannot be marked done');
+      const today = todayIST();
+      if ((mark === 'DONE' || mark === 'MISSED') && date > today) throw bad('A day that has not come yet can only be marked Planned');
+      if (mark === 'PLANNED' && date < today) throw bad('A past day cannot be marked Planned. Mark it Done or Missed');
+      // The trainer may fix Done / Missed only for today and the 2 days before (no changing old records).
+      if (role.role === 'TRAINER') {
+        const prev = p.log[date];
+        const touchesRecord = mark === 'DONE' || mark === 'MISSED' || prev === 'DONE' || prev === 'MISSED';
+        if (touchesRecord && date < addDays(today, -SESSION_EDIT_DAYS)) throw bad(`Sessions older than ${SESSION_EDIT_DAYS} days are locked. Ask the owner to change them`);
+      }
       const log = { ...p.log };
       if (mark === 'CLEAR') delete log[date];
       else log[date] = mark;

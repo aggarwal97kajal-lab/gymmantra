@@ -3,11 +3,94 @@ import { addDays, todayIST } from '../lib/dates';
 import { validSubs } from '../lib/status';
 import { requireFeature } from './billing';
 import { summaries } from './members';
+import type { PtDoc } from './pt';
 
 const RANGES = [7, 30, 90] as const;
 
 /** Reports for the owner app: money, visits and members over the last 7 / 30 / 90 days. */
+const ENTRY_RANGES = [7, 30, 90, 365] as const;
+const OVERDUE_AFTER_DAYS = 7;
+
 export function reportRoutes(app: App) {
+  /**
+   * Every membership sold (and PT package) in the period, plus anything older that still has
+   * money due. The app searches and filters this list itself (tabs: All / Paid / Pending / Overdue).
+   */
+  app.get('/api/v1/reports/entries', async (c) => {
+    await authenticate(c);
+    const g = await gymOf(c);
+    const { store } = c.var.deps;
+    await requireFeature(store, g.tenant, 'reports');
+    const asked = Number(c.req.query('days') ?? 30);
+    const days = (ENTRY_RANGES as readonly number[]).includes(asked) ? asked : 30;
+    const today = todayIST();
+    const from = addDays(today, -(days - 1));
+    const overdueBefore = addDays(today, -OVERDUE_AFTER_DAYS);
+    const [roster, pts] = await Promise.all([readRoster(store, g.tenantId), store.query<PtDoc>(P.pts(g.tenantId), [['status', 'ACTIVE']])]);
+    const visible = new Map(summaries(g, roster).map((m) => [m.id, m]));
+    const status = (total: number, paid: number, start: string) => (paid >= total ? 'PAID' : start <= overdueBefore ? 'OVERDUE' : 'PENDING');
+    const entries: Record<string, unknown>[] = [];
+    for (const [mid, e] of Object.entries(roster.members)) {
+      const m = visible.get(mid);
+      if (!m) continue;
+      const subs = validSubs(e.subs).sort((a, b) => (a.startDate < b.startDate ? -1 : 1));
+      const byId = new Map(e.subs.map((s) => [s.id, s]));
+      subs.forEach((s, i) => {
+        let root = s;
+        for (let k = 0; k < 20 && root.replacesId && byId.has(root.replacesId); k++) root = byId.get(root.replacesId)!;
+        const date = todayIST(new Date(root.createdAt));
+        const due = Math.max(0, s.total - s.paid);
+        if (date < from && due === 0) return;
+        entries.push({
+          id: s.id,
+          kind: 'MEMBERSHIP',
+          type: i === 0 ? 'New' : 'Renewal',
+          memberId: mid,
+          name: e.name,
+          memberCode: e.memberCode,
+          photoUrl: m.photoUrl,
+          title: s.planName,
+          date,
+          startDate: s.startDate,
+          endDate: s.endDate,
+          total: s.total,
+          paid: s.paid,
+          due,
+          status: status(s.total, s.paid, s.startDate),
+        });
+      });
+    }
+    for (const r of pts) {
+      const p = r.data;
+      const paid = p.payments.reduce((n, x) => n + x.amount, 0);
+      const date = p.decidedAt ? todayIST(new Date(p.decidedAt)) : p.startDate ?? today;
+      const due = Math.max(0, p.price - paid);
+      if (date < from && due === 0) continue;
+      const m = visible.get(p.memberId);
+      if (!m) continue;
+      entries.push({
+        id: p.id,
+        kind: 'PT',
+        type: 'PT',
+        memberId: p.memberId,
+        name: p.memberName,
+        memberCode: m.memberCode,
+        photoUrl: m.photoUrl,
+        title: `PT · ${p.trainerName}`,
+        date,
+        startDate: p.startDate ?? date,
+        endDate: p.endDate,
+        total: p.price,
+        paid,
+        due,
+        status: status(p.price, paid, p.startDate ?? date),
+      });
+    }
+    entries.sort((a, b) => (String(a.date) < String(b.date) ? 1 : String(a.date) > String(b.date) ? -1 : 0));
+    const sum = (k: string) => entries.reduce((n, x) => n + Number(x[k]), 0);
+    return c.json({ days, from, to: today, overdueAfterDays: OVERDUE_AFTER_DAYS, count: entries.length, total: sum('total'), paid: sum('paid'), due: sum('due'), entries });
+  });
+
   app.get('/api/v1/reports', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);

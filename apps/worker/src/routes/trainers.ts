@@ -113,7 +113,12 @@ export function trainerRoutes(app: App) {
   app.get('/api/v1/trainers', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    return c.json(await listTrainers(c.var.deps.store, g.tenantId, false));
+    const { store } = c.var.deps;
+    const list = await listTrainers(store, g.tenantId, false);
+    // Trainer attendance from the gym check-in QR.
+    const days = await store.getMany<{ month: string; visits: number; lastAt: string | null; days: string[] }>(list.map((t) => P.trainerDays(g.tenantId, t.id)));
+    const month = todayIST().slice(0, 7);
+    return c.json(list.map((t, i) => ({ ...t, visitsThisMonth: days[i]?.month === month ? days[i]!.visits : 0, lastCheckinAt: days[i]?.lastAt ?? null, checkinDays: days[i]?.days.slice(0, 31) ?? [] })));
   });
 
   app.patch('/api/v1/trainers/:id', async (c) => {
@@ -125,7 +130,7 @@ export function trainerRoutes(app: App) {
       const before = await t.get<TrainerDoc>(P.trainer(g.tenantId, id));
       if (!before || !before.active) throw notFound('Trainer not found');
       const after: TrainerDoc = { ...before };
-      if (b.speciality !== undefined) after.speciality = optStr(b, 'speciality', { max: 80 }) ?? null;
+      if (b.speciality !== undefined) after.speciality = optStr(b, 'speciality', { max: 200 }) ?? null;
       if (b.experienceYears !== undefined) after.experienceYears = optInt(b, 'experienceYears', { min: 0, max: 60 }) ?? null;
       if (b.bio !== undefined) after.bio = optStr(b, 'bio', { max: 400 }) ?? null;
       if (b.hours !== undefined) after.hours = optStr(b, 'hours', { max: 60 }) ?? null;
@@ -189,7 +194,7 @@ export function trainerRoutes(app: App) {
       const cur = await t.get<TrainerDoc>(P.trainer(g.tenantId, u.id));
       if (!cur) throw notFound('Trainer profile not found');
       const next = { ...cur };
-      if (b.speciality !== undefined) next.speciality = optStr(b, 'speciality', { max: 80 }) ?? null;
+      if (b.speciality !== undefined) next.speciality = optStr(b, 'speciality', { max: 200 }) ?? null;
       if (b.experienceYears !== undefined) next.experienceYears = optInt(b, 'experienceYears', { min: 0, max: 60 }) ?? null;
       if (b.bio !== undefined) next.bio = optStr(b, 'bio', { max: 400 }) ?? null;
       if (b.hours !== undefined) next.hours = optStr(b, 'hours', { max: 60 }) ?? null;

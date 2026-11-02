@@ -95,6 +95,12 @@ export function summaries(g: GymCtx, roster: Roster, includeArchived = false) {
         endsOn: st.endsOn,
         daysLeft: st.daysLeft,
         due: st.due,
+        // For members who owe money: how much they paid of the memberships that still have money due.
+        ...(() => {
+          if (st.due <= 0) return { duePaid: 0, dueTotal: 0 };
+          const owing = validSubs(e.subs).filter((s) => s.total > s.paid);
+          return { duePaid: owing.reduce((n, s) => n + s.paid, 0), dueTotal: owing.reduce((n, s) => n + s.total, 0) };
+        })(),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -379,8 +385,24 @@ export function memberRoutes(app: App) {
     const subs = subsRows.map((r) => r.data);
     const names = await userNames(store, subs.flatMap((s) => [s.createdById, ...s.payments.map((p) => p.receivedById)]));
     const replaced = new Set(subs.map((s) => s.replacesId).filter(Boolean));
+    const month = todayIST().slice(0, 7);
     return c.json({
       member: { ...m, photoUrl: user?.photoV ? `/api/v1/photos/${m.userId}?v=${user.photoV}` : null, hasApp: !!m.userId },
+      // What the member filled in their own app profile (read-only for the gym).
+      profile: user
+        ? {
+            name: user.name,
+            firstName: user.firstName ?? null,
+            middleName: user.middleName ?? null,
+            lastName: user.lastName ?? null,
+            dob: user.dob ?? null,
+            gender: user.gender ?? m.gender ?? null,
+            email: user.email ?? m.email ?? null,
+            phone: user.phone ?? m.phone,
+            address: user.address ?? null,
+          }
+        : null,
+      visits: { thisMonth: att?.month === month ? att.visits : 0, lastAt: att?.lastAllowedAt ?? null },
       state: {
         status: state.status,
         daysLeft: state.daysLeft,

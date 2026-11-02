@@ -1,7 +1,7 @@
 import { accountRole, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
-import { freezeDaysLeft } from '../lib/status';
+import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
 import { todayIST } from '../lib/dates';
 import { body, oneOf, optInt, optStr, str } from '../lib/validate';
 import { isYmd } from '../lib/dates';
@@ -47,7 +47,7 @@ export function meRoutes(app: App) {
     const states = entries.map(([tid, mid], i) => (rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).status : 'NO_PLAN'));
     const [offers, notices] = await Promise.all([
       Promise.all(entries.map(([tid], i) => (tenants[i] ? offersFor(store, tid, 'MEMBER', states[i]) : []))),
-      Promise.all(entries.map(([tid], i) => (tenants[i] ? noticesFor(store, tid, 'MEMBER', states[i]) : []))),
+      Promise.all(entries.map(([tid, mid], i) => (tenants[i] ? noticesFor(store, tid, 'MEMBER', states[i], 0, rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).due : 0) : []))),
     ]);
     const memberships = entries
       .map(([tid, mid], i) => {
@@ -66,6 +66,12 @@ export function meRoutes(app: App) {
           startsOn: st.current?.startDate ?? st.upcoming?.startDate ?? null,
           visitsThisMonth: logs[i]?.month === month ? logs[i]!.visits : 0,
           lastVisitAt: logs[i]?.lastAllowedAt ?? null,
+          due: st.due,
+          ...(() => {
+            const owing = validSubs(e.subs).filter((x) => x.total > x.paid);
+            return { duePaid: owing.reduce((n, x) => n + x.paid, 0), dueTotal: owing.reduce((n, x) => n + x.total, 0), duePlan: owing[0]?.planName ?? null };
+          })(),
+          entry: entryDecision(st),
           offers: offers[i],
           notices: notices[i],
         };
@@ -108,7 +114,7 @@ export function meRoutes(app: App) {
     const id = uuid();
     const trainerInfo =
       as === 'TRAINER'
-        ? { speciality: optStr(b, 'speciality', { max: 80 }) ?? null, experienceYears: optInt(b, 'experienceYears', { min: 0, max: 60 }) ?? null }
+        ? { speciality: optStr(b, 'speciality', { max: 200 }) ?? null, experienceYears: optInt(b, 'experienceYears', { min: 0, max: 60 }) ?? null }
         : {};
     const jr = { userId: u.id, kind: as, branchId, status: 'PENDING', createdAt: nowIso(), decidedById: null, decidedAt: null, ...trainerInfo };
     await store.tx(async (tx) => {
@@ -165,10 +171,19 @@ export function meRoutes(app: App) {
     const u = await authenticate(c);
     const tid = c.req.param('tenantId');
     if (!u.memberships?.[tid] && !u.requested?.[tid]) throw forbidden('Join this gym to see its plans');
-    const rows = await c.var.deps.store.query<PlanDoc>(P.plans(tid), [['showInApp', true], ['active', true]]);
+    const { store } = c.var.deps;
+    const mid = u.memberships?.[tid];
+    const [rows, roster, leads] = await Promise.all([
+      store.query<PlanDoc>(P.plans(tid), [['showInApp', true], ['active', true]]),
+      mid ? readRoster(store, tid) : Promise.resolve(null),
+      store.query<{ planId: string; status: string }>(P.leads(tid), [['userId', u.id], ['status', 'OPEN']]),
+    ]);
+    const st = mid && roster?.members[mid] ? stateOf(roster.members[mid]) : null;
+    const activePlanId = st && ['ACTIVE', 'ENDING_SOON', 'FROZEN'].includes(st.status) ? st.current?.planId ?? null : null;
+    const asked = new Set(leads.map((l) => l.data.planId));
     return c.json(
       rows
-        .map((r) => ({ id: r.id, name: r.data.name, months: r.data.months, price: r.data.price, joiningFee: r.data.joiningFee, freezeDays: r.data.freezeDays, features: r.data.features }))
+        .map((r) => ({ id: r.id, name: r.data.name, months: r.data.months, price: r.data.price, joiningFee: r.data.joiningFee, freezeDays: r.data.freezeDays, features: r.data.features, active: r.id === activePlanId, interested: asked.has(r.id) }))
         .sort((a, b) => a.months - b.months),
     );
   });

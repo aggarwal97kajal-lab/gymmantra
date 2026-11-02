@@ -1,3 +1,5 @@
+import { checkinRoutes } from './routes/checkin';
+import { dueRoutes } from './routes/dues';
 import { noticeRoutes } from './routes/notices';
 import { reportRoutes } from './routes/reports';
 import { adRoutes } from './routes/ads';
@@ -62,6 +64,8 @@ export function createApp(getDeps: () => Deps) {
   adRoutes(app);
   reportRoutes(app);
   noticeRoutes(app);
+  checkinRoutes(app);
+  dueRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

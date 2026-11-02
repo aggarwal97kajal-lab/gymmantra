@@ -491,6 +491,9 @@ describe('personal training', () => {
     expect((await mark(addDays(today, -9), 'DONE')).status).toBe(400);
     expect((await mark(addDays(today, 2), 'DONE')).status).toBe(400);
     expect((await mark(addDays(today, 2), 'PLANNED')).status).toBe(200);
+    expect((await mark(addDays(today, 2), 'MISSED')).status).toBe(400); // future day: only Planned
+    expect((await mark(addDays(today, -1), 'PLANNED')).status).toBe(400); // past day cannot be planned
+    expect((await mark(addDays(today, -3), 'DONE')).status).toBe(400); // older than 2 days: locked for the trainer
     const c = await h.api.get('/trainer/clients', tr.token);
     expect(c.body.clients[0].left).toBe(2);
     expect(c.body.clients[0].price).toBeUndefined();
@@ -611,6 +614,108 @@ describe('notices', () => {
     expect((await h.api.del(`/notices/${n.body.id}`, owner.token)).status).toBe(200);
     expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].notices).toHaveLength(0);
     expect((await h.api.get('/notices', owner.token)).body.map((x: any) => x.title)).toEqual(['Staff meeting']);
+  });
+});
+
+describe('dues, check-in QR, leads, PDFs, reports', () => {
+  let A: any, plan: any, mem: any, memberId: string;
+  beforeEach(async () => {
+    A = await h.ownerWithGym('Due Gym');
+    plan = (await h.api.post('/plans', { name: 'Yearly', months: 12, price: 12000 }, A.token)).body;
+    mem = await h.signup('Due Member');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', A.token);
+    memberId = (await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, A.token)).body.member?.id ?? (await h.api.get('/members', A.token)).body.rows[0].id;
+  });
+
+  it('lists dues with paid of total, reminds members, and clears after payment', async () => {
+    const r = await h.api.post(`/members/${memberId}/memberships`, { planId: plan.id, paymentMode: 'CASH', amountReceived: 5000, allowEntryWhileDue: false }, A.token);
+    expect(r.status).toBe(201);
+    const subId = r.body.subscription.id;
+    const dues = await h.api.get('/dues', A.token);
+    expect(dues.body.count).toBe(1);
+    expect(dues.body.members[0]).toMatchObject({ due: 7000, paid: 5000, total: 12000 });
+    const list = await h.api.get('/members', A.token);
+    expect(list.body.rows[0]).toMatchObject({ due: 7000, duePaid: 5000, dueTotal: 12000 });
+    const rem = await h.api.post('/dues/remind', {}, A.token);
+    expect(rem.body.sent).toBe(1);
+    const inbox = await h.api.get('/me/notifications', mem.token);
+    expect(inbox.body[0].title).toContain('Payment due');
+    const gyms = await h.api.get('/me/gyms', mem.token);
+    expect(gyms.body.memberships[0]).toMatchObject({ due: 7000, duePaid: 5000, dueTotal: 12000 });
+    expect(gyms.body.memberships[0].entry.result).toBe('BLOCKED');
+    // notice only to members who owe money
+    const aud = await h.api.get('/notices/audience?filter=DUE', A.token);
+    expect(aud.body.count).toBe(1);
+    expect((await h.api.post(`/memberships/${subId}/payments`, { amount: 7000, mode: 'UPI' }, A.token)).status).toBe(201);
+    expect((await h.api.get('/dues', A.token)).body.count).toBe(0);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].due).toBe(0);
+    // member detail shows the member's own profile
+    await h.api.patch('/me/profile', { dob: '1996-08-14', gender: 'male', address: 'Palam, Delhi' }, mem.token);
+    const d = await h.api.get(`/members/${memberId}`, A.token);
+    expect(d.body.profile).toMatchObject({ dob: '1996-08-14', gender: 'male', address: 'Palam, Delhi' });
+    // reports entries
+    const rep = await h.api.get('/reports/entries?days=30', A.token);
+    expect(rep.body.entries[0]).toMatchObject({ kind: 'MEMBERSHIP', type: 'New', total: 12000, paid: 12000, status: 'PAID' });
+  });
+
+  it('checks in with the gym check-in QR (not the join QR), once a day, near the gym', async () => {
+    await h.api.post(`/members/${memberId}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, A.token);
+    const qr = await h.api.get('/gym/checkin-qr', A.token);
+    expect(qr.body.text).toMatch(/^gymmantra-checkin:/);
+    expect((await h.api.post('/me/checkin', { code: qr.body.joinText }, mem.token)).status).toBe(400);
+    expect((await h.api.post('/me/checkin', { code: qr.body.text.slice(0, -2) + 'zz' }, mem.token)).status).toBe(400);
+    const first = await h.api.post('/me/checkin', { code: qr.body.text }, mem.token);
+    expect(first.status).toBe(201);
+    expect(first.body).toMatchObject({ kind: 'MEMBER', result: 'ALLOWED', duplicate: false, visitsThisMonth: 1 });
+    expect((await h.api.post('/me/checkin', { code: qr.body.text }, mem.token)).body.duplicate).toBe(true);
+    // a stranger cannot check in
+    const other = await h.signup('Stranger');
+    expect((await h.api.post('/me/checkin', { code: qr.body.text }, other.token)).status).toBe(403);
+    // with the gym location saved, the phone must be near
+    expect((await h.api.put('/gym/location', { lat: 28.5921, lng: 77.0460 }, A.token)).status).toBe(200);
+    const mem2 = await h.signup('Second Member');
+    await h.api.post('/me/join', { gymCode: A.gym.gymCode }, mem2.token);
+    const reqs = await h.api.get('/join-requests', A.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, A.token);
+    const id2 = (await h.api.get('/members', A.token)).body.rows.find((r: any) => r.name === 'Second Member').id;
+    await h.api.post(`/members/${id2}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, A.token);
+    expect((await h.api.post('/me/checkin', { code: qr.body.text }, mem2.token)).status).toBe(400);
+    expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.70, lng: 77.10 }, mem2.token)).status).toBe(403);
+    expect((await h.api.post('/me/checkin', { code: qr.body.text, lat: 28.5925, lng: 77.0462 }, mem2.token)).status).toBe(201);
+    // rotating the key stops old printouts
+    const rot = await h.api.post('/gym/checkin-qr/rotate', {}, A.token);
+    expect(rot.body.text).not.toBe(qr.body.text);
+  });
+
+  it('member says Interested in a plan; owner sees it', async () => {
+    const plans = await h.api.get(`/me/gyms/${A.gym.id}/plans`, mem.token);
+    expect(plans.body[0]).toMatchObject({ id: plan.id, active: false, interested: false });
+    expect((await h.api.post(`/me/gyms/${A.gym.id}/plans/${plan.id}/interest`, {}, mem.token)).status).toBe(201);
+    expect((await h.api.post(`/me/gyms/${A.gym.id}/plans/${plan.id}/interest`, {}, mem.token)).status).toBe(409);
+    expect((await h.api.get(`/me/gyms/${A.gym.id}/plans`, mem.token)).body[0].interested).toBe(true);
+    const leads = await h.api.get('/leads', A.token);
+    expect(leads.body[0]).toMatchObject({ name: 'Due Member', planName: 'Yearly' });
+    expect((await h.api.post(`/leads/${leads.body[0].id}/done`, {}, A.token)).status).toBe(200);
+    expect((await h.api.get('/leads', A.token)).body).toHaveLength(0);
+    await h.api.post(`/members/${memberId}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, A.token);
+    expect((await h.api.get(`/me/gyms/${A.gym.id}/plans`, mem.token)).body[0].active).toBe(true);
+  });
+
+  it('owner uploads a PDF diet chart; member reads it; other members cannot', async () => {
+    const pdf = Buffer.from('%PDF-1.4\n' + 'x'.repeat(1_500_000)).toString('base64');
+    const up = await h.api.put(`/programs/${memberId}/pdf/diet`, { tenantId: A.gym.id, name: 'diet.pdf', base64: pdf }, A.token);
+    expect(up.status).toBe(200);
+    expect(up.body.dietPdf.parts).toBe(3);
+    expect((await h.api.put(`/programs/${memberId}/pdf/diet`, { tenantId: A.gym.id, name: 'x.pdf', base64: Buffer.from('hello').toString('base64') }, A.token)).status).toBe(400);
+    const my = await h.api.get('/me/program', mem.token);
+    expect(my.body[0].dietPdf.name).toBe('diet.pdf');
+    const read = await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, mem.token);
+    expect(read.body.base64).toBe(pdf);
+    const other = await h.signup('Other');
+    expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, other.token)).status).toBe(403);
+    expect((await h.api.del(`/programs/${memberId}/pdf/diet?tenantId=${A.gym.id}`, A.token)).status).toBe(200);
+    expect((await h.api.get(`/me/program/${A.gym.id}/pdf/diet`, mem.token)).status).toBe(404);
   });
 });
 

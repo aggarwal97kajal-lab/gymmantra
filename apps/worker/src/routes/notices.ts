@@ -3,6 +3,7 @@ import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, optBool, str } from '../lib/validate';
 import type { Reader } from '../store/store';
+import { summaries } from './members';
 
 /**
  * Gym notices ("Gym closed tomorrow", timing change …) from the owner or front desk
@@ -16,7 +17,7 @@ export interface NoticeDoc {
   message: string;
   forMembers: boolean;
   forTrainers: boolean;
-  memberFilter: 'ALL' | 'ACTIVE' | 'EXPIRED';
+  memberFilter: 'ALL' | 'ACTIVE' | 'EXPIRED' | 'ENDING' | 'DUE';
   showTill: string; // last day it shows on dashboards
   active: boolean;
   createdById: string;
@@ -25,28 +26,42 @@ export interface NoticeDoc {
 }
 
 const LIVE_STATUSES = ['ACTIVE', 'ENDING_SOON', 'FROZEN', 'UPCOMING'];
-const matches = (n: NoticeDoc, who: 'MEMBER' | 'TRAINER', status?: string) => {
+const matches = (n: NoticeDoc, who: 'MEMBER' | 'TRAINER', status?: string, due = 0) => {
   if (who === 'TRAINER') return n.forTrainers;
   if (!n.forMembers) return false;
-  if (n.memberFilter === 'ACTIVE') return LIVE_STATUSES.includes(status ?? '');
-  if (n.memberFilter === 'EXPIRED') return !LIVE_STATUSES.includes(status ?? '');
-  return true;
+  switch (n.memberFilter) {
+    case 'ACTIVE':
+      return LIVE_STATUSES.includes(status ?? '');
+    case 'EXPIRED':
+      return !LIVE_STATUSES.includes(status ?? '');
+    case 'ENDING':
+      return status === 'ENDING_SOON';
+    case 'DUE':
+      return due > 0;
+    default:
+      return true;
+  }
 };
+const FILTERS = ['ALL', 'ACTIVE', 'EXPIRED', 'ENDING', 'DUE'] as const;
+/** Members a notice with this filter goes to (shown to the owner before sending). */
+export function audienceOf(list: ReturnType<typeof summaries>, filter: NoticeDoc['memberFilter']) {
+  return list.filter((m) => matches({ forMembers: true, forTrainers: false, memberFilter: filter } as NoticeDoc, 'MEMBER', m.status, m.due));
+}
 const view = (n: NoticeDoc) => ({ id: n.id, title: n.title, message: n.message, showTill: n.showTill, createdAt: n.createdAt, from: n.createdByName });
 
 /** Notices of a gym for one person. `days` > 0 also returns ones that ended in the last N days (for the inbox). */
-export async function noticesFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', status?: string, days = 0) {
+export async function noticesFor(r: Reader, tenantId: string, who: 'MEMBER' | 'TRAINER', status?: string, days = 0, due = 0) {
   const today = todayIST();
   const since = addDays(today, -days);
   return (await r.query<NoticeDoc>(P.notices(tenantId), [['active', true]]))
     .map((x) => x.data)
-    .filter((n) => n.showTill >= since && matches(n, who, status))
+    .filter((n) => n.showTill >= since && matches(n, who, status, due))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .map(view);
 }
 
 /** Gym notices shown inside a person's notifications list, newest first. */
-export async function noticeNotes(r: Reader, u: UserDoc, readUpTo: string | null): Promise<NoteItem[]> {
+export async function noticeNotes(r: Reader, u: UserDoc, readUpTo: string | null): Promise<(NoteItem & { from?: string; kind?: string })[]> {
   const memberGyms = Object.entries(u.memberships ?? {});
   const trainerGyms = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active && s.role === 'TRAINER').map(([t]) => t);
   if (!memberGyms.length && !trainerGyms.length) return [];
@@ -55,12 +70,15 @@ export async function noticeNotes(r: Reader, u: UserDoc, readUpTo: string | null
     r.getMany<TenantDoc>([...memberGyms.map(([t]) => t), ...trainerGyms].map(P.tenant)),
   ]);
   const lists = await Promise.all([
-    ...memberGyms.map(([t, m], i) => noticesFor(r, t, 'MEMBER', rosters[i].members[m] ? stateOf(rosters[i].members[m]).status : 'NO_PLAN', 30)),
+    ...memberGyms.map(([t, m], i) => {
+      const st = rosters[i].members[m] ? stateOf(rosters[i].members[m]) : null;
+      return noticesFor(r, t, 'MEMBER', st?.status ?? 'NO_PLAN', 30, st?.due ?? 0);
+    }),
     ...trainerGyms.map((t) => noticesFor(r, t, 'TRAINER', undefined, 30)),
   ]);
   const ids = [...memberGyms.map(([t]) => t), ...trainerGyms];
   const seen = new Set<string>();
-  const out: NoteItem[] = [];
+  const out: (NoteItem & { from?: string; kind?: string })[] = [];
   lists.forEach((list, i) => {
     for (const n of list) {
       if (seen.has(n.id)) continue;
@@ -68,8 +86,10 @@ export async function noticeNotes(r: Reader, u: UserDoc, readUpTo: string | null
       out.push({
         id: `notice:${n.id}`,
         tenantId: ids[i],
-        title: `📢 ${tenants[i]?.name ?? 'Your gym'}: ${n.title}`,
+        title: n.title,
         body: n.message,
+        from: tenants[i]?.name ?? 'Your gym',
+        kind: 'NOTICE',
         createdAt: n.createdAt,
         readAt: readUpTo && readUpTo >= n.createdAt ? readUpTo : null,
       });
@@ -87,6 +107,22 @@ export function noticeRoutes(app: App) {
     return c.json(rows.map((n) => ({ ...n, live: n.showTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 50));
   });
 
+  /** Who would get a members' notice with this filter (the owner sees the list before sending). */
+  app.get('/api/v1/notices/audience', async (c) => {
+    await authenticate(c);
+    const g = await gymOf(c);
+    const filter = (FILTERS as readonly string[]).includes(c.req.query('filter') ?? '') ? (c.req.query('filter') as NoticeDoc['memberFilter']) : 'ALL';
+    const list = audienceOf(summaries(g, await readRoster(c.var.deps.store, g.tenantId)), filter);
+    return c.json({
+      count: list.length,
+      withApp: list.filter((m) => m.hasApp).length,
+      members: list
+        .sort((a, b) => (a.daysLeft ?? 999) - (b.daysLeft ?? 999))
+        .slice(0, 100)
+        .map((m) => ({ id: m.id, name: m.name, memberCode: m.memberCode, photoUrl: m.photoUrl, hasApp: m.hasApp, daysLeft: m.daysLeft, due: m.due, status: m.status })),
+    });
+  });
+
   app.post('/api/v1/notices', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
@@ -96,7 +132,7 @@ export function noticeRoutes(app: App) {
     const forMembers = optBool(b, 'forMembers') ?? true;
     const forTrainers = optBool(b, 'forTrainers') ?? false;
     if (!forMembers && !forTrainers) throw bad('Choose who should get this notice: members, trainers or both');
-    const memberFilter = oneOf(b, 'memberFilter', ['ALL', 'ACTIVE', 'EXPIRED'] as const, true) ?? 'ALL';
+    const memberFilter = oneOf(b, 'memberFilter', FILTERS, true) ?? 'ALL';
     const today = todayIST();
     const showTill = typeof b.showTill === 'string' && b.showTill ? b.showTill : addDays(today, 2);
     if (!isYmd(showTill) || showTill < today) throw bad('Choose a valid last date');
