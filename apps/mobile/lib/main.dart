@@ -10,7 +10,10 @@ import 'screens/gym.dart';
 import 'screens/help.dart';
 import 'screens/home.dart';
 import 'screens/profile.dart';
+import 'screens/owner.dart';
 import 'screens/qr.dart';
+import 'screens/role.dart';
+import 'screens/trainer.dart';
 import 'screens/workouts.dart';
 import 'session.dart';
 import 'theme.dart';
@@ -49,8 +52,25 @@ class _AppState extends ConsumerState<GymMantraApp> {
         if (!session.ready || !splashDone.value) return loc == '/splash' ? null : '/splash';
         const open = ['/login', '/signup', '/forgot'];
         if (!session.loggedIn) return open.contains(loc) ? null : '/login';
-        if (open.contains(loc) || loc == '/splash') return '/home';
-        return null;
+        // Each kind of person has their own part of the app.
+        const shared = ['/notifications', '/support', '/help/new', '/help/ticket'];
+        if (shared.any((p) => loc.startsWith(p))) return null;
+        final (home, prefix) = switch (session.mode) {
+          'owner' => ('/o/home', '/o/'),
+          'trainer' => ('/t/home', '/t/'),
+          'waiting' => ('/waiting', '/waiting'),
+          'registerGym' => ('/register-gym', '/register-gym'),
+          'trainerJoin' => ('/trainer-join', '/trainer-join'),
+          'role' => ('/role', '/role'),
+          _ => ('/home', ''),
+        };
+        if (prefix.isEmpty) {
+          // Member: everything except the other parts.
+          const others = ['/o/', '/t/', '/waiting', '/register-gym', '/trainer-join', '/role'];
+          if (open.contains(loc) || loc == '/splash' || others.any((p) => loc.startsWith(p))) return home;
+          return null;
+        }
+        return loc.startsWith(prefix) ? null : home;
       },
       routes: [
         GoRoute(path: '/splash', pageBuilder: (_, __) => const NoTransitionPage(child: SplashScreen())),
@@ -74,6 +94,39 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/help/new', builder: (_, __) => const NewTicketScreen()),
         GoRoute(path: '/help/ticket/:id', builder: (_, s) => TicketScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
+        GoRoute(path: '/support', builder: (_, __) => const HelpScreen()),
+        // ---- choosing a role ----
+        GoRoute(path: '/role', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen())),
+        GoRoute(path: '/register-gym', builder: (_, __) => const RegisterGymScreen()),
+        GoRoute(path: '/trainer-join', builder: (_, __) => const TrainerJoinScreen()),
+        GoRoute(path: '/waiting', builder: (_, __) => const WaitingScreen()),
+        // ---- gym owner / front desk ----
+        ShellRoute(
+          builder: (context, state, child) => OwnerShell(location: state.matchedLocation, child: child),
+          routes: [
+            GoRoute(path: '/o/home', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerHomeScreen())),
+            GoRoute(path: '/o/members', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerMembersScreen())),
+            GoRoute(path: '/o/requests', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerRequestsScreen())),
+            GoRoute(path: '/o/offers', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerOffersScreen())),
+            GoRoute(path: '/o/more', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerMoreScreen())),
+          ],
+        ),
+        GoRoute(path: '/o/members/new', builder: (_, __) => const AddMemberScreen()),
+        GoRoute(path: '/o/member/:id', builder: (_, s) => OwnerMemberScreen(id: s.pathParameters['id']!)),
+        GoRoute(path: '/o/offers/new', builder: (_, __) => const NewOfferScreen()),
+        GoRoute(path: '/o/trainers', builder: (_, __) => const OwnerTrainersScreen()),
+        GoRoute(path: '/o/trainer', builder: (_, s) => OwnerTrainerScreen(trainer: s.extra as Map)),
+        GoRoute(path: '/o/profile', builder: (_, __) => const ProfileScreen()),
+        // ---- trainer ----
+        ShellRoute(
+          builder: (context, state, child) => TrainerShell(location: state.matchedLocation, child: child),
+          routes: [
+            GoRoute(path: '/t/home', pageBuilder: (_, __) => const NoTransitionPage(child: TrainerHomeScreen())),
+            GoRoute(path: '/t/clients', pageBuilder: (_, __) => const NoTransitionPage(child: TrainerClientsScreen())),
+            GoRoute(path: '/t/profile', pageBuilder: (_, __) => const NoTransitionPage(child: ProfileScreen())),
+          ],
+        ),
+        GoRoute(path: '/t/about', builder: (_, __) => const TrainerAboutScreen()),
       ],
     );
   }

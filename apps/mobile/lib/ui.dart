@@ -431,3 +431,66 @@ class _RingPainter extends CustomPainter {
   @override
   bool shouldRepaint(_RingPainter o) => o.v != v;
 }
+
+/// Purple-orange offer banner shown on member / trainer dashboards.
+class OfferBanner extends StatelessWidget {
+  const OfferBanner({super.key, required this.title, this.details, this.who, this.validTill});
+  final String title;
+  final String? details;
+  final String? who;
+  final String? validTill;
+  @override
+  Widget build(BuildContext context) => Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(colors: [Color(0xFF7C3AED), Color(0xFFC026D3), C.orange], stops: [0, 0.55, 1], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        ),
+        child: Stack(clipBehavior: Clip.none, children: [
+          Positioned(right: -14, bottom: -26, child: Icon(Icons.local_offer_outlined, size: 96, color: Colors.white.withAlpha(46))),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                decoration: BoxDecoration(color: Colors.white.withAlpha(56), borderRadius: BorderRadius.circular(99)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.local_offer_rounded, size: 12, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(context.t('OFFER'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 11)),
+                ]),
+              ),
+              const Spacer(),
+              if (who != null) Flexible(child: Text(who!, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 11))),
+            ]),
+            const SizedBox(height: 8),
+            Text(title, style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800)),
+            if (details != null && details!.isNotEmpty) ...[const SizedBox(height: 2), Text(details!, style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 12.5))],
+            if (validTill != null) ...[const SizedBox(height: 4), Text(context.t('Till {date}', {'date': fmtDate(validTill)}), style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 11.5, fontWeight: FontWeight.w600))],
+          ]),
+        ]),
+      );
+}
+
+/// Small stat tile (number + label).
+class StatTile extends StatelessWidget {
+  const StatTile({super.key, required this.icon, required this.value, required this.label, this.color});
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) => Panel(
+        padding: const EdgeInsets.fromLTRB(13, 13, 13, 11),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, size: 18, color: color ?? context.c.primary),
+            const SizedBox(width: 7),
+            Flexible(child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, height: 1.1))),
+          ]),
+          const SizedBox(height: 4),
+          Muted(label, size: 11.5, maxLines: 1),
+        ]),
+      );
+}

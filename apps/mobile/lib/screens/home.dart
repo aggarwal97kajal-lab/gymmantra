@@ -87,6 +87,9 @@ class HomeScreen extends ConsumerWidget {
                 final pending = (d['pendingRequests'] as List).cast<Map>();
                 final main = list.isEmpty ? null : list.first;
                 return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  for (final m in list)
+                    for (final o in ((m['offers'] as List?) ?? const []).cast<Map>())
+                      OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?),
                   for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],
                   for (final p in pending) ...[
                     Panel(

@@ -185,12 +185,13 @@ export function meRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const name = b.name !== undefined ? str(b, 'name', { min: 2, max: 80, label: 'your name' }) : undefined;
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
-    const appRole = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER'] as const, true);
+    const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'NONE'] as const, true);
+    const appRole = roleIn === 'NONE' ? null : roleIn;
     if (appRole === 'OWNER' && isTrainer(u)) throw bad('A trainer cannot be a gym owner');
     if (appRole === 'TRAINER' && isDeskStaff(u)) throw bad('A gym owner cannot be a trainer');
     const next = await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
-      const n = { ...cur, name: name ?? cur.name, language: language ?? cur.language, appRole: appRole ?? cur.appRole ?? null };
+      const n = { ...cur, name: name ?? cur.name, language: language ?? cur.language, appRole: roleIn === undefined ? cur.appRole ?? null : appRole };
       t.set(P.user(u.id), n);
       return n;
     });

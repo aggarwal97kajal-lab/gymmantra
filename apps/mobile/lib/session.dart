@@ -74,6 +74,9 @@ class Session extends ChangeNotifier {
     await api.setToken(r['token'] as String);
     _setUser(Map<String, dynamic>.from(r['user']));
     if (user?['language'] == 'hi') AppSettings.instance.setLang('hi');
+    try {
+      await refreshUser(); // adds the gyms this person runs or trains at
+    } catch (_) {}
     notifyListeners();
   }
 
@@ -113,8 +116,38 @@ class Session extends ChangeNotifier {
 
   Future<void> refreshUser() async {
     final me = await api.get('/auth/me');
-    _setUser(Map<String, dynamic>.from(me['user']));
+    _setUser({...Map<String, dynamic>.from(me['user']), 'gyms': me['gyms'] ?? []});
     notifyListeners();
+  }
+
+  /// Which part of the app this person sees.
+  /// owner / trainer / waiting (trainer request pending) / registerGym / trainerJoin / member / role (not chosen yet)
+  String get mode {
+    final u = user;
+    if (u == null) return 'none';
+    if (u['isOwner'] == true) return 'owner';
+    if (u['isTrainer'] == true) return 'trainer';
+    if (u['trainerPending'] == true) return 'waiting';
+    return switch (u['appRole']) {
+      'OWNER' => 'registerGym',
+      'TRAINER' => 'trainerJoin',
+      'MEMBER' => 'member',
+      _ => 'role',
+    };
+  }
+
+  /// The gym this owner / front desk runs (first one).
+  Map<String, dynamic>? get myGym {
+    final gyms = (user?['gyms'] as List?) ?? const [];
+    for (final g in gyms) {
+      if (g is Map && (g['role'] == 'OWNER' || g['role'] == 'FRONT_DESK')) return Map<String, dynamic>.from(g);
+    }
+    return null;
+  }
+
+  Future<void> chooseRole(String role) async {
+    await api.patch('/me/profile', {'appRole': role});
+    patchUser({'appRole': role});
   }
 
   /// Updates the profile locally first so the screen changes at once.
@@ -156,3 +189,13 @@ final ticketsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instanc
 final ticketProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/me/tickets/$id'));
 final notificationsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/me/notifications'));
 final exercisesProvider = StreamProvider<dynamic>((ref) => Api.instance.cachedGet('/exercises'));
+
+// ---- owner / trainer data ----
+final dashboardProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/dashboard'));
+final ownerMembersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/members?tab=all'));
+final ownerMemberProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/members/$id'));
+final joinRequestsProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/join-requests'));
+final offersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/offers'));
+final trainersProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainers'));
+final gymProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/gym'));
+final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/home'));
