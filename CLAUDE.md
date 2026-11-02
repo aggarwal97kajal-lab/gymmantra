@@ -6,9 +6,9 @@ Read this first, then `docs/MVP_SPEC.md` (features and business rules). The owne
 
 | Part | Folder | Stack | Status |
 | --- | --- | --- | --- |
-| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 35 tests |
+| Server (API) | `apps/worker` | Cloudflare Worker (Hono) + Firebase Auth + Firestore | Done, 46 tests |
 | Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the Worker | Done |
-| Member app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v2 design), APK built by CI |
+| App (members, trainers, gym owners) + GM Admin app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v3), both APKs built by CI |
 
 One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serves the admin panel and the 3D exercise videos as static assets. Firebase Authentication stores and checks passwords (via the Identity Toolkit REST API); Firestore is the database. The Worker reaches Firestore as the Firebase user `server@gymmantra.internal`, and `firestore.rules` lets only that user in. Apps never talk to Firebase directly. Setup: `docs/DEPLOY_FROM_PHONE.md`.
 
@@ -28,7 +28,12 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 - **Not paid yet:** the admin decides per membership whether the member may enter (`allowEntryWhileDue`), with a gym default (`tenants.allowEntryWhenDue`).
 - **Freeze:** in the MVP. Up to the plan's freeze days; blocks check-in; extends the end date; ending early returns unused days.
 - **WhatsApp:** each gym uses its own number. Messages open `wa.me` links on the staff phone with text ready.
-- **Member app is for members only:** gym staff and the super admin cannot log in to the app (`x-gm-client: mobile` + `isWebOnly`); they use the website.
+- **One app, three roles:** the person picks Member, Gym owner or Trainer (`users.appRole`). Members and trainers join with the gym code and the owner must approve (`joinRequests.kind`). A trainer cannot own or run a gym and an owner cannot be a trainer. Trainers are staff with role `TRAINER`; `gymOf()` never lets them into desk endpoints unless the route asks for `'TRAINER'`.
+- **Super admin** uses the website or the separate **GM Admin** app (`--dart-define=APP=admin`, header `x-gm-client: admin-app`, app id `com.gymmantra.admin`, crown logo). The normal app refuses the super admin; the admin app refuses everyone else.
+- **PT:** owner sets each trainer's packages and share % (`tenants/{t}/trainers`). Member requests PT → trainer and owner are notified → only the owner approves. Trainer marks sessions on a calendar (`pt.log`); member and owner see the same. PT money is kept apart from memberships; the owner pays trainers (`ptPayouts`). Diet chart and workout per client in `programs/{memberId}`.
+- **Offers** (owner → members with a status filter and/or trainers) and **ads** (super admin → members / trainers / owners, by state) show on dashboards.
+- **Plans lock features** (`billing.ts`: `offers`, `pt`, `reports`, `branches`; trial unlocks all). Owner photo gets a glowing ring in the plan colour. Plan payments are recorded by the super admin (no gateway yet) and make a receipt in `tenants/{t}/bills`.
+- **GST:** GymMantra is not registered, so bills have no GST and signup says nothing about tax. The super admin turns it on in GM Admin → GST (`settings/platform.gst`); new bills then get CGST+SGST for Delhi gyms and IGST for others (from the gym's state). New gyms must give address, state, city and a PIN that fits the state (`lib/india.ts`, `assets/india.json`).
 - **Look:** logo C (dumbbell + heartbeat), orange `#FF5A1F`, font Plus Jakarta Sans. App has Light/Dark/Auto theme and English/Hindi (`lib/strings_hi.dart`, English text is the key).
 - **Forgot password:** `POST /auth/forgot` sends the Firebase reset email (not for Google-only accounts).
 - **Pricing:** first 3 months free; Starter ₹399/₹3,990, Growth ₹799/₹7,990, Pro ₹1,399/₹13,990. Seed data only; the super admin edits plans in the panel.
@@ -61,6 +66,7 @@ npx wrangler deploy --dry-run --outdir /tmp/w   # check the Cloudflare bundle
 ## Next
 
 - Push notifications (FCM) for membership updates and ticket replies.
-- Workout tracker (sets, reps, rest timer) and assigned plans in the member app.
+- Online plan payment (Razorpay) instead of the super admin recording it.
+- QR scan for check-in inside the owner app.
 - Phone OTP login.
 - SaaS billing for gyms (card/UPI) after the free trial.
