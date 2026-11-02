@@ -137,7 +137,6 @@ ThemeData buildTheme(Brightness b) {
     ),
     pageTransitionsTheme: const PageTransitionsTheme(builders: {
       TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
-      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
   );
 }

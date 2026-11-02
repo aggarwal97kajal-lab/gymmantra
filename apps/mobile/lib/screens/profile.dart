@@ -65,7 +65,6 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
         AndroidUiSettings(
           toolbarTitle: cropTitle,
           toolbarColor: C.night,
-          statusBarColor: C.night,
           toolbarWidgetColor: Colors.white,
           backgroundColor: Colors.black,
           activeControlsWidgetColor: C.orange,

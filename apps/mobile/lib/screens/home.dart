@@ -270,7 +270,7 @@ class _MembershipCard extends StatelessWidget {
                       Text('ID ${m['memberCode']}', style: const TextStyle(color: Color(0xCCFFFFFF), fontSize: 12)),
                     ]),
                   ),
-                  if (live) DaysRing(days: daysLeft!, fraction: fraction, label: context.t('days left')),
+                  if (live) DaysRing(days: daysLeft, fraction: fraction, label: context.t('days left')),
                 ]),
                 const SizedBox(height: 16),
                 SizedBox(
