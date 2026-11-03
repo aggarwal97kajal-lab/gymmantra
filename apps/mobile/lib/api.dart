@@ -144,6 +144,24 @@ class Api {
     }
   }
 
+  /// Notes when the screen froze (main thread busy for 0.7 s or more) in the first 3 minutes,
+  /// so a stuck screen can be told apart from a slow network in the timing report.
+  void _watchFreezes() {
+    var last = DateTime.now();
+    var notes = 0;
+    final start = last;
+    Timer.periodic(const Duration(milliseconds: 200), (t) {
+      final now = DateTime.now();
+      final late = now.difference(last).inMilliseconds - 200;
+      last = now;
+      if (late >= 700 && notes < 10) {
+        notes++;
+        _note('UI', 'freeze', 0, late, 'screen froze');
+      }
+      if (now.difference(start).inMinutes >= 3) t.cancel();
+    });
+  }
+
   /// Opens a connection to the server right away (app start, back from background),
   /// so the first real screen does not pay for it.
   Future<void> warmConnection() async {
@@ -168,6 +186,7 @@ class Api {
     base = (saved == null || saved.contains('onrender.com')) ? defaultApiBase : saved;
     token = await storage.read(key: 'token');
     unawaited(warmConnection());
+    _watchFreezes();
     branchId = Prefs.getString('u:branch');
   }
 
@@ -340,7 +359,7 @@ class Api {
     _saveTimers[key] = Timer(const Duration(milliseconds: 400), () async {
       _saveTimers.remove(key);
       try {
-        final text = await Isolate.run(() => jsonEncode(data));
+        final text = await _encodeOffThread(data);
         await Prefs.setString('c:$key', text);
       } catch (_) {}
     });
@@ -407,3 +426,9 @@ class Ipv4FirstOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) => Api.ipv4First(super.createHttpClient(context));
 }
+
+/// Turns data into JSON text on a helper thread. This must stay a top-level function:
+/// a closure made inside Api also carried the whole Api object (open connections, every
+/// screen's data) to the helper thread. Copying all of that froze the screen many times at
+/// start, then failed, so phone copies were never saved and every screen waited for the server.
+Future<String> _encodeOffThread(Object? data) => Isolate.run(() => jsonEncode(data));
