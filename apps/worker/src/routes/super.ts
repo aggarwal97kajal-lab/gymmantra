@@ -1,3 +1,4 @@
+import { edgeGet, edgePut } from '../lib/edge';
 import { App, audit, authenticate, P, requireSuper, Role, TenantDoc } from '../core';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { isYmd } from '../lib/dates';
@@ -20,12 +21,17 @@ export const DEFAULT_SAAS_PLANS = [
 let baseChecked = false;
 export async function ensureBaseData(store: Store) {
   if (baseChecked) return;
+  if (await edgeGet<boolean>('base-ok')) {
+    baseChecked = true;
+    return;
+  }
   await store.tx(async (t) => {
     if (await t.get(P.platform)) return;
     t.set(P.platform, { trialMonths: 3 });
     for (const p of DEFAULT_SAAS_PLANS) t.set(P.saasPlan(uuid()), { ...p, visible: true, createdAt: nowIso() });
   });
   baseChecked = true;
+  await edgePut('base-ok', true, 24 * 3600);
 }
 export function resetBaseCheck() {
   baseChecked = false;

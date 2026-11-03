@@ -1,4 +1,5 @@
 import type { Context, Hono } from 'hono';
+import { edgeGet, edgePut } from './lib/edge';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { jwtVerify, SignJWT } from 'jose';
 import type { Identity } from './identity';
@@ -273,6 +274,11 @@ let secretCache: Secrets | null = null;
 /** Signing secrets are created once and kept in Firestore, so setup needs no extra keys. */
 export async function loadSecrets(store: Store): Promise<Secrets> {
   if (secretCache) return secretCache;
+  const shared = await edgeGet<Secrets>('secrets');
+  if (shared?.jwt) {
+    secretCache = shared;
+    return shared;
+  }
   let s = await store.get<Secrets>(P.secrets);
   if (!s) {
     s = await store.tx(async (t) => {
@@ -284,6 +290,7 @@ export async function loadSecrets(store: Store): Promise<Secrets> {
     });
   }
   secretCache = s;
+  await edgePut('secrets', s, 3600);
   return s;
 }
 export function resetSecretCache() {

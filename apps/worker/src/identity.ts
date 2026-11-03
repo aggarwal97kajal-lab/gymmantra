@@ -1,3 +1,4 @@
+import { edgeGet, edgePut } from './lib/edge';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { bad, HttpError, unauthorized } from './lib/http';
 
@@ -150,13 +151,27 @@ export class FakeIdentity implements Identity {
 /** Gets (and caches) an ID token for the GymMantra server account, used to call Firestore. */
 export function serverToken(identity: Identity, email: string, password: string) {
   let cached: { token: string; until: number } | null = null;
+  let pending: Promise<string> | null = null;
   return async () => {
     if (cached && cached.until > Date.now()) return cached.token;
+    // Shared across Worker instances in this data centre (see lib/edge.ts).
+    const shared = await edgeGet<{ token: string; until: number }>(`fb-token:${email}`);
+    if (shared && shared.until > Date.now() + 60_000) {
+      cached = shared;
+      return shared.token;
+    }
+    // Many requests at once on a new instance: one sign-in, not one each.
+    if (pending) return pending;
+    pending = signInNow().finally(() => (pending = null));
+    return pending;
+  };
+  async function signInNow() {
     const s = await identity.signIn(email, password).catch((e) => {
       if (e instanceof HttpError && e.status === 401) throw new HttpError(500, 'Server account not found. Add the server user in Firebase Authentication (see setup guide)');
       throw e;
     });
     cached = { token: s.idToken, until: Date.now() + (s.expiresIn - 300) * 1000 };
+    await edgePut(`fb-token:${email}`, cached, s.expiresIn - 360);
     return cached.token;
-  };
+  }
 }
