@@ -7,9 +7,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          B=$(echo "https://gymmantra.aggarwal97kajal.workers.dev")
-          for p in /api/v1/auth/config /api/v1/saas-plans /api/setup-check; do
-            echo "== $p"; curl -s -m 40 -o /tmp/o -w "status %{http_code} time %{time_total}s\n" "$B$p"; head -c 400 /tmp/o; echo
+          B="https://gymmantra.aggarwal97kajal.workers.dev"
+          for n in 1 2 3; do
+            curl -s -m 60 -o /dev/null -w "config $n: %{http_code} %{time_total}s\n" "$B/api/v1/auth/config"
+            curl -s -m 60 -o /tmp/o -w "login $n: %{http_code} %{time_total}s " -H 'content-type: application/json' -H 'x-gm-client: mobile' -d '{"identifier":"probe'$n'@example.com","password":"x"}' "$B/api/v1/auth/login"; head -c 150 /tmp/o; echo
+            curl -s -m 60 -o /tmp/o -w "me-noauth $n: %{http_code} %{time_total}s " -H 'x-gm-client: mobile' -H 'Authorization: Bearer abc' "$B/api/v1/auth/me"; head -c 150 /tmp/o; echo
+            curl -s -m 60 -o /tmp/o -w "lookup $n: %{http_code} %{time_total}s " -H 'x-gm-client: mobile' "$B/api/v1/me/gym-lookup?code=LIFE951"; head -c 150 /tmp/o; echo
           done
-          echo "== login (bad password)"
-          curl -s -m 40 -w "\nstatus %{http_code} time %{time_total}s\n" -H 'content-type: application/json' -H 'x-gm-client: mobile' -d '{"identifier":"probe@example.com","password":"x"}' "$B/api/v1/auth/login" | head -c 600
