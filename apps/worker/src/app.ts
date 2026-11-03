@@ -36,6 +36,8 @@ async function logDiag(deps: Deps, items: Record<string, unknown>[]) {
   }
 }
 
+let lastDiagAt = 0;
+
 /** Builds the GymMantra API. The same app runs on Cloudflare, in tests and in the local preview. */
 export function createApp(getDeps: () => Deps) {
   const app = new Hono<Env>();
@@ -68,8 +70,9 @@ export function createApp(getDeps: () => Deps) {
     const tsrc = `kv${tokenSrc.kvHits - src0.kvHits}/${tokenSrc.kvTries - src0.kvTries} sign${tokenSrc.signIns - src0.signIns}`;
     c.header('server-timing', `total;dur=${ms}, db;dur=${(st.callMs ?? 0) - ms0}, tok;dur=${tokMs};desc="${tsrc}"`);
     // Slow or failed requests go to a small log, so problems on real phones can be found.
-    if ((ms > 1500 || c.res.status >= 500) && !c.req.path.startsWith('/api/v1/diag')) {
-      const entry = { at: new Date().toISOString(), src: 'server', m: c.req.method, p: c.req.path, s: c.res.status, ms, db: (st.calls ?? 0) - calls0, dbMs: (st.callMs ?? 0) - ms0, tokMs, tsrc };
+    if ((ms > 1500 || c.res.status >= 500) && !c.req.path.startsWith('/api/v1/diag') && Date.now() - lastDiagAt > 5000) {
+      lastDiagAt = Date.now(); // at most one log write per 5 s per instance (keeps busy times light)
+      const entry = { at: new Date().toISOString(), src: 'server', m: c.req.method, p: c.req.path, s: c.res.status, ms, db: (st.calls ?? 0) - calls0, dbMs: (st.callMs ?? 0) - ms0, tokMs, tsrc, colo: String((c.req.raw as { cf?: { colo?: string } }).cf?.colo ?? '') };
       const w = logDiag(deps, [entry]);
       try {
         c.executionCtx.waitUntil(w);
@@ -88,7 +91,7 @@ export function createApp(getDeps: () => Deps) {
     const list = Array.isArray(b?.items) ? (b.items as unknown[]).slice(0, 30) : [];
     const clean = list
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-      .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 120) }));
+      .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 120), n: Number(x.n ?? 1), colo: String((c.req.raw as { cf?: { colo?: string } }).cf?.colo ?? '') }));
     if (clean.length) await logDiag(c.var.deps, clean);
     return c.json({ ok: true });
   });

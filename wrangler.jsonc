@@ -16,10 +16,8 @@
   // Keep the settings typed in the Cloudflare dashboard when deploying.
   "keep_vars": true,
   "observability": { "enabled": true },
-  // No Smart Placement: it moved the Worker far away (every database call took ~1 s).
-  // The database is in Mumbai (asia-south1); Indian users already reach a Cloudflare
-  // data centre in India, which is close to it.
-  "placement": { "mode": "off" },
+  // Run the Worker in the Cloudflare data centre next to the database (Firestore, Mumbai). Users reach it in one hop; every database call is then ~10 ms instead of 1–2 s.
+  "placement": { "region": "gcp:asia-south1" },
   // Shared memory for all Worker instances (database sign-in, secrets). Created automatically on deploy.
   "kv_namespaces": [{ "binding": "GM_KV" }]
 }

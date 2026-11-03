@@ -120,14 +120,17 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
   return new Response(JSON.stringify({ allOk, steps }, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
+let appInst: ReturnType<typeof createApp> | null = null;
+
 export default {
-  async fetch(req: Request, env: WorkerEnv): Promise<Response> {
+  async fetch(req: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/api/setup-check') return setupCheck(env);
     let res: Response;
     if (url.pathname.startsWith('/api/')) {
-      const app = createApp(() => depsFor(env, url));
-      res = await app.fetch(req, env);
+      // Built once per Worker instance (building all routes on every request wasted CPU time).
+      appInst ??= createApp(() => depsFor(env, url));
+      res = await appInst.fetch(req, env, ctx); // ctx: the slow-request log is written after the answer is sent
     } else {
       res = await env.ASSETS.fetch(req);
     }
