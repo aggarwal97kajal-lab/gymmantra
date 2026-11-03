@@ -39,10 +39,12 @@ export function meRoutes(app: App) {
     const u = await authenticate(c);
     const { store } = c.var.deps;
     const entries = Object.entries(u.memberships ?? {});
-    const [tenants, rosters, logs] = await Promise.all([
+    const reqIds = Object.keys(u.requested ?? {});
+    const [tenants, rosters, logs, reqTenants] = await Promise.all([
       store.getMany<TenantDoc>(entries.map(([t]) => P.tenant(t))),
       Promise.all(entries.map(([t]) => readRoster(store, t))),
       store.getMany<ScanLog>(entries.map(([t, m]) => P.lastScan(t, m))),
+      reqIds.length ? store.getMany<TenantDoc>(reqIds.map(P.tenant)) : Promise.resolve([] as (TenantDoc | null)[]),
     ]);
     const month = todayIST().slice(0, 7);
     const states = entries.map(([tid, mid], i) => (rosters[i].members[mid] ? stateOf(rosters[i].members[mid]).status : 'NO_PLAN'));
@@ -90,8 +92,6 @@ export function meRoutes(app: App) {
         };
       })
       .filter(Boolean);
-    const reqIds = Object.keys(u.requested ?? {});
-    const reqTenants = await store.getMany<TenantDoc>(reqIds.map(P.tenant));
     return c.json({ memberships, pendingRequests: reqIds.map((id, i) => (reqTenants[i] ? { id, gym: { id, name: reqTenants[i]!.name } } : null)).filter(Boolean) });
   });
 

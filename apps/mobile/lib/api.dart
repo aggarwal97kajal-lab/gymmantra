@@ -37,35 +37,119 @@ class Api {
   String? branchId;
   String _k(String path) => branchId == null ? path : '$path#$branchId';
 
-  /// Connects over IPv4 first. Some mobile/WiFi networks in India have a broken IPv6 route to the
-  /// server: the browser quietly falls back to IPv4, but the app's network library waited on IPv6
-  /// for many seconds (screens and login hung while Chrome opened the same server at once).
+  /// How the app opens connections to the server.
+  /// Mobile networks in India often drop the first packets of a new connection; the phone then
+  /// waits 1 s, 3 s, 7 s… before sending again, so a screen hung for many seconds while Chrome
+  /// (which tries several ways at once) opened the same server instantly. Here each new
+  /// connection is tried on several server addresses at the same time (a new try every 0.3 s),
+  /// TLS included, and the first one ready wins. DNS answers are kept for 5 minutes.
   static HttpClient _client() => ipv4First(HttpClient());
+
+  /// Time (ms) the last new connections took, sent with the timing report.
+  static final List<int> connectMs = [];
 
   static HttpClient ipv4First(HttpClient c) {
     c
-      ..connectionTimeout = const Duration(seconds: 8)
-      ..idleTimeout = const Duration(seconds: 30);
+      ..connectionTimeout = const Duration(seconds: 10)
+      ..idleTimeout = const Duration(seconds: 50)
+      ..maxConnectionsPerHost = 6;
     c.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
       final host = proxyHost ?? uri.host;
       final port = proxyPort ?? (uri.port == 0 ? (uri.scheme == 'https' ? 443 : 80) : uri.port);
-      Object target = host;
-      try {
-        final all = await InternetAddress.lookup(host).timeout(const Duration(seconds: 6));
-        final v4 = all.where((a) => a.type == InternetAddressType.IPv4);
-        if (v4.isNotEmpty) {
-          target = v4.first;
-        } else if (all.isNotEmpty) {
-          target = all.first;
-        }
-      } catch (_) {}
-      // Plain TCP to the chosen address, then TLS checked against the real host name.
-      final sock = Socket.connect(target, port, timeout: const Duration(seconds: 8)).then<Socket>(
-        (s) => uri.scheme == 'https' && proxyHost == null ? SecureSocket.secure(s, host: uri.host) : Future<Socket>.value(s),
-      );
+      final tls = uri.scheme == 'https' && proxyHost == null;
+      final sw = Stopwatch()..start();
+      final sock = _raceConnect(host, port, tls ? uri.host : null).then((s) {
+        connectMs.add(sw.elapsedMilliseconds);
+        if (connectMs.length > 20) connectMs.removeAt(0);
+        return s;
+      });
       return ConnectionTask.fromSocket(sock, () {});
     };
     return c;
+  }
+
+  static final Map<String, (List<InternetAddress>, DateTime)> _dns = {};
+
+  static Future<List<InternetAddress>> _lookup(String host) async {
+    final hit = _dns[host];
+    if (hit != null && hit.$2.isAfter(DateTime.now())) return hit.$1;
+    try {
+      final all = await InternetAddress.lookup(host).timeout(const Duration(seconds: 6));
+      if (all.isNotEmpty) _dns[host] = (all, DateTime.now().add(const Duration(minutes: 5)));
+      return all;
+    } catch (_) {
+      if (hit != null) return hit.$1; // old answer is better than none
+      rethrow;
+    }
+  }
+
+  static Future<Socket> _raceConnect(String host, int port, String? tlsHost) async {
+    List<InternetAddress> all;
+    try {
+      all = await _lookup(host);
+    } catch (_) {
+      all = [];
+    }
+    final v4 = all.where((a) => a.type == InternetAddressType.IPv4).toList();
+    final v6 = all.where((a) => a.type != InternetAddressType.IPv4).toList();
+    final List<Object> order = [...v4, ...v6];
+    if (order.isEmpty) order.add(host);
+    if (order.length < 3) order.add(order.first); // a second try on the same address also beats a lost packet
+    Future<Socket> one(Object target) async {
+      final s = await Socket.connect(target, port, timeout: const Duration(seconds: 8));
+      if (tlsHost == null) return s;
+      try {
+        return await SecureSocket.secure(s, host: tlsHost).timeout(const Duration(seconds: 8));
+      } catch (_) {
+        s.destroy();
+        rethrow;
+      }
+    }
+
+    final done = Completer<Socket>();
+    var next = 0, failed = 0;
+    Object? lastErr;
+    void startNext() {
+      if (done.isCompleted || next >= order.length) return;
+      one(order[next++]).then((s) {
+        if (done.isCompleted) {
+          s.destroy();
+        } else {
+          done.complete(s);
+        }
+      }, onError: (Object e) {
+        failed++;
+        lastErr = e;
+        if (done.isCompleted) return;
+        if (failed >= order.length) {
+          done.completeError(lastErr ?? 'connect failed');
+        } else {
+          startNext(); // that address failed fast: try the next one now
+        }
+      });
+    }
+
+    startNext();
+    final timer = Timer.periodic(const Duration(milliseconds: 300), (t) {
+      if (done.isCompleted || next >= order.length) {
+        t.cancel();
+      } else {
+        startNext();
+      }
+    });
+    try {
+      return await done.future.timeout(const Duration(seconds: 12));
+    } finally {
+      timer.cancel();
+    }
+  }
+
+  /// Opens a connection to the server right away (app start, back from background),
+  /// so the first real screen does not pay for it.
+  Future<void> warmConnection() async {
+    try {
+      await _dio.get('$base/api/v1/ping', options: Options(receiveTimeout: const Duration(seconds: 10)));
+    } catch (_) {}
   }
 
   late final Dio _dio = Dio(BaseOptions(
@@ -83,6 +167,7 @@ class Api {
     // Old test builds pointed at a server that no longer exists.
     base = (saved == null || saved.contains('onrender.com')) ? defaultApiBase : saved;
     token = await storage.read(key: 'token');
+    unawaited(warmConnection());
     branchId = Prefs.getString('u:branch');
   }
 
@@ -149,7 +234,7 @@ class Api {
     final items = List<Map<String, Object?>>.from(_diag);
     _diag.clear();
     try {
-      await _dio.post('$base/api/v1/diag', data: {'v': 'app-${adminApp ? 'admin' : 'main'}', 'items': items}, options: Options(contentType: 'application/json'));
+      await _dio.post('$base/api/v1/diag', data: {'v': 'app-${adminApp ? 'admin' : 'main'}', 'net': connectMs.join(','), 'items': items}, options: Options(contentType: 'application/json'));
     } catch (_) {}
   }
 

@@ -80,12 +80,15 @@ export function createApp(getDeps: () => Deps) {
   });
 
   /** App and server timing reports (slow / failed requests). Read with the private key. */
+  // The app calls this at start to open a connection early (no database work).
+  app.get('/api/v1/ping', (c) => c.json({ ok: true }));
+
   app.post('/api/v1/diag', async (c) => {
     const b = await c.req.json().catch(() => null);
     const list = Array.isArray(b?.items) ? (b.items as unknown[]).slice(0, 30) : [];
     const clean = list
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
-      .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 20) }));
+      .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 120) }));
     if (clean.length) await logDiag(c.var.deps, clean);
     return c.json({ ok: true });
   });
