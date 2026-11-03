@@ -153,7 +153,10 @@ class Session extends ChangeNotifier {
 
   /// Fetches the main screens of this person's part of the app in the background,
   /// so tapping a tab or menu shows data at once instead of waiting for the server.
-  void warmUp() {
+  void warmUp() => Future.delayed(const Duration(milliseconds: 1200), _warmUp); // first let the open screen load
+
+  void _warmUp() {
+    if (user == null) return;
     if (adminApp && user?['isSuperAdmin'] == true) {
       // GM Admin: every tab and every screen under More, so nothing shows grey boxes.
       api.prefetch(const [

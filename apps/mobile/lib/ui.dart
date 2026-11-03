@@ -1,4 +1,5 @@
 export 'drip.dart' show DripKind, Drip;
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
@@ -307,8 +308,54 @@ class AsyncBody<T> extends StatelessWidget {
         ),
       );
     }
-    return loading ?? const Padding(padding: EdgeInsets.all(16), child: ListSkeleton());
+    return loading ?? _SlowSkeleton(onRetry: onRetry);
   }
+}
+
+/// Grey boxes while loading; if it takes long, says so and offers "Try again" (never a silent wait).
+class _SlowSkeleton extends StatefulWidget {
+  const _SlowSkeleton({this.onRetry});
+  final VoidCallback? onRetry;
+  @override
+  State<_SlowSkeleton> createState() => _SlowSkeletonState();
+}
+
+class _SlowSkeletonState extends State<_SlowSkeleton> {
+  bool slow = false;
+  Timer? t;
+  @override
+  void initState() {
+    super.initState();
+    t = Timer(const Duration(seconds: 7), () {
+      if (mounted) setState(() => slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    t?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          if (slow)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.warn.withAlpha(30), borderRadius: BorderRadius.circular(14)),
+              child: Row(children: [
+                const Icon(Icons.wifi_rounded, color: C.warn, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Text(context.t('Internet is slow — still loading…'), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                if (widget.onRetry != null) TextButton(onPressed: widget.onRetry, child: Text(context.t('Try again'))),
+              ]),
+            ),
+          const ListSkeleton(),
+        ]),
+      );
 }
 
 /// Shows a drip toast (drips out of the front camera). [kind] is guessed from

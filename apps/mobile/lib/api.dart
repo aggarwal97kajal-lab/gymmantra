@@ -36,8 +36,10 @@ class Api {
   String _k(String path) => branchId == null ? path : '$path#$branchId';
 
   late final Dio _dio = Dio(BaseOptions(
-    connectTimeout: const Duration(seconds: 20),
-    receiveTimeout: const Duration(seconds: 30),
+    // Short waits: a dead connection is noticed fast and tried again, instead of hanging.
+    connectTimeout: const Duration(seconds: 10),
+    sendTimeout: const Duration(seconds: 25),
+    receiveTimeout: const Duration(seconds: 20),
     validateStatus: (_) => true,
     headers: {'x-gm-client': adminApp ? 'admin-app' : 'mobile'},
   ));
@@ -70,7 +72,8 @@ class Api {
   /// GETs for the same path that are already on the way share one request (less load, faster screens).
   final Map<String, Future<dynamic>> _inFlight = {};
   Future<dynamic> get(String path) {
-    final key = _k(path);
+    if (path.startsWith('/auth/')) return _send('GET', path); // login data: never shared
+    final key = '${token.hashCode}|${_k(path)}';
     final running = _inFlight[key];
     if (running != null) return running;
     final f = _send('GET', path).whenComplete(() => _inFlight.remove(key));
@@ -114,7 +117,7 @@ class Api {
           ),
         );
       } on DioException {
-        if (retry && attempt < 3) {
+        if (retry && attempt < 2) {
           await Future.delayed(backoff(attempt));
           continue;
         }
@@ -122,7 +125,7 @@ class Api {
       }
       final sc = res.statusCode ?? 0;
       // Server busy or restarting: wait a little (with jitter) and try again.
-      if (retry && attempt < 3 && (sc == 429 || sc == 502 || sc == 503 || sc == 504)) {
+      if (retry && attempt < 2 && (sc == 429 || sc == 502 || sc == 503 || sc == 504)) {
         await Future.delayed(backoff(attempt));
         continue;
       }
@@ -199,16 +202,20 @@ class Api {
   void forget() {
     _mem.clear();
     _fetchedAt.clear();
+    _inFlight.clear();
   }
 
   /// Loads screens' data in the background so they open instantly later.
+  /// Three at a time, so the screen in front of the person is never stuck behind them.
   Future<void> prefetch(List<String> paths) async {
-    await Future.wait(paths.map((p) async {
-      try {
-        final fresh = await get(p);
-        _remember(_k(p), fresh);
-      } catch (_) {}
-    }));
+    for (var i = 0; i < paths.length; i += 3) {
+      await Future.wait(paths.skip(i).take(3).map((p) async {
+        try {
+          final fresh = await get(p);
+          _remember(_k(p), fresh);
+        } catch (_) {}
+      }));
+    }
   }
 
   /// Background loading a few at a time (e.g. the details of members in a list),
