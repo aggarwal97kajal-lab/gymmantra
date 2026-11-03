@@ -41,6 +41,11 @@ jobs:
             --out GymMantra.apk build/app/outputs/flutter-apk/app-release.apk
           "$BT/apksigner" verify GymMantra.apk
           ls -la GymMantra.apk
+      - name: Free memory before the second build
+        run: |
+          (cd android && ./gradlew --stop) || true
+          pkill -f KotlinCompileDaemon || true
+          free -m || true
       - name: Build the GM Admin app (super admin)
         run: |
           bash tool/make_admin.sh

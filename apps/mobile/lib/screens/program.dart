@@ -71,7 +71,6 @@ class _MyPlanState extends ConsumerState<MyPlanScreen> {
             final wk = prog['workout'] as Map?;
             final dietPdf = prog['dietPdf'] as Map?;
             final workoutPdf = prog['workoutPdf'] as Map?;
-            final me = ref.watch(sessionProvider).user ?? {};
             final mark = '${(prog['gym'] as Map?)?['name'] ?? ''}';
             final tid = (prog['gym'] as Map)['id'] as String;
             final days = ((wk?['days'] as List?) ?? const []).cast<Map>();

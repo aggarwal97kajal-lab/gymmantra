@@ -10,6 +10,12 @@ for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION CAMERA; do
   grep -q "android.permission.$perm\"" "$M" || sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\"/>\n    <application#" "$M"
 done
 grep -q 'WRITE_EXTERNAL_STORAGE' "$M" || sed -i 's#<application#<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n    <application#' "$M"
+# Smaller Gradle memory so two builds in one job don't run the machine out of memory
+GP=android/gradle.properties
+if [ -f "$GP" ]; then
+  sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx4G -XX:MaxMetaspaceSize=1G -XX:+HeapDumpOnOutOfMemoryError/' "$GP"
+  grep -q '^kotlin.daemon.jvmargs' "$GP" || echo 'kotlin.daemon.jvmargs=-Xmx2G' >> "$GP"
+fi
 # Reports saved straight into the phone's Download folder (Android 10 needs legacy storage)
 grep -q 'requestLegacyExternalStorage' "$M" || sed -i 's#<application#<application android:requestLegacyExternalStorage="true"#' "$M"
 # UPI apps (GPay, PhonePe, Paytm, BHIM…) for paying the GymMantra plan
