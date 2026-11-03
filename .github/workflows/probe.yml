@@ -1,5 +1,5 @@
 name: probe
-# Checks the live server from GitHub (the dev sandbox cannot reach it). Makes a throwaway account and deletes it.
+# Reads the live server's timing log (slow / failed requests from the server and the apps).
 on:
   workflow_dispatch:
 jobs:
@@ -8,13 +8,5 @@ jobs:
     steps:
       - run: |
           B="https://gymmantra.aggarwal97kajal.workers.dev/api/v1"
-          H=(-H 'content-type: application/json' -H 'x-gm-client: mobile')
-          T() { curl -s -m 90 -o /tmp/o -w "%{http_code} %{time_total}s" "$@"; echo -n " "; head -c 200 /tmp/o; echo; }
-          echo "setpw-noauth: $(T "${H[@]}" -X POST "$B/auth/set-password" -d '{}')"
-          N=$RANDOM$RANDOM; PH="9$(printf '%09d' $((N % 1000000000)))"
-          echo "signup: $(T "${H[@]}" -X POST "$B/auth/signup" -d '{"firstName":"Probe","lastName":"Check","dob":"1990-01-01","state":"Delhi","city":"New Delhi","country":"India","pincode":"110001","email":"probe'$N'@example.com","phone":"'$PH'","password":"probe12345","role":"MEMBER"}')"
-          TOK=$(python3 -c "import json;print(json.load(open('/tmp/o')).get('token',''))" 2>/dev/null)
-          echo "login: $(T "${H[@]}" -X POST "$B/auth/login" -d '{"identifier":"probe'$N'@example.com","password":"probe12345","role":"MEMBER"}')"
-          A=(-H "Authorization: Bearer $TOK" -H 'x-gm-client: mobile')
-          for p in /auth/me /me/gyms /me/notifications /me/pt /me/program /ads?role=MEMBER /exercises /auth/me /me/gyms; do echo "$p: $(T "${A[@]}" "$B$p")"; done
-          echo "delete: $(T "${A[@]}" -X DELETE "$B/me")"
+          curl -s -m 30 -o /dev/null -w "config: %{http_code} %{time_total}s\n" "$B/auth/config"
+          for d in $(date -u +%F) $(date -u -d yesterday +%F); do echo "== $d"; curl -s -m 30 "$B/diag?key=gmdiag-5c81e2a7&day=$d" | python3 -c "import json,sys; [print(json.dumps(x)) for x in json.load(sys.stdin)[:80]]"; done
