@@ -19,5 +19,7 @@
   // No Smart Placement: it moved the Worker far away (every database call took ~1 s).
   // The database is in Mumbai (asia-south1); Indian users already reach a Cloudflare
   // data centre in India, which is close to it.
-  "placement": { "mode": "off" }
+  "placement": { "mode": "off" },
+  // Shared memory for all Worker instances (database sign-in, secrets). Created automatically on deploy.
+  "kv_namespaces": [{ "binding": "GM_KV" }]
 }

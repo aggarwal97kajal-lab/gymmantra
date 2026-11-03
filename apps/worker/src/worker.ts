@@ -1,3 +1,4 @@
+import { setEdgeKv } from './lib/edge';
 import { createApp } from './app';
 import { loadSecrets, type Deps } from './core';
 import { ensureBaseData } from './routes/super';
@@ -12,6 +13,7 @@ export interface WorkerEnv {
   SERVER_PASSWORD: string;
   SUPER_ADMIN_EMAIL?: string;
   GOOGLE_CLIENT_IDS?: string;
+  GM_KV?: unknown; // Cloudflare KV: shares the database sign-in between Worker instances
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -27,6 +29,7 @@ let deps: Deps | null = null;
 
 function depsFor(env: WorkerEnv, url: URL): Deps {
   if (deps) return deps;
+  setEdgeKv(env.GM_KV ?? null);
   for (const k of ['FIREBASE_API_KEY', 'FIREBASE_PROJECT_ID', 'SERVER_PASSWORD'] as const) {
     if (!env[k]) throw new Error(`Missing setting ${k}. Add it in Cloudflare → Worker → Settings → Variables`);
   }
