@@ -3,7 +3,9 @@ import 'dart:isolate';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:io';
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'prefs.dart';
 import 'theme.dart' show adminApp;
@@ -35,6 +37,37 @@ class Api {
   String? branchId;
   String _k(String path) => branchId == null ? path : '$path#$branchId';
 
+  /// Connects over IPv4 first. Some mobile/WiFi networks in India have a broken IPv6 route to the
+  /// server: the browser quietly falls back to IPv4, but the app's network library waited on IPv6
+  /// for many seconds (screens and login hung while Chrome opened the same server at once).
+  static HttpClient _client() => ipv4First(HttpClient());
+
+  static HttpClient ipv4First(HttpClient c) {
+    c
+      ..connectionTimeout = const Duration(seconds: 8)
+      ..idleTimeout = const Duration(seconds: 30);
+    c.connectionFactory = (Uri uri, String? proxyHost, int? proxyPort) async {
+      final host = proxyHost ?? uri.host;
+      final port = proxyPort ?? (uri.port == 0 ? (uri.scheme == 'https' ? 443 : 80) : uri.port);
+      Object target = host;
+      try {
+        final all = await InternetAddress.lookup(host).timeout(const Duration(seconds: 6));
+        final v4 = all.where((a) => a.type == InternetAddressType.IPv4);
+        if (v4.isNotEmpty) {
+          target = v4.first;
+        } else if (all.isNotEmpty) {
+          target = all.first;
+        }
+      } catch (_) {}
+      // Plain TCP to the chosen address, then TLS checked against the real host name.
+      final sock = Socket.connect(target, port, timeout: const Duration(seconds: 8)).then<Socket>(
+        (s) => uri.scheme == 'https' && proxyHost == null ? SecureSocket.secure(s, host: uri.host) : Future<Socket>.value(s),
+      );
+      return ConnectionTask.fromSocket(sock, () {});
+    };
+    return c;
+  }
+
   late final Dio _dio = Dio(BaseOptions(
     // Short waits: a dead connection is noticed fast and tried again, instead of hanging.
     connectTimeout: const Duration(seconds: 10),
@@ -42,7 +75,8 @@ class Api {
     receiveTimeout: const Duration(seconds: 20),
     validateStatus: (_) => true,
     headers: {'x-gm-client': adminApp ? 'admin-app' : 'mobile'},
-  ));
+  ))
+    ..httpClientAdapter = IOHttpClientAdapter(createHttpClient: _client);
 
   Future<void> load() async {
     final saved = await storage.read(key: 'api_base');
@@ -97,7 +131,44 @@ class Api {
   /// Safe to send again: reads, and writes that carry their own idempotency key.
   static bool _retryable(String method, String path, Object? body) => method == 'GET' || (method == 'POST' && path.startsWith('/subscription/payments'));
 
+  // ---- timing reports: slow / failed requests (and the first few after start) go to the server,
+  // so a problem on a real phone can be seen and fixed.
+  final List<Map<String, Object?>> _diag = [];
+  int _seen = 0;
+  Timer? _diagTimer;
+  void _note(String m, String path, int status, int ms, [String? err]) {
+    _seen++;
+    if (!(ms > 2500 || status == 0 || status >= 500 || err != null || _seen <= 15)) return;
+    _diag.add({'m': m, 'p': path.split('?').first, 's': status, 'ms': ms, if (err != null) 'e': err});
+    _diagTimer ??= Timer(const Duration(seconds: 8), _flushDiag);
+  }
+
+  Future<void> _flushDiag() async {
+    _diagTimer = null;
+    if (_diag.isEmpty) return;
+    final items = List<Map<String, Object?>>.from(_diag);
+    _diag.clear();
+    try {
+      await _dio.post('$base/api/v1/diag', data: {'v': 'app-${adminApp ? 'admin' : 'main'}', 'items': items}, options: Options(contentType: 'application/json'));
+    } catch (_) {}
+  }
+
   Future<dynamic> _send(String method, String path, [Object? body, void Function(int, int)? onSendProgress]) async {
+    final sw = Stopwatch()..start();
+    try {
+      final r = await _send0(method, path, body, onSendProgress);
+      _note(method, path, 200, sw.elapsedMilliseconds);
+      return r;
+    } on ApiException catch (e) {
+      _note(method, path, e.status, sw.elapsedMilliseconds, e.status == 0 || e.status >= 500 ? e.message : null);
+      rethrow;
+    } catch (e) {
+      _note(method, path, -1, sw.elapsedMilliseconds, e.toString());
+      rethrow;
+    }
+  }
+
+  Future<dynamic> _send0(String method, String path, [Object? body, void Function(int, int)? onSendProgress]) async {
     late Response res;
     // With a progress meter the body goes as bytes so the total size is known.
     final raw = onSendProgress != null && body != null ? utf8.encode(jsonEncode(body)) : null;
@@ -116,12 +187,12 @@ class Api {
             contentType: body == null ? null : 'application/json',
           ),
         );
-      } on DioException {
+      } on DioException catch (e) {
         if (retry && attempt < 2) {
           await Future.delayed(backoff(attempt));
           continue;
         }
-        throw ApiException(0, 'Could not reach GymMantra. Check your internet and try again.');
+        throw ApiException(0, 'Could not reach GymMantra. Check your internet and try again. (${e.type.name})');
       }
       final sc = res.statusCode ?? 0;
       // Server busy or restarting: wait a little (with jitter) and try again.
@@ -243,4 +314,11 @@ class Api {
       if (old == null) rethrow;
     }
   }
+}
+
+
+/// Every HttpClient in the app (pictures too) connects over IPv4 first.
+class Ipv4FirstOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) => Api.ipv4First(super.createHttpClient(context));
 }

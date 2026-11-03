@@ -1,8 +1,10 @@
+import 'dart:io' show HttpOverrides;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'admin.dart';
+import 'api.dart';
 import 'haptics.dart';
 import 'i18n.dart';
 import 'prefs.dart';
@@ -29,6 +31,7 @@ import 'theme.dart';
 import 'ui.dart';
 
 Future<void> main() async {
+  HttpOverrides.global = Ipv4FirstOverrides(); // see Api.ipv4First
   WidgetsFlutterBinding.ensureInitialized();
   await Future.wait([Prefs.init(), PhotoCache.init()]);
   AppSettings.instance.load();

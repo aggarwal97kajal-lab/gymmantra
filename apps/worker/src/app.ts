@@ -21,6 +21,20 @@ import { ticketRoutes } from './routes/tickets';
 import { transferRoutes } from './routes/transfers';
 import { AlreadyExists } from './store/store';
 
+const DIAG_KEY = 'gmdiag-5c81e2a7';
+
+async function logDiag(deps: Deps, items: Record<string, unknown>[]) {
+  try {
+    const path = `diag/${new Date().toISOString().slice(0, 10)}`;
+    await deps.store.tx(async (t) => {
+      const d = (await t.get<{ items: unknown[] }>(path)) ?? { items: [] };
+      t.set(path, { items: [...items, ...d.items].slice(0, 300) });
+    });
+  } catch {
+    /* logging must never break a request */
+  }
+}
+
 /** Builds the GymMantra API. The same app runs on Cloudflare, in tests and in the local preview. */
 export function createApp(getDeps: () => Deps) {
   const app = new Hono<Env>();
@@ -35,13 +49,46 @@ export function createApp(getDeps: () => Deps) {
   });
 
   app.use('/api/*', async (c, next) => {
+    const t0 = Date.now();
     const deps = getDeps();
     c.set('deps', deps);
+    const st = deps.store as unknown as { calls?: number; callMs?: number };
+    const calls0 = st.calls ?? 0;
+    const ms0 = st.callMs ?? 0;
     // Both are read once per Worker instance; do them together to save a round trip.
     const [secrets] = await Promise.all([loadSecrets(deps.store), ensureBaseData(deps.store)]);
     c.set('secrets', secrets);
     await next();
     c.header('cache-control', 'no-store');
+    const ms = Date.now() - t0;
+    c.header('server-timing', `total;dur=${ms}, db;dur=${(st.callMs ?? 0) - ms0}`);
+    // Slow or failed requests go to a small log, so problems on real phones can be found.
+    if ((ms > 1500 || c.res.status >= 500) && !c.req.path.startsWith('/api/v1/diag')) {
+      const entry = { at: new Date().toISOString(), src: 'server', m: c.req.method, p: c.req.path, s: c.res.status, ms, db: (st.calls ?? 0) - calls0, dbMs: (st.callMs ?? 0) - ms0 };
+      const w = logDiag(deps, [entry]);
+      try {
+        c.executionCtx.waitUntil(w);
+      } catch {
+        await w;
+      }
+    }
+  });
+
+  /** App and server timing reports (slow / failed requests). Read with the private key. */
+  app.post('/api/v1/diag', async (c) => {
+    const b = await c.req.json().catch(() => null);
+    const list = Array.isArray(b?.items) ? (b.items as unknown[]).slice(0, 30) : [];
+    const clean = list
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
+      .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 20) }));
+    if (clean.length) await logDiag(c.var.deps, clean);
+    return c.json({ ok: true });
+  });
+  app.get('/api/v1/diag', async (c) => {
+    if (c.req.query('key') !== DIAG_KEY) return c.json({ statusCode: 404, message: 'Not found' }, 404);
+    const day = c.req.query('day') ?? new Date().toISOString().slice(0, 10);
+    const d = await c.var.deps.store.get<{ items: unknown[] }>(`diag/${day}`);
+    return c.json(d?.items ?? []);
   });
 
   app.get('/api/v1/health', (c) => c.json({ ok: true, name: 'GymMantra API' }));

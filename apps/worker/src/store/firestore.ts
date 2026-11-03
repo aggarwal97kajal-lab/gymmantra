@@ -73,7 +73,20 @@ export class FirestoreStore implements Store {
     return `projects/${this.projectId}/databases/(default)/documents/${path}`;
   }
 
+  /** Database calls and time spent, for the slow-request log. */
+  calls = 0;
+  callMs = 0;
   private async call(method: string, url: string, body?: unknown): Promise<any> {
+    this.calls++;
+    const t0 = Date.now();
+    try {
+      return await this.call0(method, url, body);
+    } finally {
+      this.callMs += Date.now() - t0;
+    }
+  }
+
+  private async call0(method: string, url: string, body?: unknown): Promise<any> {
     const res = await fetch(url, {
       method,
       headers: { Authorization: `Bearer ${await this.token()}`, 'content-type': 'application/json' },
