@@ -400,7 +400,7 @@ export function ptRoutes(app: App) {
     const rows = trainers.map((tr, i) => {
       const mine = pts.map((r) => r.data).filter((p) => p.trainerId === tr.id);
       // Trainer earns their share of PT money received in this month.
-      const received = mine.flatMap((p) => p.payments.filter((x) => x.at.slice(0, 7) === month).map((x) => ({ amount: x.amount, share: p.sharePercent })));
+      const received = mine.flatMap((p) => p.payments.filter((x) => x.at.slice(0, 7) === month).map((x) => ({ amount: x.amount, share: tr.data.sharePercent ?? p.sharePercent })));
       const collected = received.reduce((n, x) => n + x.amount, 0);
       const earned = Math.round(received.reduce((n, x) => n + (x.amount * x.share) / 100, 0));
       const paid = payouts.map((r) => r.data).filter((x) => x.trainerId === tr.id).reduce((n, x) => n + x.amount, 0);

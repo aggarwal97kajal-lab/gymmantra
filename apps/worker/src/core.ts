@@ -37,6 +37,11 @@ export interface UserDoc {
   dob?: string | null; // YYYY-MM-DD
   gender?: 'male' | 'female' | 'other' | null;
   address?: string | null;
+  state?: string | null;
+  city?: string | null;
+  country?: string | null;
+  pincode?: string | null;
+  createdByGym?: { tenantId: string; gymName: string } | null; // gym owner added this member; they set a password from the email link
   staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean }>;
 }
 
@@ -79,6 +84,8 @@ export interface TenantDoc {
   planEndsAt?: string | null;
   allowTransfer?: boolean; // members may ask to move their membership to another branch
   dueRemindedAt?: string | null; // last time the owner sent due reminders
+  payFails?: string[]; // times plan payments were rejected (last 24 h decide the lock)
+  payLockedUntil?: string | null; // 3 failed payments in 24 h stop new payments till then
 }
 
 export interface MemberDoc {
@@ -94,6 +101,14 @@ export interface MemberDoc {
   notes: string | null;
   archived: boolean;
   createdAt: string;
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+  dob?: string | null;
+  state?: string | null;
+  city?: string | null;
+  country?: string | null;
+  pincode?: string | null;
 }
 
 export interface Payment {
@@ -214,6 +229,13 @@ export const P = {
   secrets: 'settings/secrets',
   stats: 'settings/stats',
   platformAudit: 'platformAudit',
+  coupons: 'coupons',
+  coupon: (id: string) => `coupons/${id}`,
+  couponCode: (code: string) => `couponCodes/${code}`,
+  planPayments: 'planPayments',
+  planPayment: (id: string) => `planPayments/${id}`,
+  signature: 'settings/signature',
+  platformDaily: (day: string) => `platformDaily/${day}`,
 };
 
 // ---------- Request context ----------
@@ -354,6 +376,13 @@ export interface GymCtx {
 /** Branch a record belongs to; old records without one belong to the first branch. */
 export const branchOf = (t: Pick<TenantDoc, 'branches'>, id: string | null | undefined) => id ?? t.branches[0]?.id ?? null;
 export const branchCode = (t: Pick<TenantDoc, 'branches' | 'gymCode'>, b: Branch) => b.code ?? (b.id === t.branches[0]?.id ? t.gymCode : null);
+/** Member ID after moving to another branch: the new branch's code + the same number (LIFE951-1004 → ATHE482-1004). */
+export function memberCodeFor(t: Pick<TenantDoc, 'branches' | 'gymCode'>, branchId: string | null | undefined, oldCode: string) {
+  const b = t.branches.find((x) => x.id === branchId) ?? t.branches[0];
+  const code = b ? branchCode(t, b) : null;
+  const num = oldCode.split('-').pop() ?? oldCode;
+  return code ? `${code}-${num}` : oldCode;
+}
 /** Is this record part of the branch the staff app is looking at? */
 /** How a member or trainer sees their gym: with the branch name, address and code when the gym has branches. */
 export function gymFace(t: TenantDoc, branchId: string | null | undefined) {

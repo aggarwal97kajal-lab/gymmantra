@@ -3,6 +3,7 @@ import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } f
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
+import { hasDetails, personDetails } from '../lib/person';
 import { accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
@@ -26,6 +27,11 @@ export function publicUser(id: string, u: UserDoc) {
     dob: u.dob ?? null,
     gender: u.gender ?? null,
     address: u.address ?? null,
+    state: u.state ?? null,
+    city: u.city ?? null,
+    country: u.country ?? null,
+    pincode: u.pincode ?? null,
+    addedByGym: u.createdByGym?.gymName ?? null,
     isOwner: isDeskStaff(u),
     isTrainer: isTrainer(u),
     trainerPending: Object.keys(u.trainerRequested ?? {}).length > 0,
@@ -65,13 +71,22 @@ const EMAIL_TAKEN = 'This email ID already exists. Please log in, or use a diffe
 export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phone.gymmantra.app`;
 
 /** Creates a password account in Firebase and the GymMantra user record. */
-export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string; appRole?: AppRole | null }) {
+/** The gym made this account: don't sign up again, set a password from the email link. */
+function addedByGym(u: UserDoc) {
+  const gym = u.createdByGym!.gymName;
+  return new HttpError(409, `An account with this email already exists. ${gym} has made you a member. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: gym, email: u.email });
+}
+
+export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string; appRole?: AppRole | null; details?: Partial<UserDoc> }) {
   const { store, identity, superAdminEmail } = c.var.deps;
   // The email and the mobile number must be free. Records of removed accounts do not count.
-  if (input.email && (await store.query<UserDoc>('users', [['email', input.email]])).some((r) => !r.data.deleted)) throw conflict(EMAIL_TAKEN);
+  if (input.email) {
+    const taken = (await store.query<UserDoc>('users', [['email', input.email]])).find((r) => !r.data.deleted);
+    if (taken) throw taken.data.createdByGym ? addedByGym(taken.data) : conflict(EMAIL_TAKEN);
+  }
   const phoneRef = await store.get<{ uid: string }>(P.phone(input.phone));
   const phoneOwner = phoneRef ? await store.get<UserDoc>(P.user(phoneRef.uid)) : null;
-  if (phoneOwner && !phoneOwner.deleted) throw conflict(PHONE_TAKEN);
+  if (phoneOwner && !phoneOwner.deleted) throw phoneOwner.createdByGym ? addedByGym(phoneOwner) : conflict(PHONE_TAKEN);
   const authEmail = input.email ?? phoneAuthEmail(input.phone);
   let fb: { uid: string; idToken?: string };
   let fresh = true;
@@ -91,7 +106,7 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
     }
   }
   const uid = fb.uid;
-  const user = newUser(input.name, { email: input.email, authEmail, fbUid: uid, phone: input.phone, appRole: input.appRole ?? null }, !!input.email && input.email === superAdminEmail);
+  const user = newUser(input.name, { ...(input.details ?? {}), email: input.email, authEmail, fbUid: uid, phone: input.phone, appRole: input.appRole ?? null }, !!input.email && input.email === superAdminEmail);
   try {
     await store.tx(async (t) => {
       if (phoneRef) t.set(P.phone(input.phone), { uid });
@@ -140,13 +155,14 @@ export function authRoutes(app: App) {
 
   app.post('/api/v1/auth/signup', async (c) => {
     const b = body(await c.req.json().catch(() => null));
-    const name = str(b, 'name', { min: 2, max: 80, label: 'your name' });
+    const d = hasDetails(b) ? personDetails(b) : null;
+    const name = d ? d.name : str(b, 'name', { min: 2, max: 80, label: 'your name' });
     const email = normalizeEmail(str(b, 'email', { label: 'your email' }));
     if (!email) throw bad('Enter a valid email address');
     const phone = normalizePhone(str(b, 'phone', { label: 'your mobile number' }));
     if (!phone) throw bad('Enter a valid 10-digit mobile number');
     const password = str(b, 'password', { min: 8, max: 100, label: 'password' });
-    const { uid, user } = await createPasswordUser(c, { name, email, phone, password, appRole: chosenRole(c, b) });
+    const { uid, user } = await createPasswordUser(c, { name, email, phone, password, appRole: chosenRole(c, b), details: d ? { firstName: d.firstName, middleName: d.middleName, lastName: d.lastName, dob: d.dob, gender: d.gender, state: d.state, city: d.city, country: d.country, pincode: d.pincode } : undefined });
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, user) }, 201);
   });

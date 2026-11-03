@@ -920,3 +920,90 @@ describe('branches', () => {
     expect((await h.api.post('/me/join', { gymCode: other.gym.gymCode }, mem.token)).status).toBe(201);
   });
 });
+
+describe('Nov 3: coupons, UPI payments, full details, branch codes', () => {
+  const boss = async () => {
+    const r = await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    return r.body.token as string;
+  };
+
+  it('coupon lowers the plan price; approved UPI payment makes the receipt; 3 rejects pause payments', async () => {
+    const sa = await boss();
+    const o = await h.ownerWithGym('Coupon Gym');
+    const plans = (await h.api.get('/saas-plans')).body.plans as any[];
+    const pro = plans.find((p) => p.name === 'Pro');
+    const till = addDays(todayIST(), 10);
+    expect((await h.api.post('/super/coupons', { code: 'diwali20', kind: 'PERCENT', value: 20, validTill: till, maxUses: 100 }, sa)).status).toBe(201);
+    const q = await h.api.post('/subscription/quote', { planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20' }, o.token);
+    expect(q.status).toBe(200);
+    expect(q.body.rate).toBe(13990);
+    expect(q.body.discount).toBe(2798);
+    expect(q.body.total).toBe(11192);
+    expect(q.body.upiId).toBe('7827862630@ptaxis');
+    expect((await h.api.post('/subscription/quote', { planId: pro.id, cycle: 'ANNUAL', coupon: 'NOPE' }, o.token)).status).toBe(400);
+    // pay → pending → approve
+    const pay = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20', utr: '123456789012', app: 'GPay' }, o.token);
+    expect(pay.status).toBe(201);
+    expect((await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'ANNUAL', utr: '123456789013' }, o.token)).status).toBe(409);
+    const ok = await h.api.post(`/super/payments/${pay.body.id}/approve`, {}, sa);
+    expect(ok.status).toBe(200);
+    const sub = (await h.api.get('/subscription', o.token)).body;
+    expect(sub.plan.name).toBe('Pro');
+    const bill = (await h.api.get(`/subscription/bills/${sub.bills[0].id}`, o.token)).body;
+    expect(bill.total).toBe(11192);
+    expect(bill.discount).toBe(2798);
+    expect(bill.couponCode).toBe('DIWALI20');
+    const coupons = (await h.api.get('/super/coupons', sa)).body;
+    expect(coupons[0].used).toBe(1);
+    // once per gym
+    expect((await h.api.post('/subscription/quote', { planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20' }, o.token)).status).toBe(400);
+    // 3 rejected payments → paused
+    for (let i = 0; i < 3; i++) {
+      const p = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'MONTHLY', utr: `99999999000${i}` }, o.token);
+      expect(p.status).toBe(201);
+      expect((await h.api.post(`/super/payments/${p.body.id}/reject`, { reason: 'Not found' }, sa)).status).toBe(200);
+    }
+    const locked = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'MONTHLY', utr: '888888888888' }, o.token);
+    expect(locked.status).toBe(403);
+    expect((await h.api.get('/subscription', o.token)).body.lockedUntil).toBeTruthy();
+    // super admin report sees the income
+    const rep = (await h.api.get('/super/reports?days=7', sa)).body;
+    expect(rep.totals.income).toBe(11192);
+    expect(rep.totals.newGyms).toBeGreaterThanOrEqual(1);
+  });
+
+  it('owner adds a member with full details: account is made, sign-up says set password', async () => {
+    const o = await h.ownerWithGym('Detail Gym');
+    const ph = h.nextPhone();
+    const d = { firstName: 'Rahul', middleName: 'Kumar', lastName: 'Sharma', dob: '1996-08-14', gender: 'male', state: 'Delhi', city: 'New Delhi', country: 'India', pincode: '110077' };
+    const m = await h.api.post('/members', { ...d, phone: ph, email: 'rahul@test.in' }, o.token);
+    expect(m.status).toBe(201);
+    expect(m.body.accountMade).toBe(true);
+    expect(m.body.name).toBe('Rahul Kumar Sharma');
+    expect(m.body.pincode).toBe('110077');
+    const s = await h.api.post('/auth/signup', { ...d, email: 'rahul@test.in', phone: h.nextPhone(), password: 'secret123' });
+    expect(s.status).toBe(409);
+    expect(s.body.code).toBe('ADDED_BY_GYM');
+    expect(s.body.gymName).toBe('Detail Gym');
+    // PIN must match the state
+    expect((await h.api.post('/members', { ...d, pincode: '400001', phone: h.nextPhone(), email: 'x@test.in' }, o.token)).status).toBe(400);
+    // normal sign-up with details
+    const s2 = await h.api.post('/auth/signup', { ...d, email: 'new@test.in', phone: h.nextPhone(), password: 'secret123' });
+    expect(s2.status).toBe(201);
+    expect(s2.body.user.city).toBe('New Delhi');
+    expect(s2.body.user.dob).toBe('1996-08-14');
+  });
+
+  it('branch code comes from the branch name; custom report dates work', async () => {
+    const o = await h.ownerWithGym('Lifetime Fitness');
+    const br = await h.api.post('/gym/branches', { name: 'Athelete' }, o.token);
+    expect(br.status).toBe(201);
+    expect(br.body.code).toMatch(/^ATHE\d{3}$/);
+    const from = addDays(todayIST(), -5);
+    const r = await h.api.get(`/reports?from=${from}&to=${todayIST()}`, o.token);
+    expect(r.status).toBe(200);
+    expect(r.body.days).toBe(6);
+    expect(r.body.custom).toBe(true);
+    expect((await h.api.get(`/reports?from=${todayIST()}&to=${from}`, o.token)).status).toBe(400);
+  });
+});

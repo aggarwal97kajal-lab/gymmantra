@@ -4,6 +4,7 @@ import { noticeRoutes } from './routes/notices';
 import { reportRoutes } from './routes/reports';
 import { adRoutes } from './routes/ads';
 import { billingRoutes } from './routes/billing';
+import { paymentRoutes } from './routes/payments';
 import { programRoutes } from './routes/programs';
 import { ptRoutes } from './routes/pt';
 import { trainerRoutes } from './routes/trainers';
@@ -63,6 +64,7 @@ export function createApp(getDeps: () => Deps) {
   ptRoutes(app);
   programRoutes(app);
   billingRoutes(app);
+  paymentRoutes(app);
   adRoutes(app);
   reportRoutes(app);
   noticeRoutes(app);

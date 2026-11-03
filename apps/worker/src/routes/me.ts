@@ -1,3 +1,4 @@
+import { personDetails } from '../lib/person';
 import { accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
@@ -272,6 +273,11 @@ export function meRoutes(app: App) {
     }
     if (b.gender !== undefined) parts.gender = oneOf(b, 'gender', ['male', 'female', 'other'] as const, true) ?? null;
     if (b.address !== undefined) parts.address = optStr(b, 'address', { max: 300 }) ?? null;
+    if (b.state !== undefined || b.city !== undefined || b.pincode !== undefined) {
+      const cur = { firstName: 'x', lastName: 'x', dob: '2000-01-01', state: u.state, city: u.city, country: u.country ?? 'India', pincode: u.pincode };
+      const d = personDetails({ ...cur, ...Object.fromEntries(['state', 'city', 'country', 'pincode'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]])) });
+      Object.assign(parts, { state: d.state, city: d.city, country: d.country, pincode: d.pincode });
+    }
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
     const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'NONE'] as const, true);
     const appRole = roleIn === 'NONE' ? null : roleIn;

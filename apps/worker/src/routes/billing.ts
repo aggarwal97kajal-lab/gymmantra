@@ -76,10 +76,14 @@ export interface PlatformSettings {
   supportWhatsapp?: string | null;
   businessName?: string | null;
   businessAddress?: string | null;
+  businessPan?: string | null;
+  upiId?: string | null; // where gyms pay for plans
   appUrl?: string | null; // where people download the app (Play Store or any link); used in gym share messages
   gst?: GstSettings;
 }
 export const DEFAULT_GST: GstSettings = { registered: false, gstin: null, legalName: null, address: null, stateCode: '07', rate: 18, from: null, inclusive: false };
+
+export const DEFAULT_UPI = '7827862630@ptaxis';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -107,7 +111,11 @@ export interface BillDoc {
   cycle: 'MONTHLY' | 'ANNUAL';
   periodStart: string;
   periodEnd: string;
-  price: number;
+  rate?: number; // plan price before the coupon
+  discount?: number;
+  couponCode?: string | null;
+  hsn?: string | null; // SAC code, only when GST is on
+  price: number; // after the coupon
   taxable: number;
   gst: ReturnType<typeof billAmounts>['gst'];
   total: number;
@@ -115,7 +123,7 @@ export interface BillDoc {
   ref: string | null;
   paidAt: string;
   gym: { name: string; address: string | null; state: string | null; stateCode: string | null; pincode: string | null; gstin: string | null; ownerName: string | null; ownerPhone: string | null };
-  seller: { name: string; address: string | null; gstin: string | null };
+  seller: { name: string; address: string | null; gstin: string | null; pan?: string | null };
   createdById: string;
 }
 
@@ -141,15 +149,20 @@ export function billingRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const { store } = c.var.deps;
-    const [access, plans, bills, settings, trainers] = await Promise.all([
+    const [access, plans, bills, settings, trainers, pays] = await Promise.all([
       gymAccess(store, g.tenant),
       store.query<SaasPlan & { unlocks?: string[] }>(P.saasPlans, [['visible', true]]),
       store.query<BillDoc>(P.bills(g.tenantId)),
       store.get<PlatformSettings>(P.platform),
       store.query(P.trainers(g.tenantId), [['active', true]]),
+      store.query<{ status: string; createdAt: string }>(P.planPayments, [['tenantId', g.tenantId]]),
     ]);
+    const lockedUntil = g.tenant.payLockedUntil && Date.parse(g.tenant.payLockedUntil) > Date.now() ? g.tenant.payLockedUntil : null;
     return c.json({
       ...access,
+      lockedUntil,
+      pendingPayment: pays.map((r) => r.data).find((x) => x.status === 'PENDING') ?? null,
+      lastPayment: pays.map((r) => r.data).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
       plans: plans
         .map((p) => ({ id: p.id, name: p.data.name, monthlyPrice: p.data.monthlyPrice, annualPrice: p.data.annualPrice, memberLimit: p.data.memberLimit, branchLimit: p.data.branchLimit, features: p.data.features, unlocks: unlocksOf(p.data), sortOrder: p.data.sortOrder }))
         .sort((a, b) => a.sortOrder - b.sortOrder),
@@ -164,9 +177,9 @@ export function billingRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const id = c.req.param('id');
-    const b = isUuid(id) ? await c.var.deps.store.get<BillDoc>(P.bill(g.tenantId, id)) : null;
+    const [b, sig] = await Promise.all([isUuid(id) ? c.var.deps.store.get<BillDoc>(P.bill(g.tenantId, id)) : null, c.var.deps.store.get<{ dataUrl: string }>(P.signature)]);
     if (!b) throw notFound('Bill not found');
-    return c.json(b);
+    return c.json({ ...b, signature: sig?.dataUrl ?? null });
   });
 
   // ---------------- super admin ----------------
@@ -174,7 +187,8 @@ export function billingRoutes(app: App) {
     await authenticate(c);
     requireSuper(c);
     const s = (await c.var.deps.store.get<PlatformSettings>(P.platform)) ?? {};
-    return c.json({ trialMonths: s.trialMonths ?? 3, supportWhatsapp: s.supportWhatsapp ?? null, appUrl: s.appUrl ?? null, businessName: s.businessName ?? 'GymMantra', businessAddress: s.businessAddress ?? 'New Delhi, Delhi', gst: { ...DEFAULT_GST, ...(s.gst ?? {}) } });
+    const sig = await c.var.deps.store.get<{ dataUrl: string }>(P.signature);
+    return c.json({ trialMonths: s.trialMonths ?? 3, supportWhatsapp: s.supportWhatsapp ?? null, appUrl: s.appUrl ?? null, businessName: s.businessName ?? 'GymMantra', businessAddress: s.businessAddress ?? 'New Delhi, Delhi', businessPan: s.businessPan ?? null, upiId: s.upiId ?? DEFAULT_UPI, signature: sig?.dataUrl ?? null, gst: { ...DEFAULT_GST, ...(s.gst ?? {}) } });
   });
 
   app.patch('/api/v1/super/gst', async (c) => {
@@ -241,9 +255,9 @@ export function billingRoutes(app: App) {
     requireSuper(c);
     const id = c.req.param('id');
     const bid = c.req.param('billId');
-    const b = isUuid(id) && isUuid(bid) ? await c.var.deps.store.get<BillDoc>(P.bill(id, bid)) : null;
+    const [b, sig] = await Promise.all([isUuid(id) && isUuid(bid) ? c.var.deps.store.get<BillDoc>(P.bill(id, bid)) : null, c.var.deps.store.get<{ dataUrl: string }>(P.signature)]);
     if (!b) throw notFound('Bill not found');
-    return c.json(b);
+    return c.json({ ...b, signature: sig?.dataUrl ?? null });
   });
 
   /** Super admin records a plan payment (until online payment is added). Makes the receipt. */
@@ -257,61 +271,84 @@ export function billingRoutes(app: App) {
     const mode = oneOf(b, 'mode', ['UPI', 'CASH', 'CARD', 'BANK_TRANSFER', 'FREE'] as const)!;
     const ref = optStr(b, 'ref', { max: 60 }) ?? null;
     const priceIn = optInt(b, 'price', { min: 0, max: 10_000_000, label: 'price' });
-    const { store } = c.var.deps;
-    const out = await store.tx(async (t) => {
-      const tenant = isUuid(id) ? await t.get<TenantDoc>(P.tenant(id)) : null;
-      if (!tenant) throw notFound('Gym not found');
-      const plan = isUuid(planId) ? await t.get<SaasPlan>(P.saasPlan(planId)) : null;
-      if (!plan) throw notFound('Plan not found');
-      const settings = (await t.get<PlatformSettings>(P.platform)) ?? {};
-      const today = todayIST();
-      // Renewing the same plan early continues from its end date; a new plan starts today.
-      const curEnd = tenant.saasPlanId === planId && tenant.planEndsAt && tenant.status === 'ACTIVE' && tenant.planEndsAt.slice(0, 10) >= today ? tenant.planEndsAt.slice(0, 10) : null;
-      const startIn = optStr(b, 'startDate');
-      if (startIn && !isYmd(startIn)) throw bad('Start date is not valid');
-      const start = startIn ?? (curEnd ? addDays(curEnd, 1) : today);
-      const end = addDays(addMonths(start, cycle === 'ANNUAL' ? 12 : 1), -1);
-      const price = priceIn ?? (mode === 'FREE' ? 0 : cycle === 'ANNUAL' ? plan.annualPrice : plan.monthlyPrice);
-      const amt = billAmounts(price, settings.gst, tenant.stateCode ?? (tenant.state ? stateByName(tenant.state)?.code : null));
-      const kind: BillDoc['kind'] = amt.gst ? 'TAX_INVOICE' : 'RECEIPT';
-      const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(id), [['role', 'OWNER']])).filter((o) => o.data.active);
-      const owner = owners[0] ? await t.get<UserDoc>(P.user(owners[0].id)) : null;
-      const bill: BillDoc = {
-        id: uuid(),
-        number: await nextNumber(t, kind, today),
-        kind,
-        planId,
-        planName: plan.name,
-        cycle,
-        periodStart: start,
-        periodEnd: end,
-        price,
-        taxable: amt.taxable,
-        gst: amt.gst,
-        total: amt.total,
-        mode,
-        ref,
-        paidAt: nowIso(),
-        gym: {
-          name: tenant.name,
-          address: [tenant.addressLine ?? tenant.address, tenant.city, tenant.pincode].filter(Boolean).join(', ') || null,
-          state: tenant.state ?? null,
-          stateCode: tenant.stateCode ?? null,
-          pincode: tenant.pincode ?? null,
-          gstin: tenant.gstin ?? null,
-          ownerName: owner?.name ?? null,
-          ownerPhone: owner?.phone ?? null,
-        },
-        seller: { name: settings.gst?.registered ? settings.gst.legalName ?? settings.businessName ?? 'GymMantra' : settings.businessName ?? 'GymMantra', address: settings.gst?.registered ? settings.gst.address ?? settings.businessAddress ?? null : settings.businessAddress ?? 'New Delhi, Delhi', gstin: amt.gst ? settings.gst?.gstin ?? null : null },
-        createdById: u.id,
-      };
-      t.set(P.bill(id, bill.id), JSON.parse(JSON.stringify(bill)));
-      const after: TenantDoc = { ...tenant, status: 'ACTIVE', saasPlanId: planId, planCycle: cycle, planEndsAt: `${end}T18:29:59.000Z` };
-      t.set(P.tenant(id), after);
-      for (const o of owners) await notify(t, o.id, id, 'Plan activated', `${plan.name} plan is active till ${end}. Your receipt is in Subscription.`);
-      audit(t, id, u.id, 'super.subscription', 'tenant', id, tenant, after);
-      return bill;
-    });
+    const startIn = optStr(b, 'startDate');
+    if (startIn && !isYmd(startIn)) throw bad('Start date is not valid');
+    const out = await c.var.deps.store.tx((t) => activatePlan(t, { tenantId: id, planId, cycle, mode, ref, price: priceIn, startDate: startIn ?? null, byId: u.id }));
     return c.json(out, 201);
   });
+}
+
+/** Turns on a plan for a gym and makes the receipt. Used when the super admin records a payment or approves a UPI payment. */
+export async function activatePlan(
+  t: Tx,
+  o: { tenantId: string; planId: string; cycle: 'MONTHLY' | 'ANNUAL'; mode: string; ref: string | null; price?: number; discount?: number; couponCode?: string | null; startDate?: string | null; byId: string },
+) {
+  const id = o.tenantId;
+  const tenant = isUuid(id) ? await t.get<TenantDoc>(P.tenant(id)) : null;
+  if (!tenant) throw notFound('Gym not found');
+  const plan = isUuid(o.planId) ? await t.get<SaasPlan>(P.saasPlan(o.planId)) : null;
+  if (!plan) throw notFound('Plan not found');
+  const settings = (await t.get<PlatformSettings>(P.platform)) ?? {};
+  const today = todayIST();
+  // Renewing the same plan early continues from its end date; a new plan starts today.
+  const curEnd = tenant.saasPlanId === o.planId && tenant.planEndsAt && tenant.status === 'ACTIVE' && tenant.planEndsAt.slice(0, 10) >= today ? tenant.planEndsAt.slice(0, 10) : null;
+  const start = o.startDate ?? (curEnd ? addDays(curEnd, 1) : today);
+  const end = addDays(addMonths(start, o.cycle === 'ANNUAL' ? 12 : 1), -1);
+  const listPrice = o.cycle === 'ANNUAL' ? plan.annualPrice : plan.monthlyPrice;
+  const rate = o.price ?? (o.mode === 'FREE' ? 0 : listPrice);
+  const discount = Math.min(rate, Math.max(0, o.discount ?? 0));
+  const price = rate - discount;
+  const amt = billAmounts(price, settings.gst, tenant.stateCode ?? (tenant.state ? stateByName(tenant.state)?.code : null));
+  const kind: BillDoc['kind'] = amt.gst ? 'TAX_INVOICE' : 'RECEIPT';
+  const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(id), [['role', 'OWNER']])).filter((x) => x.data.active);
+  const owner = owners[0] ? await t.get<UserDoc>(P.user(owners[0].id)) : null;
+  const gstOn = !!settings.gst?.registered;
+  const bill: BillDoc = {
+    id: uuid(),
+    number: await nextNumber(t, kind, today),
+    kind,
+    planId: o.planId,
+    planName: plan.name,
+    cycle: o.cycle,
+    periodStart: start,
+    periodEnd: end,
+    rate,
+    discount,
+    couponCode: o.couponCode ?? null,
+    hsn: amt.gst ? '998314' : null,
+    price,
+    taxable: amt.taxable,
+    gst: amt.gst,
+    total: amt.total,
+    mode: o.mode,
+    ref: o.ref,
+    paidAt: nowIso(),
+    gym: {
+      name: tenant.name,
+      address: [tenant.addressLine ?? tenant.address, tenant.city, tenant.pincode].filter(Boolean).join(', ') || null,
+      state: tenant.state ?? null,
+      stateCode: tenant.stateCode ?? null,
+      pincode: tenant.pincode ?? null,
+      gstin: tenant.gstin ?? null,
+      ownerName: owner?.name ?? null,
+      ownerPhone: owner?.phone ?? null,
+    },
+    seller: {
+      name: gstOn ? settings.gst!.legalName ?? settings.businessName ?? 'GymMantra' : settings.businessName ?? 'GymMantra',
+      address: gstOn ? settings.gst!.address ?? settings.businessAddress ?? null : settings.businessAddress ?? 'New Delhi, Delhi',
+      gstin: amt.gst ? settings.gst?.gstin ?? null : null,
+      pan: settings.businessPan ?? null,
+    },
+    createdById: o.byId,
+  };
+  t.set(P.bill(id, bill.id), JSON.parse(JSON.stringify(bill)));
+  const after: TenantDoc = { ...tenant, status: 'ACTIVE', saasPlanId: o.planId, planCycle: o.cycle, planEndsAt: `${end}T18:29:59.000Z`, payFails: [], payLockedUntil: null };
+  t.set(P.tenant(id), after);
+  // Platform money per day, for the super admin reports.
+  const dayPath = P.platformDaily(today);
+  const day = (await t.get<Record<string, number>>(dayPath)) ?? {};
+  t.set(dayPath, { ...day, income: (day.income ?? 0) + bill.total, bills: (day.bills ?? 0) + 1 });
+  for (const ow of owners) await notify(t, ow.id, id, 'Plan activated', `${plan.name} plan is active till ${end}. Your receipt is in Subscription.`);
+  audit(t, id, o.byId, 'super.subscription', 'tenant', id, tenant, after);
+  return bill;
 }

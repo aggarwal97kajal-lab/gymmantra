@@ -3,6 +3,7 @@ import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, optBool, optStr, str, strList } from '../lib/validate';
 import { stateByName } from '../lib/india';
+import { couponExists } from './payments';
 
 // ---------- Ads the super admin shows on dashboards ----------
 
@@ -23,6 +24,7 @@ export interface AdDoc {
   active: boolean;
   imageV: number | null;
   color: string;
+  couponCode?: string | null; // owners tap it to use the coupon on a plan
   views: Record<AdRole, number>;
   clicks: Record<AdRole, number>;
   createdAt: string;
@@ -51,7 +53,8 @@ function readAd(b: Record<string, unknown>, cur?: AdDoc) {
   if (endsOn < startsOn) throw bad('The last date is before the start date');
   const color = pick('color', () => optStr(b, 'color', { max: 9 }) ?? '#2563EB', cur?.color ?? '#2563EB');
   if (!/^#[0-9A-Fa-f]{6}$/.test(color)) throw bad('Colour is not valid');
-  return { title, body: text, linkKind, linkValue, forMembers, forTrainers, forOwners, states, startsOn, endsOn, color };
+  const couponCode = pick('couponCode', () => (optStr(b, 'couponCode', { max: 20 }) ?? '').trim().toUpperCase() || null, cur?.couponCode ?? null);
+  return { title, body: text, linkKind, linkValue, forMembers, forTrainers, forOwners, states, startsOn, endsOn, color, couponCode };
 }
 
 const view = (a: AdDoc) => ({ ...a, imageUrl: a.imageV ? `/api/v1/ads/${a.id}/image?v=${a.imageV}` : null, live: a.active && a.startsOn <= todayIST() && a.endsOn >= todayIST() });
@@ -70,6 +73,7 @@ export function adRoutes(app: App) {
     requireSuper(c);
     const b = body(await c.req.json().catch(() => null));
     const ad: AdDoc = { id: uuid(), ...readAd(b), active: true, imageV: null, views: { ...ZERO }, clicks: { ...ZERO }, createdAt: nowIso() };
+    if (ad.couponCode && !(await couponExists(c.var.deps.store, ad.couponCode))) throw bad('No coupon with this code. Make the coupon first');
     await c.var.deps.store.tx(async (t) => {
       t.set(P.ad(ad.id), ad);
       audit(t, null, u.id, 'ad.create', 'ad', ad.id, null, ad);
@@ -86,6 +90,7 @@ export function adRoutes(app: App) {
       const before = isUuid(id) ? await t.get<AdDoc>(P.ad(id)) : null;
       if (!before) throw notFound('Ad not found');
       const after: AdDoc = { ...before, ...readAd(b, before), active: optBool(b, 'active') ?? before.active };
+      if (after.couponCode && after.couponCode !== before.couponCode && !(await couponExists(t, after.couponCode))) throw bad('No coupon with this code. Make the coupon first');
       t.set(P.ad(id), after);
       audit(t, null, u.id, 'ad.update', 'ad', id, before, after);
       return after;
@@ -160,7 +165,7 @@ export function adRoutes(app: App) {
       .filter((a) => !a.states.length || a.states.some((s) => myStates.has(s)))
       .map((a) => {
         const v = view(a);
-        return { id: v.id, title: v.title, body: v.body, linkKind: v.linkKind, linkValue: v.linkValue, imageUrl: v.imageUrl, color: v.color };
+        return { id: v.id, title: v.title, body: v.body, linkKind: v.linkKind, linkValue: v.linkValue, imageUrl: v.imageUrl, color: v.color, couponCode: role === 'OWNER' ? v.couponCode ?? null : null };
       });
     return c.json(ads);
   });

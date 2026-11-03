@@ -53,8 +53,8 @@ export async function ensureBranchCodes(store: Store, tenantId: string, tenant: 
   if (!missing.length) return tenant;
   const codes = new Map<string, string>();
   for (const b of missing) {
-    let code = await uniqueGymCode(store, `${tenant.name} ${b.name}`);
-    while ([...codes.values()].includes(code)) code = await uniqueGymCode(store, `${tenant.name} ${b.name}`);
+    let code = await uniqueGymCode(store, b.name);
+    while ([...codes.values()].includes(code)) code = await uniqueGymCode(store, b.name);
     codes.set(b.id, code);
   }
   return store.tx(async (t) => {
@@ -195,7 +195,7 @@ export function gymRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const name = str(b, 'name', { min: 2, max: 60, label: 'the branch name' });
     // Every branch has its own join code (the first branch keeps the gym's old code).
-    const code = await uniqueGymCode(c.var.deps.store, `${g.tenant.name} ${name}`);
+    const code = await uniqueGymCode(c.var.deps.store, name);
     const branch: Branch = { id: uuid(), name, address: optStr(b, 'address', { max: 300 }) ?? null, hours: optStr(b, 'hours', { max: 120 }) ?? null, code, createdAt: nowIso() };
     const limits = await gymLimits(c.var.deps.store, g.tenant);
     await c.var.deps.store.tx(async (t) => {

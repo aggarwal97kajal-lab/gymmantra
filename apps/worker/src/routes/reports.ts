@@ -1,5 +1,6 @@
 import { App, authenticate, dailyFor, gymOf, P, readRoster } from '../core';
-import { addDays, todayIST } from '../lib/dates';
+import { addDays, isYmd, todayIST } from '../lib/dates';
+import { bad } from '../lib/http';
 import { validSubs } from '../lib/status';
 import { requireFeature } from './billing';
 import { summaries } from './members';
@@ -11,6 +12,24 @@ const RANGES = [7, 30, 90] as const;
 const ENTRY_RANGES = [7, 30, 90, 365] as const;
 const OVERDUE_AFTER_DAYS = 7;
 
+/** `?days=7|30|90` or a custom `?from=YYYY-MM-DD&to=YYYY-MM-DD` (up to 1 year). */
+export function reportRange(q: (k: string) => string | undefined, allowed: readonly number[]) {
+  const today = todayIST();
+  const f = q('from');
+  const t = q('to');
+  if (f || t) {
+    if (!f || !t || !isYmd(f) || !isYmd(t)) throw bad('Choose both dates');
+    const to = t > today ? today : t;
+    if (f > to) throw bad('From date must be before To date');
+    const days = Math.round((Date.parse(to) - Date.parse(f)) / 86400000) + 1;
+    if (days > 366) throw bad('Choose up to 1 year');
+    return { from: f, to, days, custom: true };
+  }
+  const asked = Number(q('days') ?? 30);
+  const days = allowed.includes(asked) ? asked : 30;
+  return { from: addDays(today, -(days - 1)), to: today, days, custom: false };
+}
+
 export function reportRoutes(app: App) {
   /**
    * Every membership sold (and PT package) in the period, plus anything older that still has
@@ -21,10 +40,7 @@ export function reportRoutes(app: App) {
     const g = await gymOf(c);
     const { store } = c.var.deps;
     await requireFeature(store, g.tenant, 'reports');
-    const asked = Number(c.req.query('days') ?? 30);
-    const days = (ENTRY_RANGES as readonly number[]).includes(asked) ? asked : 30;
-    const today = todayIST();
-    const from = addDays(today, -(days - 1));
+    const { from, to: today, days, custom } = reportRange((k) => c.req.query(k), ENTRY_RANGES);
     const overdueBefore = addDays(today, -OVERDUE_AFTER_DAYS);
     const [roster, pts] = await Promise.all([readRoster(store, g.tenantId), store.query<PtDoc>(P.pts(g.tenantId), [['status', 'ACTIVE']])]);
     const visible = new Map(summaries(g, roster).map((m) => [m.id, m]));
@@ -40,7 +56,7 @@ export function reportRoutes(app: App) {
         for (let k = 0; k < 20 && root.replacesId && byId.has(root.replacesId); k++) root = byId.get(root.replacesId)!;
         const date = todayIST(new Date(root.createdAt));
         const due = Math.max(0, s.total - s.paid);
-        if (date < from && due === 0) return;
+        if ((date < from || date > today) && due === 0) return;
         entries.push({
           id: s.id,
           kind: 'MEMBERSHIP',
@@ -65,7 +81,7 @@ export function reportRoutes(app: App) {
       const paid = p.payments.reduce((n, x) => n + x.amount, 0);
       const date = p.decidedAt ? todayIST(new Date(p.decidedAt)) : p.startDate ?? today;
       const due = Math.max(0, p.price - paid);
-      if (date < from && due === 0) continue;
+      if ((date < from || date > today) && due === 0) continue;
       const m = visible.get(p.memberId);
       if (!m) continue;
       entries.push({
@@ -88,7 +104,7 @@ export function reportRoutes(app: App) {
     }
     entries.sort((a, b) => (String(a.date) < String(b.date) ? 1 : String(a.date) > String(b.date) ? -1 : 0));
     const sum = (k: string) => entries.reduce((n, x) => n + Number(x[k]), 0);
-    return c.json({ days, from, to: today, overdueAfterDays: OVERDUE_AFTER_DAYS, count: entries.length, total: sum('total'), paid: sum('paid'), due: sum('due'), entries });
+    return c.json({ days, custom, from, to: today, overdueAfterDays: OVERDUE_AFTER_DAYS, count: entries.length, total: sum('total'), paid: sum('paid'), due: sum('due'), entries });
   });
 
   app.get('/api/v1/reports', async (c) => {
@@ -96,10 +112,7 @@ export function reportRoutes(app: App) {
     const g = await gymOf(c);
     const { store } = c.var.deps;
     await requireFeature(store, g.tenant, 'reports');
-    const asked = Number(c.req.query('days') ?? 30);
-    const days = (RANGES as readonly number[]).includes(asked) ? asked : 30;
-    const today = todayIST();
-    const from = addDays(today, -(days - 1));
+    const { from, to: today, days, custom } = reportRange((k) => c.req.query(k), RANGES);
     const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
     const [daily, roster] = await Promise.all([
       store.getMany<Record<string, number>>(dates.map((d) => P.daily(g.tenantId, d))),
@@ -133,9 +146,10 @@ export function reportRoutes(app: App) {
         return todayIST(new Date(cur.createdAt));
       };
       const firstDay = subs.map(soldOn).sort()[0];
-      if (firstDay && firstDay >= from) newMembers++;
+      if (firstDay && firstDay >= from && firstDay <= today) newMembers++;
       for (const s of subs) {
-        if (soldOn(s) < from) continue;
+        const on = soldOn(s);
+        if (on < from || on > today) continue;
         sold++;
         soldAmount += s.total;
         const p = plan(s.planName);
@@ -147,6 +161,7 @@ export function reportRoutes(app: App) {
 
     return c.json({
       days,
+      custom,
       from,
       to: today,
       series,

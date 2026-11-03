@@ -6,6 +6,9 @@ import type { Store } from '../store/store';
 import type { SaasPlan } from './gym';
 import { FEATURE_KEYS } from './billing';
 import { normalizePhone } from '../lib/phone';
+import { addDays, todayIST } from '../lib/dates';
+import { reportRange } from './reports';
+import { ticketStatus, type Ticket } from './tickets';
 
 /** Starting SaaS plans. Created once; after that the super admin edits them in the panel. */
 export const DEFAULT_SAAS_PLANS = [
@@ -183,6 +186,16 @@ export function superRoutes(app: App) {
     }
     if (b.businessName !== undefined) patch.businessName = optStr(b, 'businessName', { max: 120 }) ?? null;
     if (b.businessAddress !== undefined) patch.businessAddress = optStr(b, 'businessAddress', { max: 300 }) ?? null;
+    if (b.businessPan !== undefined) {
+      const pan = (optStr(b, 'businessPan', { max: 10 }) ?? '').toUpperCase();
+      if (pan && !/^[A-Z]{5}\d{4}[A-Z]$/.test(pan)) throw bad('PAN is not valid');
+      patch.businessPan = pan || null;
+    }
+    if (b.upiId !== undefined) {
+      const upi = (optStr(b, 'upiId', { max: 60 }) ?? '').trim();
+      if (upi && !/^[\w.-]{2,}@[a-zA-Z][\w.-]*$/.test(upi)) throw bad('UPI ID is not valid');
+      patch.upiId = upi || null;
+    }
     const out = await c.var.deps.store.tx(async (t) => {
       const before = await t.get(P.platform);
       const after = { ...(before ?? {}), ...patch };
@@ -191,6 +204,71 @@ export function superRoutes(app: App) {
       return after;
     });
     return c.json(out);
+  });
+
+  /** GymMantra-wide report: plan income, new gyms, gyms by plan, tickets, top gyms. ?days=7|30|90|365 or ?from&to. */
+  app.get('/api/v1/super/reports', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const { store } = c.var.deps;
+    const { from, to, days, custom } = reportRange((k) => c.req.query(k), [7, 30, 90, 365]);
+    const dates = Array.from({ length: days }, (_, i) => addDays(from, i));
+    const [tenants, daily, tickets, plans] = await Promise.all([
+      store.query<TenantDoc>('tenants'),
+      store.getMany<{ income?: number; bills?: number }>(dates.map((d) => P.platformDaily(d))),
+      store.query<Ticket>(P.tickets),
+      store.query<SaasPlan>(P.saasPlans),
+    ]);
+    const planName = new Map(plans.map((p) => [p.id, p.data.name]));
+    const now = Date.now();
+    const newByDay = new Map<string, number>();
+    for (const t of tenants) {
+      const d = todayIST(new Date(t.data.createdAt));
+      if (d >= from && d <= to) newByDay.set(d, (newByDay.get(d) ?? 0) + 1);
+    }
+    const series = dates.map((date, i) => ({ date, income: daily[i]?.income ?? 0, bills: daily[i]?.bills ?? 0, newGyms: newByDay.get(date) ?? 0 }));
+    const byPlan: Record<string, number> = {};
+    let activeGyms = 0;
+    for (const t of tenants) {
+      if (t.data.status === 'SUSPENDED') {
+        byPlan.Suspended = (byPlan.Suspended ?? 0) + 1;
+        continue;
+      }
+      const g = t.data;
+      const inTrial = g.status === 'TRIAL' && (!g.trialEndsAt || Date.parse(g.trialEndsAt) > now);
+      const paid = !inTrial && g.status === 'ACTIVE' && !!g.saasPlanId && planName.has(g.saasPlanId) && (!g.planEndsAt || Date.parse(g.planEndsAt) > now);
+      const k = inTrial ? 'Trial' : paid ? planName.get(g.saasPlanId!)! : 'Expired';
+      byPlan[k] = (byPlan[k] ?? 0) + 1;
+      if (inTrial || paid) activeGyms++;
+    }
+    const tk = { OPEN: 0, IN_PROGRESS: 0, WAITING: 0, RESOLVED: 0, CLOSED: 0 } as Record<string, number>;
+    for (const r of tickets) {
+      const d = todayIST(new Date(r.data.createdAt));
+      if (d < from || d > to) continue;
+      const st = ticketStatus(r.data);
+      tk[st] = (tk[st] ?? 0) + 1;
+    }
+    return c.json({
+      days,
+      custom,
+      from,
+      to,
+      series,
+      totals: {
+        income: series.reduce((n, x) => n + x.income, 0),
+        bills: series.reduce((n, x) => n + x.bills, 0),
+        newGyms: series.reduce((n, x) => n + x.newGyms, 0),
+        gyms: tenants.length,
+        activeGyms,
+        members: tenants.reduce((n, t) => n + (t.data.memberCount ?? 0), 0),
+      },
+      byPlan: Object.entries(byPlan).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+      tickets: tk,
+      topGyms: tenants
+        .map((t) => ({ id: t.id, name: t.data.name, gymCode: t.data.gymCode, city: t.data.city ?? null, members: t.data.memberCount ?? 0 }))
+        .sort((a, b) => b.members - a.members)
+        .slice(0, 10),
+    });
   });
 
   app.get('/api/v1/super/audit', async (c) => {

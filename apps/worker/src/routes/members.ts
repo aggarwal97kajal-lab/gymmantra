@@ -1,3 +1,4 @@
+import { hasDetails, personDetails } from '../lib/person';
 import {
   App,
   audit,
@@ -13,6 +14,7 @@ import {
   gymOf,
   isDeskStaff,
   MemberDoc,
+  memberCodeFor,
   notify,
   P,
   paidOf,
@@ -127,7 +129,7 @@ export async function addMember(
   t: Tx,
   g: GymCtx,
   actorId: string,
-  input: { name: string; phone: string; email?: string | null; gender?: string | null; branchId?: string | null; joinedOn?: string; notes?: string | null; userId?: string | null; photoV?: number | null },
+  input: { name: string; phone: string; email?: string | null; gender?: string | null; branchId?: string | null; joinedOn?: string; notes?: string | null; userId?: string | null; photoV?: number | null; details?: Partial<MemberDoc> },
 ) {
   const tenant = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
   const roster = await readRoster(t, g.tenantId);
@@ -149,6 +151,7 @@ export async function addMember(
     notes: input.notes ?? null,
     archived: false,
     createdAt: nowIso(),
+    ...(input.details ?? {}),
   };
   roster.members[id] = { ...rosterEntry(m), photoV: input.photoV ?? null };
   t.set(P.tenant(g.tenantId), { ...tenant, nextMemberNumber: tenant.nextMemberNumber + 1, memberCount: activeCount + 1 });
@@ -318,19 +321,77 @@ export function memberRoutes(app: App) {
     if (joinedOn && !isYmd(joinedOn)) throw bad('Joining date is not valid');
     return { name, phone, email, gender, branchId, joinedOn, notes: optStr(b, 'notes', { max: 500 }) ?? null };
   };
+  /** New app: first / middle / last name, DOB, state, city, country, PIN, email (all required like sign-up). */
+  const fullInput = (g: GymCtx, b: Record<string, unknown>) => {
+    const d = personDetails(b);
+    const base = memberInput(g, { ...b, name: d.name, gender: d.gender ?? b.gender });
+    if (!base.email) throw bad('Enter the email ID');
+    return { ...base, details: { firstName: d.firstName, middleName: d.middleName, lastName: d.lastName, dob: d.dob, state: d.state, city: d.city, country: d.country, pincode: d.pincode } };
+  };
 
   app.post('/api/v1/members', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
-    const input = memberInput(g, body(await c.req.json().catch(() => null)));
-    const { store } = c.var.deps;
-    const existingUser = (await store.get<{ uid: string }>(P.phone(input.phone)))?.uid ?? null;
-    const m = await store.tx(async (t) => {
-      const r = await addMember(t, g, u.id, { ...input, userId: existingUser });
-      if (existingUser) await linkUser(t, existingUser, g.tenantId, r.m.id);
-      return r.m;
-    });
-    return c.json(m, 201);
+    const b = body(await c.req.json().catch(() => null));
+    const full = hasDetails(b) ? fullInput(g, b) : null;
+    const input = full ?? memberInput(g, b);
+    const { store, identity } = c.var.deps;
+    let existingUser = (await store.get<{ uid: string }>(P.phone(input.phone)))?.uid ?? null;
+    if (!existingUser && input.email) existingUser = (await store.query<UserDoc>('users', [['email', input.email]])).find((r) => !r.data.deleted)?.id ?? null;
+    if (existingUser) {
+      const eu = await store.get<UserDoc>(P.user(existingUser));
+      if (eu?.memberships?.[g.tenantId]) throw conflict('This person is already a member of your gym');
+    }
+    // No GymMantra account yet: make one with these details. The member sets a password from the email link.
+    let made: { uid: string; idToken?: string } | null = null;
+    if (!existingUser && full && input.email) {
+      const pw = `${crypto.randomUUID()}Aa1!`;
+      try {
+        made = await identity.signUp(input.email, pw);
+      } catch {
+        made = null; // the email already has a login somewhere; add the member without an account
+      }
+    }
+    try {
+      const m = await store.tx(async (t) => {
+        const r = await addMember(t, g, u.id, { ...input, userId: existingUser ?? made?.uid ?? null, details: full?.details });
+        if (existingUser) await linkUser(t, existingUser, g.tenantId, r.m.id);
+        else if (made && full) {
+          const phoneRef = await t.get<{ uid: string }>(P.phone(input.phone));
+          if (phoneRef) throw conflict('This mobile number already has a GymMantra account');
+          t.create(P.phone(input.phone), { uid: made.uid });
+          const nu: UserDoc = {
+            name: input.name,
+            email: input.email,
+            authEmail: input.email,
+            fbUid: made.uid,
+            phone: input.phone,
+            googleSub: null,
+            photoV: null,
+            language: 'en',
+            isSuperAdmin: false,
+            failed: 0,
+            lockedUntil: null,
+            createdAt: nowIso(),
+            memberships: { [g.tenantId]: r.m.id },
+            requested: {},
+            staffOf: {},
+            appRole: 'MEMBER',
+            gender: (input.gender as UserDoc['gender']) ?? null,
+            ...full.details,
+            createdByGym: { tenantId: g.tenantId, gymName: g.tenant.name },
+          };
+          t.set(P.user(made.uid), nu);
+          const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };
+          t.set(P.stats, { ...st, users: (st.users ?? 0) + 1 });
+        }
+        return r.m;
+      });
+      return c.json({ ...m, accountMade: !!made }, 201);
+    } catch (e) {
+      if (made?.idToken) await identity.deleteAccount(made.idToken).catch(() => {});
+      throw e;
+    }
   });
 
   app.post('/api/v1/members/import', async (c) => {
@@ -479,12 +540,13 @@ export function memberRoutes(app: App) {
       if (b.branchId !== undefined) {
         after.branchId = optStr(b, 'branchId') ?? null;
         checkBranch(g, after.branchId);
+        if (branchOf(g.tenant, after.branchId) !== branchOf(g.tenant, before.branchId)) after.memberCode = memberCodeFor(g.tenant, branchOf(g.tenant, after.branchId), before.memberCode);
       }
       if (b.notes !== undefined) after.notes = optStr(b, 'notes', { max: 500 }) ?? null;
       const archived = optBool(b, 'archived');
       if (archived !== undefined) after.archived = archived;
       const e = roster.members[before.id] ?? rosterEntry(before);
-      roster.members[before.id] = { ...e, name: after.name, phone: after.phone, branchId: after.branchId, archived: after.archived };
+      roster.members[before.id] = { ...e, name: after.name, phone: after.phone, memberCode: after.memberCode, branchId: after.branchId, archived: after.archived };
       t.set(P.member(g.tenantId, before.id), after);
       t.set(P.roster(g.tenantId), roster);
       audit(t, g.tenantId, u.id, 'member.update', 'member', before.id, before, after);

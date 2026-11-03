@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, MemberDoc, notify, P, readRoster, rosterEntry, TenantDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, MemberDoc, memberCodeFor, notify, P, readRoster, rosterEntry, TenantDoc } from '../core';
 import { bad, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, str } from '../lib/validate';
 import { ownerIds } from './pt';
@@ -133,9 +133,9 @@ export function transferRoutes(app: App) {
       t.set(P.transfer(g.tenantId, id), done);
       if (action === 'approve') {
         if (!g.tenant.branches.some((b) => b.id === tr.toBranchId)) throw bad('That branch was deleted');
-        const after = { ...m, branchId: tr.toBranchId };
+        const after = { ...m, branchId: tr.toBranchId, memberCode: memberCodeFor(g.tenant, tr.toBranchId, m.memberCode) };
         t.set(P.member(g.tenantId, m.id), after);
-        roster.members[m.id] = { ...(roster.members[m.id] ?? rosterEntry(m)), branchId: tr.toBranchId };
+        roster.members[m.id] = { ...(roster.members[m.id] ?? rosterEntry(m)), branchId: tr.toBranchId, memberCode: after.memberCode };
         t.set(P.roster(g.tenantId), roster);
         audit(t, g.tenantId, u.id, 'member.transfer', 'member', m.id, { branchId: m.branchId }, { branchId: tr.toBranchId });
         await notify(t, m.userId, g.tenantId, 'Branch changed', `Your membership at ${g.tenant.name} is now at ${branchName(g.tenant, tr.toBranchId)}`, tr.toBranchId);
