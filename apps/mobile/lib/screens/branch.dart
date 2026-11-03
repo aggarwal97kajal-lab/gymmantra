@@ -88,26 +88,55 @@ Future<void> showBranchQr(BuildContext context, WidgetRef ref, Map b) async {
   if (context.mounted) context.push('/o/gym-qr');
 }
 
-/// Offer / notice form: who sees it — this branch only, or every branch.
+/// Offer / notice form: which branches see it — one, some or all.
+/// [picked] null = only the branch being looked at.
 class BranchTarget extends ConsumerWidget {
-  const BranchTarget({super.key, required this.all, required this.onChanged});
-  final bool all;
-  final ValueChanged<bool> onChanged;
+  const BranchTarget({super.key, required this.picked, required this.onChanged});
+  final Set<String>? picked;
+  final ValueChanged<Set<String>?> onChanged;
+
+  /// What to send to the server.
+  static Object? body(Set<String>? picked, int branchCount) => picked == null ? null : (picked.length >= branchCount ? 'ALL' : picked.toList());
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final g = ref.watch(gymProvider).valueOrNull as Map?;
     final list = branchesOf(g);
     if (list.length < 2) return const SizedBox.shrink();
     final cur = list.firstWhere((b) => b['id'] == (Api.instance.branchId ?? g?['currentBranchId']), orElse: () => list.first);
+    final sel = picked ?? {cur['id'] as String};
+    final all = sel.length >= list.length;
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(context.t('Branch'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+        Text(context.t('Which branches should run it?'), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         const SizedBox(height: 6),
         Wrap(spacing: 8, runSpacing: 6, children: [
-          ChoiceChip(label: Text(context.t('Only {b}', {'b': cur['name']})), selected: !all, onSelected: (_) => onChanged(false)),
-          ChoiceChip(label: Text(context.t('All branches')), selected: all, onSelected: (_) => onChanged(true)),
+          ChoiceChip(label: Text(context.t('All branches')), selected: all, onSelected: (_) => onChanged({for (final b in list) b['id'] as String})),
+          ChoiceChip(label: Text(context.t('Only {b}', {'b': cur['name']})), selected: picked == null || (sel.length == 1 && sel.contains(cur['id'])), onSelected: (_) => onChanged(null)),
         ]),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(color: context.c.surf, borderRadius: BorderRadius.circular(14), border: Border.all(color: context.c.line)),
+          child: Column(children: [
+            for (final b in list)
+              CheckboxListTile(
+                dense: true,
+                value: sel.contains(b['id']),
+                title: Text(b['name'] as String, style: const TextStyle(fontWeight: FontWeight.w700)),
+                secondary: Text('${b['code'] ?? ''}', style: TextStyle(color: context.c.mut, fontSize: 12)),
+                onChanged: (v) {
+                  final next = {...sel};
+                  if (v == true) {
+                    next.add(b['id'] as String);
+                  } else if (next.length > 1) {
+                    next.remove(b['id']);
+                  }
+                  onChanged(next);
+                },
+              ),
+          ]),
+        ),
       ]),
     );
   }

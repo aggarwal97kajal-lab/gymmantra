@@ -1032,7 +1032,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
   bool forMembers = true;
   bool forTrainers = false;
   String filter = 'ALL';
-  bool allBranches = false;
+  Set<String>? branchPick; // null = only this branch
   bool busy = false;
   String? error;
   Uint8List? bannerBytes;
@@ -1093,7 +1093,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
           ]),
         ],
         const SizedBox(height: 4),
-        BranchTarget(all: allBranches, onChanged: (v) => setState(() => allBranches = v)),
+        BranchTarget(picked: branchPick, onChanged: (v) => setState(() => branchPick = v)),
         const SizedBox(height: 8),
         Text(context.t('Banner picture (optional)'), style: const TextStyle(fontWeight: FontWeight.w800)),
         const SizedBox(height: 4),
@@ -1139,7 +1139,7 @@ class _NewOfferState extends ConsumerState<NewOfferScreen> {
                       'forMembers': forMembers,
                       'forTrainers': forTrainers,
                       'memberFilter': filter,
-                      if (allBranches) 'branchIds': 'ALL',
+                      if (branchPick != null) 'branchIds': BranchTarget.body(branchPick, branchesOf(ref.read(gymProvider).valueOrNull as Map?).length),
                     });
                     if (bannerBytes != null) {
                       await Api.instance.post('/offers/${o['id']}/image', {'mime': 'image/jpeg', 'base64': base64Encode(bannerBytes!)});
@@ -1222,7 +1222,7 @@ class OwnerMoreScreen extends ConsumerWidget {
             if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets'), lock: 'pt'),
             row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers'), lock: 'offers'),
             row(Icons.bar_chart_rounded, context.t('Reports'), () => context.push('/o/reports'), sub: context.t('Money, visits and plans'), lock: 'reports'),
-            if (gym['role'] == 'OWNER') row(Icons.place_rounded, context.t('Gym address'), () => context.push('/o/address')),
+            row(Icons.store_mall_directory_rounded, context.t('Branches'), () => context.push('/o/branches'), sub: context.t('Every branch: code, address, QR · Edit / Delete')),
             row(Icons.receipt_long_rounded, context.t('Membership plans'), () => context.push('/o/plans'), sub: context.t('Prices, freeze days, what is included')),
             row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => context.push('/o/settings'), sub: context.t('Name, numbers, branches, join poster')),
             row(Icons.language_rounded, context.t('Full panel on the website'), () => openUrl(Api.instance.base)),

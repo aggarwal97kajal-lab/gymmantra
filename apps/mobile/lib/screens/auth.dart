@@ -429,6 +429,11 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
       subtitle: context.t('Member · Gym owner · Trainer — everyone fills the same details'),
       children: [
         const RoleBadge(),
+        if (s.googleClientId != null) ...[
+          GoogleButton(label: context.t('Sign up with Google'), onPressed: busy || !agreed ? null : () => run(() => s.google(signup: true))),
+          if (!agreed) Padding(padding: const EdgeInsets.only(top: 6), child: Center(child: Muted(context.t('Tick "I agree" below first.'), size: 12))),
+          const _OrDivider(),
+        ],
         PersonFields(value: person, between: [
           PhoneField(label: '${context.t('Mobile')} *', controller: phone, action: TextInputAction.next, bottom: 12),
           LabeledField(label: '${context.t('Email')} *', controller: email, keyboard: TextInputType.emailAddress, action: TextInputAction.next),
@@ -633,6 +638,112 @@ class RoleBadge extends StatelessWidget {
         const SizedBox(width: 6),
         TextButton(onPressed: () => context.go('/start'), child: Text(context.t('Change'))),
       ]),
+    );
+  }
+}
+
+/// Gym-made account, first login (for example with Google): the member chooses a password once.
+class SetPasswordScreen extends ConsumerStatefulWidget {
+  const SetPasswordScreen({super.key});
+  @override
+  ConsumerState<SetPasswordScreen> createState() => _SetPasswordState();
+}
+
+class _SetPasswordState extends ConsumerState<SetPasswordScreen> with _Busy {
+  final pw = TextEditingController();
+  final pw2 = TextEditingController();
+  bool hide = true;
+
+  void save() {
+    final short = context.t('Password (at least 8 characters)');
+    final mismatch = context.t('Passwords do not match');
+    run(() async {
+      if (pw.text.length < 8) throw ApiException(400, short);
+      if (pw.text != pw2.text) throw ApiException(400, mismatch);
+      final r = await Api.instance.post('/auth/set-password', {'next': pw.text});
+      ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(r['user'] as Map));
+      if (mounted) toast(context, context.t('Password saved'), kind: DripKind.ok);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final u = ref.watch(sessionProvider).user ?? {};
+    return _AuthFrame(
+      busyText: busy ? context.t('Saving…') : null,
+      title: context.t('Set your password'),
+      subtitle: context.t('{gym} made you a member ({email}). Choose your password once — then log in with Google or with email and password.', {'gym': u['addedByGym'] ?? context.t('Your gym'), 'email': u['email'] ?? ''}),
+      children: [
+        LabeledField(
+          label: '${context.t('New password (8+ characters)')} *',
+          controller: pw,
+          icon: Icons.lock_outline_rounded,
+          obscure: hide,
+          suffix: IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20), onPressed: () => setState(() => hide = !hide)),
+        ),
+        LabeledField(label: '${context.t('Re-enter password')} *', controller: pw2, icon: Icons.lock_outline_rounded, obscure: hide, onSubmitted: (_) => save()),
+        ErrorText(error),
+        const SizedBox(height: 10),
+        FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save password & continue'))),
+        const SizedBox(height: 10),
+        Center(child: TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: Text(context.t('Log out')))),
+      ],
+    );
+  }
+}
+
+/// Signed up with Google: the same details everyone gives (DOB, state, city, PIN, mobile).
+class CompleteDetailsScreen extends ConsumerStatefulWidget {
+  const CompleteDetailsScreen({super.key});
+  @override
+  ConsumerState<CompleteDetailsScreen> createState() => _CompleteDetailsState();
+}
+
+class _CompleteDetailsState extends ConsumerState<CompleteDetailsScreen> with _Busy {
+  late final PersonDetails person = () {
+    final u = ref.read(sessionProvider).user ?? {};
+    final d = PersonDetails();
+    final parts = ((u['name'] as String?) ?? '').trim().split(RegExp(r'\s+'));
+    d.first = (u['firstName'] as String?) ?? (parts.isNotEmpty ? parts.first : '');
+    d.last = (u['lastName'] as String?) ?? (parts.length > 1 ? parts.last : '');
+    d.dob = u['dob'] as String?;
+    d.gender = u['gender'] as String?;
+    return d;
+  }();
+  late final phone = TextEditingController(text: PhoneField.local(ref.read(sessionProvider).user?['phone']));
+
+  void save() {
+    final miss = person.missing(context);
+    if (miss != null) {
+      setState(() => error = miss);
+      return;
+    }
+    final needPhone = ref.read(sessionProvider).user?['phone'] == null;
+    final badPhone = context.t('Enter a valid 10-digit mobile number');
+    run(() async {
+      if (needPhone && phone.text.trim().length != 10) throw ApiException(400, badPhone);
+      final s = ref.read(sessionProvider);
+      if (needPhone) s.patchUser(Map<String, dynamic>.from(await Api.instance.patch('/me/contact', {'phone': phone.text.trim()}) as Map));
+      final r = await Api.instance.patch('/me/profile', person.toJson());
+      s.patchUser(Map<String, dynamic>.from(r as Map));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final needPhone = ref.watch(sessionProvider).user?['phone'] == null;
+    return _AuthFrame(
+      busyText: busy ? context.t('Saving…') : null,
+      title: context.t('Your details'),
+      subtitle: context.t('One last step — everyone gives the same details.'),
+      children: [
+        PersonFields(value: person, between: [if (needPhone) PhoneField(label: '${context.t('Mobile')} *', controller: phone, bottom: 12)]),
+        ErrorText(error),
+        const SizedBox(height: 10),
+        FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save and continue'))),
+        const SizedBox(height: 10),
+        Center(child: TextButton(onPressed: () => ref.read(sessionProvider).logout(), child: Text(context.t('Log out')))),
+      ],
     );
   }
 }

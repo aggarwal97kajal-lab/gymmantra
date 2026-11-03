@@ -151,9 +151,9 @@ ThemeData buildTheme(Brightness b) {
 class QuickPageTransitionsBuilder extends PageTransitionsBuilder {
   const QuickPageTransitionsBuilder();
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 240);
+  Duration get transitionDuration => const Duration(milliseconds: 160);
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 200);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 140);
   @override
   Widget buildTransitions<T>(PageRoute<T> route, BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
     final inA = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic, reverseCurve: Curves.easeInCubic);

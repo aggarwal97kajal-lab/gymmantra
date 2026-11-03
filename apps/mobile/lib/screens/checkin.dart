@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:gal/gal.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
@@ -21,6 +20,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
+import '../qr_scan.dart';
 
 // Two QR codes, on purpose:
 //  * Join QR (orange, with the gym code) is shared on WhatsApp; scanning it only sends a join request.
@@ -413,96 +413,31 @@ class ScanCheckinScreen extends ConsumerStatefulWidget {
   ConsumerState<ScanCheckinScreen> createState() => _ScanState();
 }
 
-class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObserver {
-  // Started by hand (not autoStart). Some phones (Xiaomi/Redmi/Poco, Vivo, Oppo) pause the
-  // app while the permission box is open, which breaks a camera that is half started.
-  // So: never stop the camera while it is starting, and when anything goes wrong throw the
-  // old camera away and start a brand-new one (a few tries, automatically).
-  MobileScannerController? cam = _newCam();
-  int camGen = 0;
+class _ScanState extends ConsumerState<ScanCheckinScreen> {
+  final camKey = GlobalKey<QrCameraState>();
   bool working = false;
   Map? result;
   String? error;
   bool torch = false;
-  MobileScannerErrorCode? camError;
-  bool starting = false;
-  bool again2 = false;
+  String? camError; // live camera could not start
+  String? camDetail;
+  bool permDenied = false;
 
-  static MobileScannerController _newCam() =>
-      MobileScannerController(autoStart: false, detectionSpeed: DetectionSpeed.noDuplicates, formats: const [BarcodeFormat.qrCode]);
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => startCam());
-  }
-
-  bool get _running => cam?.value.isRunning == true;
-
-  /// Starts the camera; on failure makes a fresh camera and tries again (3 tries).
-  Future<void> startCam({bool fresh = false}) async {
-    if (result != null || !mounted) return;
-    if (starting) {
-      again2 = true;
-      return;
-    }
-    starting = true;
-    MobileScannerErrorCode? last;
-    for (var attempt = 0; attempt < 3 && mounted; attempt++) {
-      try {
-        if (fresh || attempt > 0 || cam?.value.error != null) {
-          final old = cam;
-          setState(() {
-            cam = _newCam();
-            camGen++;
-            torch = false;
-          });
-          try {
-            await old?.dispose();
-          } catch (_) {}
-          await WidgetsBinding.instance.endOfFrame;
-          if (attempt > 0) await Future.delayed(Duration(milliseconds: 350 * attempt));
-        }
-        await cam!.start();
-        last = null;
-        break;
-      } on MobileScannerException catch (e) {
-        if (e.errorCode == MobileScannerErrorCode.controllerAlreadyInitialized && cam?.value.error == null) {
-          last = null;
-          break;
-        }
-        last = e.errorCode;
-        if (e.errorCode == MobileScannerErrorCode.permissionDenied) break; // trying again will not help
-      } catch (_) {
-        last = MobileScannerErrorCode.genericError;
-      }
-    }
-    starting = false;
+  void onCamError(String code, String? detail) {
     if (!mounted) return;
-    setState(() => camError = last);
-    if (again2) {
-      again2 = false;
-      if (!_running) startCam(fresh: true);
-    }
+    setState(() {
+      camError = code;
+      camDetail = detail;
+      permDenied = code.contains('AccessDenied') || code.contains('Restricted');
+    });
   }
 
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (cam == null || result != null) return;
-    if (state == AppLifecycleState.resumed) {
-      // Back from the permission box or phone settings: start again if the camera is not running.
-      if (!_running) startCam(fresh: camError != null || cam?.value.error != null);
-    } else if (state == AppLifecycleState.paused && !starting && _running) {
-      cam!.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    cam?.dispose();
-    super.dispose();
+  Future<void> retryCam() async {
+    setState(() {
+      camError = null;
+      camDetail = null;
+    });
+    await camKey.currentState?.restart();
   }
 
   Future<void> onCode(String code) async {
@@ -522,7 +457,6 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
         if (pos != null) 'accuracy': pos.accuracy,
       });
       HapticFeedback.mediumImpact();
-      await cam?.stop();
       ref.invalidate(gymsProvider);
       if (mounted) setState(() => result = r as Map);
     } catch (e) {
@@ -538,26 +472,24 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
       result = null;
       error = null;
     });
-    startCam(fresh: !_running);
   }
 
-  /// Live camera not working on this phone: take a photo of the QR with the phone's camera app and read it.
+  /// Photo of the QR with the phone's own camera app — works even when the live camera does not.
   Future<void> scanPhoto() async {
-    try {
-      if (_running) await cam?.stop();
-    } catch (_) {}
-    final f = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90);
+    final f = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1800, imageQuality: 92);
     if (f == null || !mounted) return;
-    setState(() => working = true);
-    BarcodeCapture? cap;
+    setState(() {
+      working = true;
+      error = null;
+    });
+    String? v;
     try {
-      cap = await (cam ?? _newCam()).analyzeImage(f.path);
+      v = await decodePhoto(await f.readAsBytes());
     } catch (_) {
-      cap = null;
+      v = null;
     }
     if (!mounted) return;
     setState(() => working = false);
-    final v = cap == null || cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
     if (v == null) {
       setState(() => error = context.t('No QR found in the photo. Hold the phone closer and keep the whole QR in the photo.'));
       return;
@@ -569,6 +501,7 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
   Widget build(BuildContext context) {
     final r = result;
     if (r != null) return _ResultView(r: r, onDone: widget.standalone ? () => context.pop() : again, standalone: widget.standalone);
+    final camOk = camError == null;
     return Scaffold(
       backgroundColor: const Color(0xFF0B0D10),
       appBar: AppBar(
@@ -578,145 +511,125 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
         automaticallyImplyLeading: widget.standalone,
       ),
       body: Stack(children: [
-        Positioned.fill(
-          child: MobileScanner(
-            key: ValueKey(camGen),
-            controller: cam,
-            onDetect: (cap) {
-              final v = cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
-              if (v != null) onCode(v);
-            },
-            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, detail: e.errorDetails?.message, onRetry: () => startCam(fresh: true), onPhoto: scanPhoto),
+        Positioned.fill(child: QrCamera(key: camKey, onCode: onCode, onError: onCamError, torch: torch, paused: working || error != null)),
+        if (!camOk)
+          Positioned.fill(child: _CamProblem(perm: permDenied, code: camError!, detail: camDetail, onRetry: retryCam, onPhoto: scanPhoto, working: working, error: error))
+        else ...[
+          Center(
+            child: Container(width: 250, height: 250, decoration: BoxDecoration(border: Border.all(color: C.orange, width: 4), borderRadius: BorderRadius.circular(24))),
           ),
-        ),
-        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, detail: cam?.value.error?.errorDetails?.message, onRetry: () => startCam(fresh: true), onPhoto: scanPhoto)),
-        // Frame
-        if (camError == null && cam?.value.error == null)
-        Center(
-          child: Container(
-            width: 250,
-            height: 250,
-            decoration: BoxDecoration(border: Border.all(color: C.orange, width: 4), borderRadius: BorderRadius.circular(24)),
-          ),
-        ),
-        Positioned(
-          left: 24,
-          right: 24,
-          bottom: 40,
-          child: Column(children: [
-            if (working) const Padding(padding: EdgeInsets.only(bottom: 14), child: CircularProgressIndicator(color: Colors.white)),
-            if (error != null)
-              Container(
-                padding: const EdgeInsets.all(14),
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(color: const Color(0xEEB91C1C), borderRadius: BorderRadius.circular(16)),
-                child: Column(children: [
-                  Text(context.t(error!), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFB91C1C)), onPressed: again, child: Text(context.t('Try again'))),
-                ]),
-              )
-            else ...[
-              Text(context.t('Point the camera at the check-in QR in your gym'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
-              const SizedBox(height: 4),
-              Text(context.t('You are checked in as soon as it scans'), textAlign: TextAlign.center, style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 12.5)),
-            ],
-            const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              _RoundBtn(
-                icon: torch ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
-                label: context.t('Torch'),
-                onTap: () {
-                  cam?.toggleTorch();
-                  setState(() => torch = !torch);
-                },
-              ),
-              const SizedBox(width: 12),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 18)),
-                onPressed: working ? null : scanPhoto,
-                icon: const Icon(Icons.photo_camera_rounded, size: 20),
-                label: Text(context.t('Scan with photo')),
-              ),
+          Positioned(
+            left: 24,
+            right: 24,
+            bottom: 34,
+            child: Column(children: [
+              if (working) const Padding(padding: EdgeInsets.only(bottom: 14), child: CircularProgressIndicator(color: Colors.white)),
+              if (error != null)
+                _ErrorBox(text: context.t(error!), onAgain: again)
+              else ...[
+                Text(context.t('Point the camera at the check-in QR in your gym'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15)),
+                const SizedBox(height: 4),
+                Text(context.t('You are checked in as soon as it scans'), textAlign: TextAlign.center, style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 12.5)),
+              ],
+              const SizedBox(height: 16),
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                _RoundBtn(icon: torch ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded, label: context.t('Torch'), onTap: () => setState(() => torch = !torch)),
+                const SizedBox(width: 12),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 18)),
+                  onPressed: working ? null : scanPhoto,
+                  icon: const Icon(Icons.photo_camera_rounded, size: 20),
+                  label: Text(context.t('Scan with photo')),
+                ),
+              ]),
             ]),
-          ]),
-        ),
+          ),
+        ],
       ]),
     );
   }
 }
 
-/// Camera could not start: ask for permission (or open settings if it was refused for good).
+class _ErrorBox extends StatelessWidget {
+  const _ErrorBox({required this.text, required this.onAgain});
+  final String text;
+  final VoidCallback onAgain;
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(color: const Color(0xEEB91C1C), borderRadius: BorderRadius.circular(16)),
+        child: Column(children: [
+          Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFFB91C1C)), onPressed: onAgain, child: Text(context.t('Try again'))),
+        ]),
+      );
+}
+
+/// Live camera could not start: photo of the QR still checks you in.
 class _CamProblem extends StatelessWidget {
-  const _CamProblem({required this.code, required this.onRetry, required this.onPhoto, this.detail});
-  final MobileScannerErrorCode code;
+  const _CamProblem({required this.perm, required this.code, required this.onRetry, required this.onPhoto, required this.working, this.detail, this.error});
+  final bool perm;
+  final String code;
+  final String? detail;
   final VoidCallback onRetry;
   final VoidCallback onPhoto;
-  final String? detail;
+  final bool working;
+  final String? error;
   @override
   Widget build(BuildContext context) {
-    final perm = code == MobileScannerErrorCode.permissionDenied;
     return Container(
       color: const Color(0xFF0B0D10),
-      padding: const EdgeInsets.all(28),
-      alignment: Alignment.center,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          width: 84,
-          height: 84,
-          decoration: BoxDecoration(color: C.orange.withAlpha(46), shape: BoxShape.circle),
-          child: const Icon(Icons.photo_camera_rounded, color: C.orange, size: 38),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          perm ? context.t('Camera permission needed') : context.t('Live camera did not start'),
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          perm ? context.t('Allow GymMantra to use the camera to scan the QR') : context.t('No problem — take a photo of the QR and you are checked in.'),
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 13),
-        ),
-        const SizedBox(height: 20),
-        if (!perm) ...[
-          FilledButton.icon(
-            style: FilledButton.styleFrom(minimumSize: const Size(240, 50)),
-            onPressed: onPhoto,
-            icon: const Icon(Icons.photo_camera_rounded),
-            label: Text(context.t('Take photo of QR')),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(minimumSize: const Size(240, 48), foregroundColor: Colors.white, side: const BorderSide(color: Color(0x55FFFFFF))),
-            onPressed: onRetry,
-            child: Text(context.t('Try live camera again')),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFF1A1D23), borderRadius: BorderRadius.circular(10)),
-            child: Text(
-              '${context.t('Error code')}: ${code.name}${detail != null ? ' · $detail' : ''}\n${context.t('Send a screenshot of this and we will fix it.')}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0x99FFFFFF), fontSize: 11),
+      padding: const EdgeInsets.fromLTRB(24, 10, 24, 24),
+      child: Center(
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(color: C.orange.withAlpha(46), shape: BoxShape.circle),
+              child: const Icon(Icons.photo_camera_rounded, color: C.orange, size: 38),
             ),
-          ),
-        ] else
-          FilledButton(
-            style: FilledButton.styleFrom(minimumSize: const Size(220, 48)),
-            onPressed: onRetry,
-            child: Text(context.t('Allow camera')),
-          ),
-        if (perm) ...[
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => Geolocator.openAppSettings(),
-            child: Text(context.t('Open phone settings'), style: const TextStyle(color: Color(0xCCFFFFFF))),
-          ),
-        ],
-      ]),
+            const SizedBox(height: 16),
+            Text(
+              perm ? context.t('Camera permission needed') : context.t('Live camera did not start'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              perm ? context.t('Allow GymMantra to use the camera to scan the QR') : context.t('No problem — take a photo of the QR and you are checked in.'),
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 13),
+            ),
+            const SizedBox(height: 20),
+            if (working) const Padding(padding: EdgeInsets.only(bottom: 14), child: CircularProgressIndicator(color: Colors.white)),
+            if (error != null) _ErrorBox(text: context.t(error!), onAgain: onPhoto),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+              onPressed: working ? null : onPhoto,
+              icon: const Icon(Icons.photo_camera_rounded),
+              label: Text(context.t('Take photo of QR')),
+            ),
+            const SizedBox(height: 10),
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 48), backgroundColor: const Color(0xFF22262D), foregroundColor: Colors.white),
+              onPressed: onRetry,
+              child: Text(perm ? context.t('Allow camera') : context.t('Try live camera again')),
+            ),
+            if (perm) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Geolocator.openAppSettings(),
+                child: Text(context.t('Open phone settings'), style: const TextStyle(color: Color(0xCCFFFFFF))),
+              ),
+            ],
+            const SizedBox(height: 14),
+            Text('${context.t('Error code')}: $code', textAlign: TextAlign.center, style: const TextStyle(color: Color(0x77FFFFFF), fontSize: 10.5)),
+          ]),
+        ),
+      ),
     );
   }
 }

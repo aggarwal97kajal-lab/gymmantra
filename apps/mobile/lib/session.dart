@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'api.dart';
 import 'prefs.dart';
+import 'theme.dart' show adminApp;
 
 class Session extends ChangeNotifier {
   Session() {
@@ -153,6 +154,22 @@ class Session extends ChangeNotifier {
   /// Fetches the main screens of this person's part of the app in the background,
   /// so tapping a tab or menu shows data at once instead of waiting for the server.
   void warmUp() {
+    if (adminApp && user?['isSuperAdmin'] == true) {
+      // GM Admin: every tab and every screen under More, so nothing shows grey boxes.
+      api.prefetch(const [
+        '/super/overview',
+        '/super/gyms',
+        '/super/saas-plans',
+        '/super/ads',
+        '/super/tickets',
+        '/super/settings',
+        '/super/coupons',
+        '/super/payments?status=PAID',
+        '/super/reports?days=30',
+        '/me/notifications',
+      ]);
+      return;
+    }
     final paths = switch (mode) {
       'owner' => [
           '/dashboard',
@@ -172,6 +189,10 @@ class Session extends ChangeNotifier {
           '/me/notifications',
           '/gym/checkin-qr',
           '/transfers',
+          '/reports?days=30',
+          '/reports/entries?days=30',
+          '/gym/staff',
+          '/subscription/payments',
         ],
       'trainer' || 'waiting' || 'trainerJoin' => ['/trainer/home', '/trainer/clients', '/trainer/payouts', '/ads?role=TRAINER', '/me/notifications'],
       'member' => ['/me/gyms', '/me/pt', '/me/program', '/me/notifications', '/me/tickets', '/exercises', '/ads?role=MEMBER'],
@@ -263,7 +284,8 @@ Map<String, dynamic> withBranch(Map g) {
   final cur = branches.firstWhere((b) => b['id'] == curId, orElse: () => branches.first);
   out['gymCode'] = cur['code'] ?? g['gymCode'];
   out['branchName'] = cur['name'];
-  out['name'] = '${g['name']} – ${cur['name']}';
+  // Main (first) branch uses the gym's name; any other branch shows only its own name.
+  out['name'] = cur['id'] == branches.first['id'] ? g['name'] : cur['name'];
   if (cur['address'] != null && '${cur['address']}'.isNotEmpty) {
     out['addressLine'] = cur['address'];
     out['city'] = null;

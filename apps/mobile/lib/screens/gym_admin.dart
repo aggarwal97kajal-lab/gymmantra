@@ -1192,7 +1192,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
   final message = TextEditingController();
   bool members = true;
   bool trainers = false;
-  bool allBranches = false;
+  Set<String>? branchPick; // null = only this branch
   String filter = 'ALL';
   int showDays = 2; // today + 2 more days
   DateTime? custom;
@@ -1235,7 +1235,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
         'forTrainers': trainers,
         'memberFilter': filter,
         'showTill': ymd(till),
-        if (allBranches) 'branchIds': 'ALL',
+        if (branchPick != null) 'branchIds': BranchTarget.body(branchPick, branchesOf(ref.read(gymProvider).valueOrNull as Map?).length),
       });
       ref.invalidate(noticesProvider);
       if (mounted) {
@@ -1326,7 +1326,7 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
         const SizedBox(height: 10),
         Text(context.t('Send to'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
         const SizedBox(height: 8),
-        BranchTarget(all: allBranches, onChanged: (v) => setState(() => allBranches = v)),
+        BranchTarget(picked: branchPick, onChanged: (v) => setState(() => branchPick = v)),
         Row(children: [
           _who(Icons.groups_rounded, context.t('Members'), context.t('On their app dashboard'), members, () => setState(() => members = !members)),
           const SizedBox(width: 10),
@@ -1392,6 +1392,117 @@ class _NewNoticeState extends ConsumerState<NewNoticeScreen> {
           label: Text(context.t('Also share on WhatsApp group'), style: const TextStyle(color: C.wa)),
         ),
       ]),
+    );
+  }
+}
+
+// ============================================================ More → Branches
+
+/// Every branch with its code, address and check-in QR, with Edit and Delete. (Was "Gym address".)
+class BranchesScreen extends ConsumerWidget {
+  const BranchesScreen({super.key});
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(gymProvider);
+    final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
+    final p = context.c;
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Branches'))),
+      floatingActionButton: owner
+          ? FloatingActionButton.extended(
+              onPressed: () async {
+                final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => const _BranchSheet());
+                if (ok == true) ref.invalidate(gymProvider);
+              },
+              icon: const Icon(Icons.add_rounded),
+              label: Text(context.t('Add branch')),
+            )
+          : null,
+      body: RefreshIndicator(
+        onRefresh: () async => ref.invalidate(gymProvider),
+        child: AsyncBody(
+          value: v,
+          onRetry: () => ref.invalidate(gymProvider),
+          builder: (d) {
+            final g = d as Map;
+            final branches = ((g['branches'] as List?) ?? const []).cast<Map>();
+            final limits = (g['limits'] as Map?) ?? {};
+            return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 100), children: [
+              Muted(context.t('{n} of {max} branches on your plan', {'n': branches.length, 'max': limits['branchLimit'] ?? 1}), size: 12.5),
+              const SizedBox(height: 10),
+              for (final (i, b) in branches.indexed)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Panel(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                      Row(children: [
+                        Expanded(
+                          child: Text.rich(TextSpan(children: [
+                            TextSpan(text: b['name'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                            if (i == 0) TextSpan(text: '  ${context.t('Main')}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12)),
+                          ])),
+                        ),
+                        Text('${b['code'] ?? '—'}', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                      ]),
+                      const SizedBox(height: 4),
+                      if (i == 0 && (g['address'] as String?)?.isNotEmpty == true && (b['address'] as String?)?.isNotEmpty != true)
+                        Muted(g['address'] as String, size: 12.5)
+                      else if ((b['address'] as String?)?.isNotEmpty == true)
+                        Muted(b['address'] as String, size: 12.5),
+                      if ((b['hours'] as String?)?.isNotEmpty == true) Muted(b['hours'] as String, size: 12.5),
+                      const SizedBox(height: 10),
+                      Row(children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => showBranchQr(context, ref, b),
+                            icon: const Icon(Icons.qr_code_2_rounded, size: 18),
+                            label: Text(context.t('QR')),
+                          ),
+                        ),
+                        if (owner) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final ok = i == 0
+                                    ? await context.push<bool>('/o/address')
+                                    : await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => _BranchSheet(edit: b));
+                                if (ok == true || i == 0) ref.invalidate(gymProvider);
+                              },
+                              icon: const Icon(Icons.edit_rounded, size: 18),
+                              label: Text(context.t('Edit')),
+                            ),
+                          ),
+                          if (branches.length > 1 && i > 0) ...[
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(foregroundColor: C.red),
+                                onPressed: () async {
+                                  final yes = await confirmDelete(context, context.t('Delete {b}?', {'b': b['name']}));
+                                  if (!yes) return;
+                                  try {
+                                    await Api.instance.delete('/gym/branches/${b['id']}');
+                                    ref.invalidate(gymProvider);
+                                    if (context.mounted) toast(context, context.t('Branch deleted'));
+                                  } catch (e) {
+                                    if (context.mounted) toastError(context, e);
+                                  }
+                                },
+                                icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                                label: Text(context.t('Delete')),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ]),
+                    ]),
+                  ),
+                ),
+            ]);
+          },
+        ),
+      ),
     );
   }
 }

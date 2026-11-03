@@ -335,6 +335,8 @@ class _AdminGymsState extends ConsumerState<AdminGyms> {
           builder: (d) {
             final all = (d as List).cast<Map>();
             final list = all.where((g) => (f.isEmpty || g['status'] == f) && (q.isEmpty || '${g['name']} ${g['gymCode']} ${g['city'] ?? ''}'.toLowerCase().contains(q.toLowerCase()))).toList();
+            // Open a gym instantly: its details load in the background.
+            Api.instance.prefetchSome([for (final g in all.take(30)) '/super/gyms/${g['id']}']);
             Widget chip(String k, String l) => Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(label: Text('$l (${k.isEmpty ? all.length : all.where((g) => g['status'] == k).length})'), selected: f == k, onSelected: (_) => setState(() => f = k)),
@@ -1283,15 +1285,20 @@ class _AdminSettingsState extends ConsumerState<AdminSettings> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
               SectionTitle(context.t('Business')),
-              TextField(controller: bizName, decoration: InputDecoration(labelText: context.t('Name on receipts'))),
-              const SizedBox(height: 10),
-              TextField(controller: bizAddress, decoration: InputDecoration(labelText: context.t('Address on receipts'))),
-              const SizedBox(height: 10),
-              TextField(controller: wa, keyboardType: TextInputType.phone, decoration: InputDecoration(labelText: context.t('Support WhatsApp (gyms message here to buy a plan)'))),
-              const SizedBox(height: 12),
-              TextField(controller: appUrl, keyboardType: TextInputType.url, decoration: InputDecoration(labelText: context.t('App download link (Play Store)'), helperText: context.t('Goes in the message gyms share on WhatsApp'))),
-              const SizedBox(height: 10),
-              TextField(controller: trial, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: context.t('Free trial (months) for new gyms'))),
+              // Label above each box (long labels never get cut), short help in small blue text.
+              _LabeledBox(label: context.t('Name on receipts'), child: TextField(controller: bizName, textCapitalization: TextCapitalization.words)),
+              _LabeledBox(label: context.t('Address on receipts'), child: TextField(controller: bizAddress, textCapitalization: TextCapitalization.words)),
+              _LabeledBox(
+                label: context.t('Support WhatsApp number'),
+                help: context.t('Gyms use this number to message you.'),
+                child: TextField(controller: wa, keyboardType: TextInputType.phone, decoration: const InputDecoration(hintText: '98765 43210')),
+              ),
+              _LabeledBox(
+                label: context.t('App download link'),
+                help: context.t('Gyms send this link to their members on WhatsApp.'),
+                child: TextField(controller: appUrl, keyboardType: TextInputType.url, decoration: const InputDecoration(hintText: 'https://play.google.com/…')),
+              ),
+              _LabeledBox(label: context.t('Free trial for new gyms (months)'), child: TextField(controller: trial, keyboardType: TextInputType.number)),
               const SizedBox(height: 20),
               SectionTitle(context.t('GST')),
               Panel(
@@ -1388,7 +1395,7 @@ class AdminMore extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
             row(Icons.bar_chart_rounded, context.t('Reports'), () => context.push('/a/reports')),
-            row(Icons.payments_rounded, context.t('Plan payments (UPI)'), () => context.push('/a/payments')),
+            row(Icons.payments_rounded, context.t('Plan payments'), () => context.push('/a/payments')),
             row(Icons.sell_rounded, context.t('Coupons'), () => context.push('/a/coupons')),
             row(Icons.confirmation_number_rounded, context.t('Support tickets'), () => context.push('/a/tickets')),
             row(Icons.draw_rounded, context.t('Receipt & signature'), () => context.push('/a/receipt')),
@@ -1408,6 +1415,22 @@ class AdminMore extends ConsumerWidget {
       ]),
     );
   }
+}
+
+class _LabeledBox extends StatelessWidget {
+  const _LabeledBox({required this.label, required this.child, this.help});
+  final String label;
+  final String? help;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.c.mut))),
+          child,
+          if (help != null) Padding(padding: const EdgeInsets.only(left: 4, top: 5), child: Text(help!, style: const TextStyle(fontSize: 11.5, color: C.indigo, fontWeight: FontWeight.w500))),
+        ]),
+      );
 }
 
 /// Keeps the import used when HapticFeedback is needed elsewhere in the admin app.

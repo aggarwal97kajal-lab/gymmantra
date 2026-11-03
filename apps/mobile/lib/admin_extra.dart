@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
+import 'package:flutter/gestures.dart' show DragStartBehavior;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,7 @@ import 'screens/reports_kit.dart';
 
 final _coupons = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/coupons'));
 final _payments = StreamProvider.autoDispose.family<dynamic, String>((ref, status) => Api.instance.cachedGet('/super/payments?status=$status'));
+// (Plan payments turn the plan on at once; the super admin only stops one whose money never came.)
 final _plansList = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/saas-plans'));
 final _settingsX = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/settings'));
 
@@ -186,7 +188,7 @@ class _CouponEditState extends ConsumerState<CouponEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final plans = (ref.watch(_plansList).valueOrNull as List?)?.cast<Map>() ?? const [];
+    final plans = (((ref.watch(_plansList).valueOrNull as Map?)?['plans'] as List?) ?? const []).cast<Map>();
     Widget label(String t) => Padding(padding: const EdgeInsets.only(left: 2, bottom: 6, top: 4), child: Muted(t, size: 13));
     return Scaffold(
       appBar: AppBar(
@@ -295,42 +297,30 @@ class AdminPayments extends ConsumerStatefulWidget {
 }
 
 class _AdminPaymentsState extends ConsumerState<AdminPayments> {
-  String status = 'PENDING';
+  String status = 'PAID';
 
-  Future<void> decide(Map p, bool approve) async {
-    String? reason;
-    if (!approve) {
-      final c = TextEditingController(text: 'Payment not found in the bank account');
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(ctx.t('Reject this payment?')),
-          content: TextField(controller: c, decoration: InputDecoration(labelText: ctx.t('Reason (the owner sees it)'))),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Reject'), style: const TextStyle(color: C.red))),
-          ],
-        ),
-      );
-      if (ok != true) return;
-      reason = c.text.trim();
-    } else {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(ctx.t('Money received?')),
-          content: Text(ctx.t('Check your UPI app for {amount} with UTR {utr}. Approving turns on the plan and makes the receipt.', {'amount': rupees(p['amount'] as num?), 'utr': p['utr']})),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
-            TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Approve'))),
-          ],
-        ),
-      );
-      if (ok != true) return;
-    }
+  /// Money never reached the bank: stop the plan and mark the receipt cancelled.
+  Future<void> cancel(Map p) async {
+    final c = TextEditingController(text: 'Payment not found in the bank account');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.t('Payment not received?')),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(ctx.t('The plan of {gym} stops at once and the receipt shows CANCELLED. The owner gets a notification to pay again.', {'gym': p['gymName']}), style: const TextStyle(fontSize: 13.5)),
+          const SizedBox(height: 12),
+          TextField(controller: c, decoration: InputDecoration(labelText: ctx.t('Reason (the owner sees it)'))),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Stop the plan'), style: const TextStyle(color: C.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
     try {
-      await Api.instance.post('/super/payments/${p['id']}/${approve ? 'approve' : 'reject'}', {if (reason != null) 'reason': reason});
-      if (mounted) toast(context, context.t(approve ? 'Plan turned on' : 'Payment rejected'), kind: approve ? DripKind.ok : DripKind.info);
+      await Api.instance.post('/super/payments/${p['id']}/cancel', {'reason': c.text.trim()});
+      if (mounted) toast(context, context.t('Plan stopped'), kind: DripKind.info);
       ref.invalidate(_payments);
     } catch (e) {
       if (mounted) toastError(context, e);
@@ -345,7 +335,7 @@ class _AdminPaymentsState extends ConsumerState<AdminPayments> {
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Seg<String>(value: status, items: [('PENDING', context.t('To check'), null), ('APPROVED', context.t('Approved'), null), ('REJECTED', context.t('Rejected'), null)], onChanged: (x) => setState(() => status = x)),
+          child: Seg<String>(value: status, items: [('PAID', context.t('Paid'), null), ('CANCELLED', context.t('Cancelled'), null), ('FAILED', context.t('Failed'), null)], onChanged: (x) => setState(() => status = x)),
         ),
         Expanded(
           child: RefreshIndicator(
@@ -354,28 +344,36 @@ class _AdminPaymentsState extends ConsumerState<AdminPayments> {
               value: v,
               onRetry: () => ref.invalidate(_payments),
               builder: (d) {
-                final list = (d as List).cast<Map>();
-                if (list.isEmpty) return ListView(children: [const SizedBox(height: 100), Center(child: Muted(context.t('Nothing here.')))]);
+                final list = ((d as Map)['payments'] as List).cast<Map>();
                 return ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), children: [
+                  if (status == 'PAID')
+                    Row(children: [
+                      Expanded(child: StatBox(value: rupees(d['monthTotal'] as num?), label: context.t('This month'), color: C.indigo)),
+                      const SizedBox(width: 10),
+                      Expanded(child: StatBox(value: '${d['monthCount']}', label: context.t('Payments'), color: C.ok)),
+                    ]),
+                  const SizedBox(height: 10),
+                  if (list.isEmpty) Padding(padding: const EdgeInsets.only(top: 60), child: Center(child: Muted(context.t('Nothing here.')))),
                   for (final p in list)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 10),
                       child: Panel(
+                        onTap: p['billId'] == null ? null : () => context.push('/a/bill/${p['tenantId']}/${p['billId']}'),
                         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                           Row(children: [
-                            Expanded(child: Text('${p['gymName']} (${p['gymCode']})', style: const TextStyle(fontWeight: FontWeight.w800))),
+                            Expanded(child: Text('${p['gymName']} · ${p['gymCode']}', style: const TextStyle(fontWeight: FontWeight.w800))),
                             Text(rupees(p['amount'] as num?), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                           ]),
                           const SizedBox(height: 4),
-                          Muted('${p['planName']} · ${context.t(p['cycle'] == 'ANNUAL' ? 'Yearly' : 'Monthly')}${p['couponCode'] != null ? ' · ${p['couponCode']} (−${rupees(p['discount'] as num?)})' : ''}', size: 12.5),
-                          Muted('UTR ${p['utr']}${p['app'] != null ? ' · ${p['app']}' : ''} · ${fmtDateTime(p['createdAt'] as String)}', size: 12),
+                          Muted('${p['planName']} · ${context.t(p['cycle'] == 'ANNUAL' ? '1 year' : '1 month')}${p['couponCode'] != null ? ' · ${p['couponCode']}' : ''}', size: 12.5),
+                          Muted('${p['payId']}${p['app'] != null ? ' · ${p['app']}' : ''}${p['upiRef'] != null ? ' · Ref ${p['upiRef']}' : ''} · ${fmtDateTime((p['paidAt'] ?? p['createdAt']) as String)}', size: 12),
                           if (p['reason'] != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(p['reason'] as String, style: const TextStyle(color: C.red, fontSize: 12.5))),
-                          if (p['status'] == 'PENDING') ...[
-                            const SizedBox(height: 10),
+                          if (p['status'] == 'PAID') ...[
+                            const SizedBox(height: 8),
                             Row(children: [
-                              Expanded(child: OutlinedButton(onPressed: () => decide(p, false), child: Text(context.t('Reject'), style: const TextStyle(color: C.red)))),
-                              const SizedBox(width: 10),
-                              Expanded(child: FilledButton(style: FilledButton.styleFrom(backgroundColor: C.ok), onPressed: () => decide(p, true), child: Text(context.t('Approve')))),
+                              if (p['billId'] != null) Expanded(child: OutlinedButton.icon(onPressed: () => context.push('/a/bill/${p['tenantId']}/${p['billId']}'), icon: const Icon(Icons.receipt_long_rounded, size: 18), label: Text(context.t('Receipt')))),
+                              const SizedBox(width: 8),
+                              Expanded(child: OutlinedButton(onPressed: () => cancel(p), child: Text(context.t('Not received'), style: const TextStyle(color: C.red)))),
                             ]),
                           ],
                         ]),
@@ -702,11 +700,25 @@ class _SignaturePadState extends State<SignaturePad> {
   Size area = Size.zero;
 
   Future<void> done() async {
-    if (strokes.isEmpty) return;
+    final pts = strokes.expand((x) => x).toList();
+    if (pts.isEmpty) return;
+    // Cut the picture to just the signature (plus a little space), so it fits the receipt nicely.
+    var minX = pts.first.dx, maxX = pts.first.dx, minY = pts.first.dy, maxY = pts.first.dy;
+    for (final p in pts) {
+      minX = math.min(minX, p.dx);
+      maxX = math.max(maxX, p.dx);
+      minY = math.min(minY, p.dy);
+      maxY = math.max(maxY, p.dy);
+    }
+    const pad = 12.0;
+    final box = Rect.fromLTRB(minX - pad, minY - pad, maxX + pad, maxY + pad);
+    const scale = 2.0;
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
+    canvas.scale(scale);
+    canvas.translate(-box.left, -box.top);
     _SigPainter(strokes, Colors.black).paint(canvas, area);
-    final img = await rec.endRecording().toImage(math.max(1, area.width.round()), math.max(1, area.height.round()));
+    final img = await rec.endRecording().toImage(math.max(1, (box.width * scale).round()), math.max(1, (box.height * scale).round()));
     final data = await img.toByteData(format: ui.ImageByteFormat.png);
     if (mounted && data != null) Navigator.pop(context, data.buffer.asUint8List());
   }
@@ -720,35 +732,43 @@ class _SignaturePadState extends State<SignaturePad> {
             TextButton(onPressed: done, child: Text(context.t('Done'))),
           ],
         ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Container(
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: context.c.line)),
-            clipBehavior: Clip.antiAlias,
-            child: LayoutBuilder(builder: (_, box) {
-              area = Size(box.maxWidth, math.min(box.maxHeight, box.maxWidth * 0.5));
-              return Align(
-                alignment: Alignment.topCenter,
-                child: SizedBox(
-                  width: area.width,
-                  height: area.height,
-                  child: GestureDetector(
-                    onPanStart: (d) => setState(() => strokes.add([d.localPosition])),
-                    onPanUpdate: (d) => setState(() => strokes.last.add(d.localPosition)),
-                    child: CustomPaint(painter: _SigPainter(strokes, const Color(0xFF1E3A8A)), child: const SizedBox.expand()),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+            child: Container(
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFC7D2FE), width: 2)),
+              clipBehavior: Clip.antiAlias,
+              // The whole white area takes the pen — every stroke, anywhere, as many times as needed.
+              child: LayoutBuilder(builder: (_, box) {
+                area = Size(box.maxWidth, box.maxHeight);
+                return Stack(children: [
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      dragStartBehavior: DragStartBehavior.down,
+                      onPanStart: (d) => setState(() => strokes.add([d.localPosition])),
+                      onPanUpdate: (d) => setState(() {
+                        if (strokes.isEmpty) strokes.add([]);
+                        strokes.last.add(d.localPosition);
+                      }),
+                      child: CustomPaint(painter: _SigPainter(strokes, const Color(0xFF1E3A8A), version: strokes.fold(0, (n, s) => n + s.length))),
+                    ),
                   ),
-                ),
-              );
-            }),
+                  if (strokes.isEmpty)
+                    IgnorePointer(child: Center(child: Text(context.t('Sign anywhere here'), style: const TextStyle(color: Colors.black38, fontSize: 16)))),
+                ]);
+              }),
+            ),
           ),
         ),
       );
 }
 
 class _SigPainter extends CustomPainter {
-  _SigPainter(this.strokes, this.color);
+  _SigPainter(this.strokes, this.color, {this.version = 0});
   final List<List<Offset>> strokes;
   final Color color;
+  final int version; // number of points; a change means repaint
   @override
   void paint(Canvas canvas, Size size) {
     final p = Paint()
@@ -772,5 +792,5 @@ class _SigPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SigPainter o) => true;
+  bool shouldRepaint(_SigPainter o) => true; // the stroke list grows in place, so always repaint
 }

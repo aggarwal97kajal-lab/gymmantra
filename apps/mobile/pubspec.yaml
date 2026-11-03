@@ -21,7 +21,11 @@ dependencies:
   video_player: ^2.9.1
   google_sign_in: ^6.2.1
   path_provider: ^2.1.4
-  mobile_scanner: ^6.0.2
+  camera: '>=0.11.0 <1.0.0'
+  # Camera2 instead of CameraX (CameraX failed to start on some phones)
+  camera_android: '>=0.10.9 <1.0.0'
+  zxing2: '>=0.2.4 <1.0.0'
+  image: ^4.2.0
   geolocator: ^13.0.2
   share_plus: ^10.1.4
   gal: ^2.3.1

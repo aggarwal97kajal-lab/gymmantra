@@ -33,12 +33,20 @@ if [ -n "$MA" ]; then
   cat > "$MA" <<KT
 package $PKG
 
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.net.Uri
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
+    private var upiResult: MethodChannel.Result? = null
+    private val upiRequest = 4711
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymmantra/secure").setMethodCallHandler { call, result ->
@@ -47,6 +55,64 @@ class MainActivity : FlutterActivity() {
                 "off" -> { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE); result.success(null) }
                 else -> result.notImplemented()
             }
+        }
+        // UPI apps installed on this phone (real name + real icon), and paying with one of them.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "gymmantra/upi").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "apps" -> {
+                    try {
+                        val pm = packageManager
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("upi://pay"))
+                        val list = pm.queryIntentActivities(intent, 0)
+                        val seen = HashSet<String>()
+                        val out = ArrayList<Map<String, Any>>()
+                        for (ri in list) {
+                            val pkg = ri.activityInfo.packageName
+                            if (!seen.add(pkg)) continue
+                            val label = ri.loadLabel(pm).toString()
+                            val d = ri.loadIcon(pm)
+                            val size = 112
+                            val bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+                            val c = Canvas(bmp)
+                            d.setBounds(0, 0, size, size)
+                            d.draw(c)
+                            val bos = ByteArrayOutputStream()
+                            bmp.compress(Bitmap.CompressFormat.PNG, 100, bos)
+                            out.add(mapOf("package" to pkg, "name" to label, "icon" to bos.toByteArray()))
+                        }
+                        result.success(out)
+                    } catch (e: Exception) {
+                        result.error("UPI_LIST", e.message, null)
+                    }
+                }
+                "pay" -> {
+                    val uri = call.argument<String>("uri")
+                    val pkg = call.argument<String>("package")
+                    if (uri == null) { result.error("NO_URI", "No payment link", null); return@setMethodCallHandler }
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri))
+                    if (pkg != null) intent.setPackage(pkg)
+                    try {
+                        upiResult?.success(null)
+                        upiResult = result
+                        startActivityForResult(if (pkg == null) Intent.createChooser(intent, "Pay with") else intent, upiRequest)
+                    } catch (e: Exception) {
+                        upiResult = null
+                        result.error("NO_APP", e.message, null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == upiRequest) {
+            // UPI apps answer like "txnId=..&responseCode=00&Status=SUCCESS&txnRef=.."
+            val r = data?.getStringExtra("response") ?: data?.getStringExtra("Status")
+            upiResult?.success(r ?: (if (resultCode == RESULT_OK) "" else null))
+            upiResult = null
         }
     }
 }

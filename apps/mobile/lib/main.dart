@@ -71,6 +71,10 @@ class _AppState extends ConsumerState<GymMantraApp> {
           if (loc == '/start') return null;
           return open.contains(loc) ? null : '/login';
         }
+        // Gym-made account on its first (Google) login: choose a password once.
+        if (session.user?['needsPassword'] == true) return loc == '/set-password' ? null : '/set-password';
+        // Google sign-up: DOB, state, city and PIN are still needed.
+        if (session.user?['needsDetails'] == true) return loc == '/complete-details' ? null : '/complete-details';
         // Each kind of person has their own part of the app.
         const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/', '/checkin', '/pdf'];
         if (shared.any((p) => loc.startsWith(p))) return null;
@@ -86,7 +90,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         if (prefix.isEmpty) {
           // Member: everything except the other parts.
           const others = ['/o/', '/t/', '/waiting', '/register-gym', '/trainer-join', '/role'];
-          if (open.contains(loc) || loc == '/splash' || others.any((p) => loc.startsWith(p))) return home;
+          if (open.contains(loc) || loc == '/splash' || loc == '/set-password' || loc == '/complete-details' || others.any((p) => loc.startsWith(p))) return home;
           return null;
         }
         if (prefix == '/t/' && (loc.startsWith('/trainer-join') || loc.startsWith('/waiting'))) return null;
@@ -136,6 +140,9 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/subscription', builder: (_, __) => const SubscriptionScreen()),
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
+        GoRoute(path: '/o/branches', builder: (_, __) => const BranchesScreen()),
+        GoRoute(path: '/set-password', builder: (_, __) => const SetPasswordScreen()),
+        GoRoute(path: '/complete-details', builder: (_, __) => const CompleteDetailsScreen()),
         GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
         GoRoute(path: '/transfer/:tid', builder: (_, s) => MemberTransferScreen(tenantId: s.pathParameters['tid']!, toBranchId: s.uri.queryParameters['to']?.isEmpty == true ? null : s.uri.queryParameters['to'])),
         GoRoute(path: '/o/gym-qr', builder: (_, s) => GymQrScreen(share: s.uri.queryParameters['share'] == '1')),

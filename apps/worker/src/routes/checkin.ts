@@ -159,7 +159,9 @@ export function checkinRoutes(app: App) {
       const acc = typeof b.accuracy === 'number' && b.accuracy > 0 ? Math.min(b.accuracy, 30) : 0;
       if (d > RADIUS_M + acc) throw forbidden(`You are ${d >= 1000 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`} away from ${tenant.name}. Check in from inside the gym`);
     }
-    const gym = { id: tenantId, name: tenant.name, branchName: tenant.branches.length > 1 ? branchName : null, whatsappNumber: tenant.whatsappNumber, phone: tenant.phone };
+    // Main branch shows the gym name; another branch shows only its own name.
+    const isMain = hit.branchId == null || hit.branchId === tenant.branches[0]?.id;
+    const gym = { id: tenantId, name: isMain ? tenant.name : branchName ?? tenant.name, branchName: null, whatsappNumber: tenant.whatsappNumber, phone: tenant.phone };
     if (memberId) {
       const out = await store.tx(async (t) => {
         const mem = await t.get<MemberDoc>(P.member(tenantId, memberId));

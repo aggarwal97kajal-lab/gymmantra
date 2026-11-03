@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../i18n.dart';
 import '../theme.dart';
 import '../ui.dart';
@@ -174,15 +175,16 @@ class _PersonFieldsState extends State<PersonFields> {
         _Box(label: context.t('Country'), child: InputDecorator(decoration: const InputDecoration(), child: Text(context.t('India'), style: const TextStyle(fontWeight: FontWeight.w600)))),
         _Box(
           label: '${context.t('PIN code')} *',
+          // No maxLength (its hidden counter made this box taller than the others).
           child: TextField(
             controller: pin,
             keyboardType: TextInputType.number,
-            maxLength: 6,
-            decoration: InputDecoration(counterText: '', errorText: pinError, errorMaxLines: 3),
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
             onChanged: (t) => setState(() => v.pin = t),
           ),
         ),
       ),
+      if (pinError != null) Padding(padding: const EdgeInsets.only(left: 4, top: 0, bottom: 8), child: Text(pinError!, style: const TextStyle(color: C.red, fontSize: 12))),
     ]);
   }
 }

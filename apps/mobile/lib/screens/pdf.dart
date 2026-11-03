@@ -130,6 +130,78 @@ class _Watermark extends StatelessWidget {
       );
 }
 
+/// Uploads keep going even when the screen that started them scrolls away or closes.
+class PdfUploads extends ChangeNotifier {
+  PdfUploads._();
+  static final instance = PdfUploads._();
+  final Map<String, PdfUploadJob> jobs = {};
+
+  static String keyOf(String tenantId, String memberId, String kind) => '$tenantId/$memberId/$kind';
+
+  Future<Map?> start({required String tenantId, required String memberId, required String kind, required String name, required List<int> bytes}) async {
+    final key = keyOf(tenantId, memberId, kind);
+    if (jobs[key]?.done == false) return null;
+    final job = PdfUploadJob(name, bytes.length);
+    jobs[key] = job;
+    notifyListeners();
+    try {
+      // Small pieces, 4 at a time: fast, and each piece is light for the server.
+      final b64 = base64Encode(bytes);
+      const piece = 300000;
+      final parts = [for (var i = 0; i < b64.length; i += piece) b64.substring(i, i + piece > b64.length ? b64.length : i + piece)];
+      final uploadId = _uuid();
+      var sentChars = 0;
+      Future<void> sendPart(int i) async {
+        for (var attempt = 1; ; attempt++) {
+          try {
+            await Api.instance.put('/programs/$memberId/pdf/$kind/parts/$i', {'tenantId': tenantId, 'uploadId': uploadId, 'data': parts[i]});
+            break;
+          } catch (e) {
+            if (attempt >= 3 || (e is ApiException && e.status >= 400 && e.status < 500 && e.status != 429)) rethrow;
+            await Future.delayed(Api.backoff(attempt));
+          }
+        }
+        sentChars += parts[i].length;
+        job.progress = (sentChars / b64.length * 0.97).clamp(0, 1).toDouble();
+        notifyListeners();
+      }
+      for (var i = 0; i < parts.length; i += 4) {
+        await Future.wait([for (var k = i; k < i + 4 && k < parts.length; k++) sendPart(k)]);
+      }
+      final p = await Api.instance.put('/programs/$memberId/pdf/$kind', {'tenantId': tenantId, 'name': name, 'uploadId': uploadId, 'parts': parts.length, 'size': bytes.length});
+      job.progress = 1;
+      job.result = (p as Map)[kind == 'diet' ? 'dietPdf' : 'workoutPdf'] as Map?;
+      job.done = true;
+      Drip.showLater('Uploaded successfully', kind: DripKind.ok);
+      return job.result;
+    } catch (e) {
+      job.error = e.toString();
+      job.done = true;
+      Drip.showLater(e.toString(), kind: DripKind.error);
+      return null;
+    } finally {
+      notifyListeners();
+      // Forget finished jobs after a moment (the screen has the new PDF by then).
+      Future.delayed(const Duration(seconds: 3), () {
+        if (jobs[key] == job) {
+          jobs.remove(key);
+          notifyListeners();
+        }
+      });
+    }
+  }
+}
+
+class PdfUploadJob {
+  PdfUploadJob(this.name, this.size);
+  final String name;
+  final int size;
+  double progress = 0;
+  bool done = false;
+  Map? result;
+  String? error;
+}
+
 /// Trainer / owner: upload, replace or remove the PDF for one plan.
 class PdfUploadBox extends StatefulWidget {
   const PdfUploadBox({super.key, required this.tenantId, required this.memberId, required this.memberName, required this.kind, required this.meta, required this.onChanged});
@@ -145,12 +217,29 @@ class PdfUploadBox extends StatefulWidget {
 
 class _PdfUploadBoxState extends State<PdfUploadBox> {
   bool busy = false;
-  double? progress; // 0..1 while uploading
-  String? uploadingName;
-  int uploadingSize = 0;
+  bool removed = false;
+  String get key => PdfUploads.keyOf(widget.tenantId, widget.memberId, widget.kind);
+
+  @override
+  void initState() {
+    super.initState();
+    PdfUploads.instance.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    PdfUploads.instance.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (!mounted) return;
+    final j = PdfUploads.instance.jobs[key];
+    if (j != null && j.done && j.result != null && widget.meta?['uploadedAt'] != j.result!['uploadedAt']) widget.onChanged(j.result);
+    setState(() {});
+  }
 
   Future<void> pick() async {
-    final sent = context.t('Uploaded successfully');
     final tooBig = context.t('PDF is too big. Upload a PDF up to 2 MB');
     try {
       final r = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: const ['pdf'], withData: true);
@@ -160,72 +249,37 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
         if (mounted) toast(context, tooBig);
         return;
       }
-      setState(() {
-        busy = true;
-        progress = 0;
-        uploadingName = f.name;
-        uploadingSize = f.bytes!.length;
-      });
-      // Sent in small pieces, two at a time, so big PDFs (up to 2 MB) go through.
-      final b64 = base64Encode(f.bytes!);
-      const piece = 300000;
-      final parts = [for (var i = 0; i < b64.length; i += piece) b64.substring(i, i + piece > b64.length ? b64.length : i + piece)];
-      final uploadId = _uuid();
-      var sentChars = 0;
-      Future<void> sendPart(int i) async {
-        for (var attempt = 0; ; attempt++) {
-          try {
-            await Api.instance.put('/programs/${widget.memberId}/pdf/${widget.kind}/parts/$i', {'tenantId': widget.tenantId, 'uploadId': uploadId, 'data': parts[i]});
-            break;
-          } catch (e) {
-            if (attempt >= 2 || (e is ApiException && e.status >= 400 && e.status < 500)) rethrow;
-            await Future.delayed(Duration(milliseconds: 600 * (attempt + 1)));
-          }
-        }
-        sentChars += parts[i].length;
-        if (mounted) setState(() => progress = (sentChars / b64.length * 0.97).clamp(0, 1).toDouble());
-      }
-      for (var i = 0; i < parts.length; i += 2) {
-        await Future.wait([sendPart(i), if (i + 1 < parts.length) sendPart(i + 1)]);
-      }
-      final p = await Api.instance.put('/programs/${widget.memberId}/pdf/${widget.kind}', {
-        'tenantId': widget.tenantId,
-        'name': f.name,
-        'uploadId': uploadId,
-        'parts': parts.length,
-        'size': f.bytes!.length,
-      });
-      if (mounted) setState(() => progress = 1);
-      widget.onChanged((p as Map)[widget.kind == 'diet' ? 'dietPdf' : 'workoutPdf'] as Map?);
-      if (mounted) toast(context, sent);
+      setState(() => removed = false);
+      final res = await PdfUploads.instance.start(tenantId: widget.tenantId, memberId: widget.memberId, kind: widget.kind, name: f.name, bytes: f.bytes!);
+      if (res != null && mounted) widget.onChanged(res);
     } catch (e) {
       if (mounted) toastError(context, e);
-    } finally {
-      if (mounted) {
-        setState(() {
-          busy = false;
-          progress = null;
-        });
-      }
     }
   }
 
+  /// Gone from the screen at once; deleted on the server in the background.
   Future<void> remove() async {
-    setState(() => busy = true);
+    final before = widget.meta;
+    setState(() => removed = true);
+    widget.onChanged(null);
     try {
       await Api.instance.delete('/programs/${widget.memberId}/pdf/${widget.kind}?tenantId=${widget.tenantId}');
-      widget.onChanged(null);
     } catch (e) {
-      if (mounted) toastError(context, e);
-    } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) {
+        setState(() => removed = false);
+        widget.onChanged(before);
+        toastError(context, e);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final m = widget.meta;
+    final m = removed ? null : widget.meta;
     final p = context.c;
+    final job = PdfUploads.instance.jobs[key];
+    final uploading = job != null && !job.done;
+    final progress = uploading ? job.progress : null;
     return Panel(
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -244,11 +298,11 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(uploadingName ?? '', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-                    Muted(progress! >= 1 ? context.t('Saving…') : context.t('Uploading…'), size: 11.5),
+                    Text(job.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    Muted(progress >= 0.97 ? context.t('Saving…') : context.t('Uploading… you can scroll or leave this screen'), size: 11.5),
                   ]),
                 ),
-                Text('${(progress! * 100).round()}%', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, fontSize: 16)),
+                Text('${(progress * 100).round()}%', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, fontSize: 16)),
               ]),
               const SizedBox(height: 10),
               ClipRRect(
@@ -256,7 +310,7 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
                 child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: p.line, valueColor: AlwaysStoppedAnimation(p.primary)),
               ),
               const SizedBox(height: 6),
-              Muted('${_size(uploadingSize * progress!)} ${context.t('of')} ${_size(uploadingSize)}', size: 11),
+              Muted('${_size(job.size * progress)} ${context.t('of')} ${_size(job.size)}', size: 11),
             ]),
           ),
         ] else if (m != null) ...[
@@ -288,8 +342,8 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
           width: double.infinity,
           child: OutlinedButton.icon(
             style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(44), side: BorderSide(color: p.primary, width: 1.4), foregroundColor: p.primary),
-            onPressed: busy ? null : pick,
-            icon: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.upload_file_rounded, size: 19),
+            onPressed: uploading ? null : pick,
+            icon: uploading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.upload_file_rounded, size: 19),
             label: Text(context.t(m == null ? 'Upload PDF' : 'Change PDF')),
           ),
         ),

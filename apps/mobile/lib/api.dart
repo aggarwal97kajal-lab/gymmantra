@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:isolate';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -66,29 +67,66 @@ class Api {
   String url(String path) => path.startsWith('http') ? path : '$base$path';
   Map<String, String> get authHeaders => token == null ? {} : {'Authorization': 'Bearer $token'};
 
-  Future<dynamic> get(String path) => _send('GET', path);
+  /// GETs for the same path that are already on the way share one request (less load, faster screens).
+  final Map<String, Future<dynamic>> _inFlight = {};
+  Future<dynamic> get(String path) {
+    final key = _k(path);
+    final running = _inFlight[key];
+    if (running != null) return running;
+    final f = _send('GET', path).whenComplete(() => _inFlight.remove(key));
+    _inFlight[key] = f;
+    return f;
+  }
   Future<dynamic> post(String path, [Object? body]) => _send('POST', path, body ?? {});
   Future<dynamic> patch(String path, Object body) => _send('PATCH', path, body);
   Future<dynamic> put(String path, Object body, {void Function(int sent, int total)? onSendProgress}) => _send('PUT', path, body, onSendProgress);
   Future<dynamic> delete(String path) => _send('DELETE', path);
 
+  static final _rand = math.Random();
+
+  /// Wait before try number [attempt] (1, 2, …): exponential backoff with full jitter
+  /// (0.4 s, 0.8 s, 1.6 s … each a random part of that), so thousands of phones never retry together.
+  static Duration backoff(int attempt) {
+    final capMs = math.min(4000, 400 * (1 << (attempt - 1)));
+    return Duration(milliseconds: capMs ~/ 2 + _rand.nextInt(capMs ~/ 2 + 1));
+  }
+
+  /// Safe to send again: reads, and writes that carry their own idempotency key.
+  static bool _retryable(String method, String path, Object? body) => method == 'GET' || (method == 'POST' && path.startsWith('/subscription/payments'));
+
   Future<dynamic> _send(String method, String path, [Object? body, void Function(int, int)? onSendProgress]) async {
-    Response res;
+    late Response res;
     // With a progress meter the body goes as bytes so the total size is known.
     final raw = onSendProgress != null && body != null ? utf8.encode(jsonEncode(body)) : null;
-    try {
-      res = await _dio.request(
-        '$base/api/v1$path',
-        data: raw ?? body,
-        onSendProgress: onSendProgress,
-        options: Options(
-          method: method,
-          headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!, if (raw != null) Headers.contentLengthHeader: raw.length},
-          contentType: body == null ? null : 'application/json',
-        ),
-      );
-    } on DioException {
-      throw ApiException(0, 'Could not reach GymMantra. Check your internet and try again.');
+    final retry = _retryable(method, path, body) && !path.startsWith('/auth/');
+    var attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        res = await _dio.request(
+          '$base/api/v1$path',
+          data: raw ?? body,
+          onSendProgress: onSendProgress,
+          options: Options(
+            method: method,
+            headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!, if (raw != null) Headers.contentLengthHeader: raw.length},
+            contentType: body == null ? null : 'application/json',
+          ),
+        );
+      } on DioException {
+        if (retry && attempt < 3) {
+          await Future.delayed(backoff(attempt));
+          continue;
+        }
+        throw ApiException(0, 'Could not reach GymMantra. Check your internet and try again.');
+      }
+      final sc = res.statusCode ?? 0;
+      // Server busy or restarting: wait a little (with jitter) and try again.
+      if (retry && attempt < 3 && (sc == 429 || sc == 502 || sc == 503 || sc == 504)) {
+        await Future.delayed(backoff(attempt));
+        continue;
+      }
+      break;
     }
     final code = res.statusCode ?? 0;
     if (code >= 200 && code < 300) {

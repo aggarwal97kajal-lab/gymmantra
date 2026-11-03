@@ -24,12 +24,63 @@ String todayYmd() => ymdOf(DateTime.now().toUtc().add(const Duration(hours: 5, m
 
 // ============================================================ calendar
 
+String _weekday(String ymd) => const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][DateTime.parse(ymd).weekday - 1];
+
+/// "7:00 AM" from "07:00".
+String fmtTime(String? hm) {
+  if (hm == null || !hm.contains(':')) return '';
+  final h = int.tryParse(hm.split(':')[0]) ?? 0;
+  final m = hm.split(':')[1];
+  return '${h % 12 == 0 ? 12 : h % 12}:$m ${h < 12 ? 'AM' : 'PM'}';
+}
+
+Future<void> showPlannedSheet(BuildContext context, String ymd, Map? plan) => showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('${ctx.t('PT planned')} · ${ctx.t(_weekday(ymd))} ${fmtDate(ymd)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            Panel(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _kv(ctx, ctx.t('For'), '${ctx.t(_weekday(ymd))} ${fmtDate(ymd)}${plan?['time'] != null ? ', ${fmtTime(plan!['time'] as String)}' : ''}'),
+                if (plan?['byName'] != null) _kv(ctx, ctx.t('Planned by'), plan!['byName'] as String),
+                if (plan?['at'] != null) _kv(ctx, ctx.t('Planned on'), fmtDateTime(plan!['at'] as String)),
+                if (plan == null) Muted(ctx.t('Planned before times were saved — no more details.'), size: 12.5),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+
+Widget _kv(BuildContext context, String k, String v) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        SizedBox(width: 96, child: Text(k, style: TextStyle(color: context.c.mut, fontSize: 13))),
+        Expanded(child: Text(v, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5))),
+      ]),
+    );
+
+/// The next planned PT day (today or later), for the member's card.
+MapEntry<String, Map?>? nextPlanned(Map pt) {
+  final log = (pt['log'] as Map?) ?? const {};
+  final plans = (pt['plans'] as Map?) ?? const {};
+  final today = todayYmd();
+  final days = log.entries.where((e) => e.value == 'PLANNED' && (e.key as String).compareTo(today) >= 0).map((e) => e.key as String).toList()..sort();
+  if (days.isEmpty) return null;
+  return MapEntry(days.first, plans[days.first] as Map?);
+}
+
 const _monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
 /// Month calendar of PT sessions. Green = done, red = missed, dashed = planned.
 class PtCalendar extends StatefulWidget {
-  const PtCalendar({super.key, required this.log, this.startDate, this.endDate, this.onTapDay, this.selected});
+  const PtCalendar({super.key, required this.log, this.startDate, this.endDate, this.onTapDay, this.selected, this.plans});
   final Map log;
+  /// Planned days: {date: {time, byName, at}}. Tapping a planned day shows them.
+  final Map? plans;
   final String? startDate;
   final String? endDate;
   final ValueChanged<String>? onTapDay;
@@ -83,6 +134,17 @@ class _PtCalendarState extends State<PtCalendar> {
             alignment: Alignment.center,
             child: Text('$d', style: TextStyle(fontWeight: ymd == today ? FontWeight.w900 : FontWeight.w700, fontSize: 13, color: fg, decoration: ymd == today ? TextDecoration.underline : null)),
           );
+          if (mark == 'PLANNED' && widget.plans != null) {
+            // Planned day: show for which day and time, who planned it and when (trainer, owner and member).
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (widget.onTapDay != null && inRange) widget.onTapDay!(ymd);
+                showPlannedSheet(context, ymd, widget.plans![ymd] as Map?);
+              },
+              child: cell,
+            );
+          }
           if (widget.onTapDay == null || !inRange) return cell;
           return GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => widget.onTapDay!(ymd), child: cell);
         }),
@@ -506,9 +568,31 @@ class MyPtScreen extends ConsumerWidget {
           else ...[
             _SessionStats(pt: p),
             const SizedBox(height: 12),
-            PtCalendar(log: (p['log'] as Map?) ?? const {}, startDate: p['startDate'] as String?, endDate: p['endDate'] as String?),
+            Builder(builder: (_) {
+              final next = nextPlanned(p);
+              if (next == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Panel(
+                  onTap: () => showPlannedSheet(context, next.key, next.value),
+                  child: Row(children: [
+                    const IconTile(Icons.event_available_rounded, color: C.blue),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Muted(context.t('Next PT'), size: 12),
+                        Text('${context.t(_weekday(next.key))} ${fmtDate(next.key)}${next.value?['time'] != null ? ' · ${fmtTime(next.value!['time'] as String)}' : ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                        if (next.value?['byName'] != null)
+                          Muted(context.t('{who} planned it on {date}', {'who': next.value!['byName'], 'date': fmtDate(next.value!['at'] as String?)}), size: 12),
+                      ]),
+                    ),
+                  ]),
+                ),
+              );
+            }),
+            PtCalendar(log: (p['log'] as Map?) ?? const {}, plans: (p['plans'] as Map?) ?? const {}, startDate: p['startDate'] as String?, endDate: p['endDate'] as String?),
             const SizedBox(height: 8),
-            Muted(context.t('Your trainer marks each session here.'), size: 12),
+            Muted(context.t('Your trainer marks each session here. Tap a planned (dashed) day to see its time.'), size: 12),
           ],
         ]),
       ),
@@ -631,9 +715,16 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
   bool busy = false;
 
   Future<void> mark(String date, String m) async {
+    String? time;
+    if (m == 'PLANNED') {
+      // Time of the planned session (optional): member and owner see it.
+      final t = await showTimePicker(context: context, initialTime: const TimeOfDay(hour: 7, minute: 0), helpText: context.t('PT time (optional)'), cancelText: context.t('No time'));
+      if (t != null) time = '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+      if (!mounted) return;
+    }
     setState(() => busy = true);
     try {
-      final r = await Api.instance.post('/pt/${pt['id']}/session', {'tenantId': widget.tenantId, 'date': date, 'mark': m});
+      final r = await Api.instance.post('/pt/${pt['id']}/session', {'tenantId': widget.tenantId, 'date': date, 'mark': m, if (time != null) 'time': time});
       setState(() => pt = {...pt, ...(r as Map)});
       ref.invalidate(trainerClientsProvider);
       ref.invalidate(ownerPtProvider('ACTIVE'));
@@ -715,6 +806,7 @@ class _PtClientState extends ConsumerState<PtClientScreen> {
           const SizedBox(height: 12),
           PtCalendar(
             log: (pt['log'] as Map?) ?? const {},
+            plans: (pt['plans'] as Map?) ?? const {},
             startDate: pt['startDate'] as String?,
             endDate: pt['endDate'] as String?,
             selected: widget.canMark ? sel : null,

@@ -11,8 +11,9 @@ import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'home.dart' show openUrl, waLink;
+import '../upi.dart';
+import 'person.dart' show BusyCover;
 
 final subscriptionProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/subscription'));
 
@@ -201,10 +202,6 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => PaymentLockedScreen(until: locked, supportWhatsapp: sub['supportWhatsapp'] as String?)));
       return;
     }
-    if (sub['pendingPayment'] != null) {
-      toast(context, context.t('Your last payment is still being checked. You will get a notification soon.'), kind: DripKind.info);
-      return;
-    }
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlanPayScreen(plan: plan, yearly: yearly))).then((_) => ref.invalidate(subscriptionProvider));
   }
 
@@ -251,30 +248,14 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
                     Expanded(child: Text(context.t('Your free trial has ended. Choose a plan to unlock features again.'), style: const TextStyle(fontWeight: FontWeight.w700))),
                   ]),
                 ),
-              if (d['pendingPayment'] != null) ...[
-                const SizedBox(height: 12),
-                Panel(
-                  color: C.warn.withAlpha(30),
-                  child: Row(children: [
-                    const IconTile(Icons.hourglass_top_rounded, color: C.warn, size: 42),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(context.t('Payment is being checked'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                        Muted(
-                          context.t('{plan} · {amount} · UTR {utr}. Your plan turns on as soon as GymMantra sees the money.', {'plan': d['pendingPayment']['planName'], 'amount': rupees(d['pendingPayment']['amount'] as num?), 'utr': d['pendingPayment']['utr']}),
-                          size: 12.5,
-                        ),
-                      ]),
-                    ),
-                  ]),
-                ),
-              ] else if (d['lastPayment']?['status'] == 'REJECTED' && d['lockedUntil'] == null) ...[
+              if (d['lastPayment']?['status'] == 'CANCELLED' || d['lastPayment']?['status'] == 'FAILED') ...[
                 const SizedBox(height: 12),
                 Panel(
                   color: C.red.withAlpha(22),
                   child: Text(
-                    context.t('We could not find your last payment (UTR {utr}). {reason}', {'utr': d['lastPayment']['utr'], 'reason': d['lastPayment']['reason'] ?? ''}),
+                    d['lastPayment']['status'] == 'CANCELLED'
+                        ? context.t('We did not receive your last payment ({id}). The plan was stopped — please pay again.', {'id': d['lastPayment']['payId']})
+                        : context.t('Your last payment did not go through ({id}). Please pay again.', {'id': d['lastPayment']['payId']}),
                     style: const TextStyle(fontWeight: FontWeight.w600, color: C.red),
                   ),
                 ),
@@ -299,7 +280,7 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
                 ]),
               ),
               const SizedBox(height: 16),
-              SectionTitle(context.t('Plan history')),
+              SectionTitle(context.t('Payment history')),
               if (bills.isEmpty) Muted(context.t('No bills yet.')),
               for (final b in bills)
                 Padding(
@@ -316,7 +297,10 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
                           Muted('${fmtDate(b['periodStart'] as String?)} – ${fmtDate(b['periodEnd'] as String?)} · ${b['number']}', size: 11.5),
                         ]),
                       ),
-                      Text(rupees(b['total'] as num?), style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text(rupees(b['total'] as num?), style: TextStyle(fontWeight: FontWeight.w800, decoration: b['cancelledAt'] != null ? TextDecoration.lineThrough : null)),
+                        if (b['cancelledAt'] != null) Text(context.t('Cancelled'), style: const TextStyle(color: C.red, fontSize: 11, fontWeight: FontWeight.w800)),
+                      ]),
                     ]),
                   ),
                 ),
@@ -335,22 +319,6 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
 
 // ============================================================ choose plan → coupon → pay by UPI
 
-class UpiApp {
-  const UpiApp(this.name, this.scheme, this.color, this.letter);
-  final String name;
-  final String scheme; // null-like '' = any UPI app
-  final Color color;
-  final String letter;
-}
-
-const upiApps = [
-  UpiApp('Google Pay', 'tez://upi/pay', Color(0xFF1A73E8), 'G'),
-  UpiApp('PhonePe', 'phonepe://pay', Color(0xFF5F259F), 'P'),
-  UpiApp('Paytm', 'paytmmp://pay', Color(0xFF00BAF2), 'P'),
-  UpiApp('BHIM', 'upi://pay', Color(0xFF00897B), 'B'),
-  UpiApp('Other UPI app', 'upi://pay', Color(0xFF475569), '₹'),
-];
-
 class PlanPayScreen extends ConsumerStatefulWidget {
   const PlanPayScreen({super.key, required this.plan, required this.yearly});
   final Map plan;
@@ -366,7 +334,9 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
   String? codeError;
   bool loading = true;
   bool checking = false;
+  bool paying = false;
   String? error;
+  List<UpiApp> apps = const [];
 
   @override
   void initState() {
@@ -374,6 +344,9 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
     final pending = Prefs.getString('pendingCoupon');
     if (pending != null && pending.isNotEmpty) code.text = pending;
     load(code.text.trim().isEmpty ? null : code.text.trim(), first: true);
+    installedUpiApps().then((a) {
+      if (mounted) setState(() => apps = a);
+    });
   }
 
   Future<void> load(String? coupon, {bool first = false}) async {
@@ -408,130 +381,116 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
     }
   }
 
-  Uri upiUri(UpiApp app, Map q) {
-    final gym = ref.read(sessionProvider).myGym ?? {};
-    final note = 'GymMantra ${q['planName']} ${widget.yearly ? 'yearly' : 'monthly'} ${gym['gymCode'] ?? ''}'.trim();
-    final params = {'pa': q['upiId'] as String, 'pn': q['payeeName'] as String? ?? 'GymMantra', 'am': (q['total'] as num).toStringAsFixed(2), 'cu': 'INR', 'tn': note};
-    return Uri.parse('${app.scheme}?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}');
-  }
-
-  Future<void> pay() async {
+  /// Pick a UPI app (real icons from the phone).
+  Future<void> choose() async {
     final q = quote;
     if (q == null) return;
-    final app = await showModalBottomSheet<UpiApp>(
+    if (q['lockedUntil'] != null) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => PaymentLockedScreen(until: q['lockedUntil'] as String)));
+      return;
+    }
+    final picked = await showModalBottomSheet<Object>(
       context: context,
       builder: (ctx) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Text(ctx.t('Pay {amount} with', {'amount': rupees(q['total'] as num?)}), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 4),
-            Muted('UPI ID: ${q['upiId']}', size: 12.5),
-            const SizedBox(height: 10),
-            for (final a in upiApps)
-              ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                leading: CircleAvatar(backgroundColor: a.color, child: Text(a.letter, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
-                title: Text(ctx.t(a.name), style: const TextStyle(fontWeight: FontWeight.w700)),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pop(ctx, a),
+            const SizedBox(height: 2),
+            Muted(apps.isEmpty ? ctx.t('Choose any UPI app on your phone') : ctx.t('UPI apps on your phone'), size: 12.5),
+            const SizedBox(height: 14),
+            if (apps.isNotEmpty)
+              GridView.count(
+                crossAxisCount: 4,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 10,
+                childAspectRatio: 0.82,
+                children: [
+                  for (final a in apps)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => Navigator.pop(ctx, a),
+                      child: Column(children: [
+                        SizedBox(width: 52, height: 52, child: a.icon == null ? const Icon(Icons.account_balance_wallet_rounded, size: 40) : Image.memory(a.icon!, gaplessPlayback: true)),
+                        const SizedBox(height: 6),
+                        Text(a.name, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
+                ],
               ),
-            const SizedBox(height: 4),
-            OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: q['upiId'] as String));
-                Navigator.pop(ctx);
-                toast(context, context.t('UPI ID copied. Pay {amount} from any UPI app, then enter the UTR here.', {'amount': rupees(q['total'] as num?)}));
-                askUtr(null);
-              },
-              icon: const Icon(Icons.copy_rounded),
-              label: Text(ctx.t('Copy UPI ID and pay myself')),
-            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(onPressed: () => Navigator.pop(ctx, 'other'), icon: const Icon(Icons.apps_rounded), label: Text(ctx.t('Other UPI app'))),
           ]),
         ),
       ),
     );
-    if (app == null || !mounted) return;
-    var opened = false;
-    try {
-      opened = await launchUrl(upiUri(app, q), mode: LaunchMode.externalNonBrowserApplication);
-    } catch (_) {
-      opened = false;
-    }
-    if (!opened && app.scheme != 'upi://pay') {
-      try {
-        opened = await launchUrl(upiUri(upiApps.last, q), mode: LaunchMode.externalNonBrowserApplication);
-      } catch (_) {}
-    }
-    if (!mounted) return;
-    if (!opened) toast(context, context.t('{app} is not on this phone. Choose another UPI app.', {'app': app.name}), kind: DripKind.error);
-    // Coming back from the UPI app: ask for the transaction ID.
-    await Future<void>.delayed(const Duration(milliseconds: 600));
-    if (mounted && opened) askUtr(app.name);
+    if (picked == null || !mounted) return;
+    await pay(picked is UpiApp ? picked : null);
   }
 
-  Future<void> askUtr(String? appName) async {
+  Future<void> pay(UpiApp? app) async {
     final q = quote!;
-    final utr = TextEditingController();
-    final sent = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) {
-        var busy = false;
-        String? err;
-        return StatefulBuilder(
-          builder: (ctx, set) => Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(ctx.t('Payment done?'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 4),
-              Muted(ctx.t('Enter the 12-digit UPI transaction ID (UTR / UPI Ref No.) from your UPI app. GymMantra checks it and turns on your plan.'), size: 13),
-              const SizedBox(height: 14),
-              TextField(
-                controller: utr,
-                autofocus: true,
-                keyboardType: TextInputType.text,
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')), LengthLimitingTextInputFormatter(30)],
-                style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.4),
-                decoration: InputDecoration(labelText: ctx.t('UPI transaction ID (UTR)'), hintText: '412345678901'),
-              ),
-              ErrorText(err),
-              const SizedBox(height: 14),
-              FilledButton(
-                onPressed: busy
-                    ? null
-                    : () async {
-                        set(() {
-                          busy = true;
-                          err = null;
-                        });
-                        try {
-                          await Api.instance.post('/subscription/payments', {
-                            'planId': widget.plan['id'],
-                            'cycle': widget.yearly ? 'ANNUAL' : 'MONTHLY',
-                            if (applied != null) 'coupon': applied,
-                            'utr': utr.text.trim(),
-                            if (appName != null) 'app': appName,
-                          });
-                          if (ctx.mounted) Navigator.pop(ctx, true);
-                        } catch (e) {
-                          set(() {
-                            busy = false;
-                            err = e.toString();
-                          });
-                        }
-                      },
-                child: busy ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : Text(ctx.t('Send for checking')),
-              ),
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Payment did not go through'))),
-            ]),
+    setState(() {
+      paying = true;
+      error = null;
+    });
+    final key = newPaymentKey();
+    try {
+      // 1. The payment record (same key = same payment, even if sent twice).
+      final p = await Api.instance.post('/subscription/payments', {
+        'key': key,
+        'planId': widget.plan['id'],
+        'cycle': widget.yearly ? 'ANNUAL' : 'MONTHLY',
+        if (applied != null) 'coupon': applied,
+      }) as Map;
+      // 2. The UPI app. The payment ID goes in the note so it can be found in the bank history.
+      final answer = await payWithUpi(
+        upiId: p['upiId'] as String,
+        name: (p['payeeName'] as String?) ?? 'GymMantra',
+        amount: p['amount'] as num,
+        note: 'GymMantra ${p['planName']} ${p['payId']}',
+        ref: p['payId'] as String,
+        package: app?.package,
+      );
+      if (!mounted) return;
+      var status = answer.status;
+      if (!answer.cameBack || status.isEmpty) {
+        // Came back without a clear answer: ask once.
+        final paid = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => AlertDialog(
+            title: Text(ctx.t('Did the payment go through?')),
+            content: Text(ctx.t('If {amount} was paid in your UPI app, tap "Yes, paid". Your plan turns on at once.', {'amount': rupees(p['amount'] as num?)})),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('No, not paid'))),
+              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Yes, paid'))),
+            ],
           ),
         );
-      },
-    );
-    if (sent == true && mounted) {
-      toast(context, context.t('Thanks! We are checking your payment of {amount}. Your plan turns on soon.', {'amount': rupees(q['total'] as num?)}), kind: DripKind.ok);
-      Navigator.of(context).pop();
+        if (paid != true) {
+          setState(() => error = context.t('Payment not done. Your plan is not changed — you can pay again.'));
+          return;
+        }
+        status = 'SUBMITTED';
+      }
+      // 3. Plan on at once (or nothing, if the UPI app said it failed).
+      final r = await Api.instance.post('/subscription/payments/$key/done', {'upiStatus': status, if (answer.ref != null) 'upiRef': answer.ref, 'app': app?.name ?? 'UPI'}) as Map;
+      if (!mounted) return;
+      final pay = r['payment'] as Map;
+      if (pay['status'] != 'PAID') {
+        setState(() => error = context.t('The UPI app says the payment failed. No money was taken for the plan — try again.'));
+        return;
+      }
+      ref.invalidate(subscriptionProvider);
+      await Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => PlanActiveScreen(payment: pay, bill: r['bill'] as Map?)));
+    } on PlatformException {
+      if (mounted) setState(() => error = context.t('Could not open the UPI app. Choose another app.'));
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => paying = false);
     }
   }
 
@@ -550,88 +509,125 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
     final unlocks = (widget.plan['unlocks'] as List?)?.cast<String>() ?? const [];
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Choose plan'))),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-        Panel(
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${widget.plan['name']} · ${context.t(widget.yearly ? 'Yearly' : 'Monthly')}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                Muted(unlocks.isEmpty ? context.t('Basic features') : unlocks.map((k) => context.t(featureNames[k] ?? k)).join(', '), size: 12.5),
-              ]),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(color: p.primary.withAlpha(30), borderRadius: BorderRadius.circular(99)),
-              child: Text(context.t('Selected'), style: TextStyle(color: p.primary, fontWeight: FontWeight.w700, fontSize: 12)),
-            ),
-          ]),
-        ),
-        const SizedBox(height: 16),
-        Muted(context.t('Coupon code'), size: 13),
-        const SizedBox(height: 6),
-        TextField(
-          controller: code,
-          textCapitalization: TextCapitalization.characters,
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9-]')), LengthLimitingTextInputFormatter(20)],
-          style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.4),
-          onChanged: (_) {
-            if (applied != null) {
-              setState(() => applied = null);
-              load(null);
-            }
-          },
-          decoration: InputDecoration(
-            hintText: context.t('Have a code? Type it here'),
-            errorText: codeError,
-            enabledBorder: applied != null ? OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: C.ok, width: 1.6)) : null,
-            suffixIcon: applied != null
-                ? const Padding(padding: EdgeInsets.only(right: 12), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_rounded, color: C.ok, size: 18), SizedBox(width: 4), Text('Applied', style: TextStyle(color: C.ok, fontWeight: FontWeight.w700))]))
-                : TextButton(onPressed: checking || code.text.trim().isEmpty ? null : () => load(code.text.trim()), child: checking ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(context.t('Apply'))),
-          ),
-        ),
-        const SizedBox(height: 14),
-        if (loading) const ListSkeleton(),
-        if (error != null) ErrorText(error),
-        if (q != null)
+      body: Stack(children: [
+        ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
           Panel(
-            child: Column(children: [
-              row(context.t('Plan price'), rupees(q['rate'] as num?), strike: (q['discount'] as num) > 0, color: (q['discount'] as num) > 0 ? p.mut : null),
-              if ((q['discount'] as num) > 0)
-                row(
-                  '${q['coupon']['code']} (${q['coupon']['kind'] == 'PERCENT' ? '${q['coupon']['value']}% off' : '${rupees(q['coupon']['value'] as num?)} off'})',
-                  '− ${rupees(q['discount'] as num?)}',
-                  color: C.ok,
-                ),
-              if (gst != null) ...[
-                row(context.t('Taxable value'), rupees(q['taxable'] as num?)),
-                if (gst['type'] == 'CGST_SGST') ...[
-                  row('CGST ${(gst['rate'] as num) / 2}%', rupees(gst['cgst'] as num?)),
-                  row('SGST ${(gst['rate'] as num) / 2}%', rupees(gst['sgst'] as num?)),
-                ] else
-                  row('IGST ${gst['rate']}%', rupees(gst['igst'] as num?)),
-              ],
-              const Divider(),
-              row(context.t('You pay'), rupees(q['total'] as num?), bold: true, color: p.primary),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${widget.plan['name']} · ${context.t(widget.yearly ? 'Yearly' : 'Monthly')}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                  Muted(unlocks.isEmpty ? context.t('Basic features') : unlocks.map((k) => context.t(featureNames[k] ?? k)).join(', '), size: 12.5),
+                ]),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: p.primary.withAlpha(30), borderRadius: BorderRadius.circular(99)),
+                child: Text(context.t('Selected'), style: TextStyle(color: p.primary, fontWeight: FontWeight.w700, fontSize: 12)),
+              ),
             ]),
           ),
-        const SizedBox(height: 16),
-        FilledButton(
-          style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-          onPressed: q == null || checking ? null : pay,
-          child: Text(q == null ? context.t('Pay') : context.t('Pay {amount}', {'amount': rupees(q['total'] as num?)})),
-        ),
-        const SizedBox(height: 8),
-        if (q != null) Center(child: Muted(context.t('Only {amount} will be charged · UPI', {'amount': rupees(q['total'] as num?)}), size: 12)),
-        const SizedBox(height: 18),
-        Center(
-          child: TextButton(
-            onPressed: () => askUtr(null),
-            child: Text(context.t('Already paid? Enter the UTR')),
+          const SizedBox(height: 16),
+          Muted(context.t('Coupon code'), size: 13),
+          const SizedBox(height: 6),
+          TextField(
+            controller: code,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9-]')), LengthLimitingTextInputFormatter(20)],
+            style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.4),
+            onChanged: (_) {
+              if (applied != null) {
+                setState(() => applied = null);
+                load(null);
+              } else {
+                setState(() {});
+              }
+            },
+            decoration: InputDecoration(
+              hintText: context.t('Have a code? Type it here'),
+              errorText: codeError,
+              enabledBorder: applied != null ? OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: C.ok, width: 1.6)) : null,
+              suffixIcon: applied != null
+                  ? Padding(padding: const EdgeInsets.only(right: 12), child: Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.check_rounded, color: C.ok, size: 18), const SizedBox(width: 4), Text(context.t('Applied'), style: const TextStyle(color: C.ok, fontWeight: FontWeight.w700))]))
+                  : TextButton(onPressed: checking || code.text.trim().isEmpty ? null : () => load(code.text.trim()), child: checking ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : Text(context.t('Apply'))),
+            ),
           ),
-        ),
+          const SizedBox(height: 14),
+          if (loading) const ListSkeleton(),
+          if (q != null)
+            Panel(
+              child: Column(children: [
+                row(context.t('Plan price'), rupees(q['rate'] as num?), strike: (q['discount'] as num) > 0, color: (q['discount'] as num) > 0 ? p.mut : null),
+                if ((q['discount'] as num) > 0)
+                  row(
+                    '${q['coupon']['code']} (${q['coupon']['kind'] == 'PERCENT' ? '${q['coupon']['value']}% off' : '${rupees(q['coupon']['value'] as num?)} off'})',
+                    '− ${rupees(q['discount'] as num?)}',
+                    color: C.ok,
+                  ),
+                if (gst != null) ...[
+                  row(context.t('Taxable value'), rupees(q['taxable'] as num?)),
+                  if (gst['type'] == 'CGST_SGST') ...[
+                    row('CGST ${(gst['rate'] as num) / 2}%', rupees(gst['cgst'] as num?)),
+                    row('SGST ${(gst['rate'] as num) / 2}%', rupees(gst['sgst'] as num?)),
+                  ] else
+                    row('IGST ${gst['rate']}%', rupees(gst['igst'] as num?)),
+                ],
+                const Divider(),
+                row(context.t('You pay'), rupees(q['total'] as num?), bold: true, color: p.primary),
+              ]),
+            ),
+          if (error != null) ...[const SizedBox(height: 10), ErrorText(error)],
+          const SizedBox(height: 16),
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+            onPressed: q == null || checking || paying ? null : choose,
+            child: Text(q == null ? context.t('Pay') : context.t('Pay {amount}', {'amount': rupees(q['total'] as num?)})),
+          ),
+          const SizedBox(height: 8),
+          if (q != null) Center(child: Muted(context.t('Only {amount} will be charged · UPI · plan turns on at once', {'amount': rupees(q['total'] as num?)}), size: 12, align: TextAlign.center)),
+        ]),
+        if (paying) BusyCover(text: context.t('Waiting for the UPI app…')),
       ]),
     );
   }
+}
+
+/// Paid: plan is on. Receipt is one tap away.
+class PlanActiveScreen extends StatelessWidget {
+  const PlanActiveScreen({super.key, required this.payment, this.bill});
+  final Map payment;
+  final Map? bill;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(
+          child: ListView(padding: const EdgeInsets.fromLTRB(22, 50, 22, 28), children: [
+            Center(
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0.4, end: 1.0),
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.elasticOut,
+                builder: (_, v, child) => Transform.scale(scale: v, child: child),
+                child: Container(width: 92, height: 92, decoration: BoxDecoration(color: C.ok.withAlpha(36), shape: BoxShape.circle), child: const Icon(Icons.check_rounded, color: C.ok, size: 50)),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Center(child: Text(context.t('{plan} plan active!', {'plan': payment['planName']}), style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))),
+            const SizedBox(height: 6),
+            Muted(
+              '${rupees(payment['amount'] as num?)} ${context.t('paid')}${payment['couponCode'] != null ? ' · ${payment['couponCode']}' : ''}\n${context.t('Payment ID')}: ${payment['payId']}${bill?['periodEnd'] != null ? '\n${context.t('Active till {date}', {'date': fmtDate(bill!['periodEnd'] as String?)})}' : ''}',
+              align: TextAlign.center,
+            ),
+            const SizedBox(height: 26),
+            if (bill != null)
+              FilledButton.icon(
+                onPressed: () => context.pushReplacement('/o/bill/${bill!['id']}'),
+                icon: const Icon(Icons.receipt_long_rounded),
+                label: Text(context.t('See receipt')),
+              ),
+            const SizedBox(height: 10),
+            OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: Text(context.t('Done'))),
+          ]),
+        ),
+      );
 }
 
 /// 3 failed payments: payment is paused for 24 hours.
@@ -909,11 +905,15 @@ class ReceiptPaper extends StatelessWidget {
                 if (bill['ref'] != null) Text('Ref: ${bill['ref']}', style: t(10.5, c: const Color(0xFF475569))),
                 line('Place of supply', pos),
                 const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                  decoration: BoxDecoration(border: Border.all(color: const Color(0xFF16A34A), width: 1.6), borderRadius: BorderRadius.circular(5)),
-                  child: Text('PAID', style: t(11, w: FontWeight.w900, c: const Color(0xFF16A34A))),
-                ),
+                Builder(builder: (_) {
+                  final cancelled = bill['cancelledAt'] != null;
+                  final col = cancelled ? const Color(0xFFDC2626) : const Color(0xFF16A34A);
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                    decoration: BoxDecoration(border: Border.all(color: col, width: 1.6), borderRadius: BorderRadius.circular(5)),
+                    child: Text(cancelled ? 'CANCELLED' : 'PAID', style: t(11, w: FontWeight.w900, c: col)),
+                  );
+                }),
               ]),
             ]),
             const SizedBox(height: 10),

@@ -224,8 +224,6 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
         ),
         const SizedBox(height: 12),
         Center(child: Text(name, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
-        const SizedBox(height: 2),
-        Center(child: Muted([u['phone'], u['email']].where((x) => x != null).join(' · '), align: TextAlign.center)),
         const SizedBox(height: 20),
         Panel(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -594,7 +592,7 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
         }),
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
-          child: TextField(controller: pin, keyboardType: TextInputType.number, maxLength: 6, decoration: InputDecoration(labelText: context.t('PIN code'), counterText: '', prefixIcon: const Icon(Icons.pin_drop_outlined))),
+          child: TextField(controller: pin, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)], decoration: InputDecoration(labelText: context.t('PIN code'), prefixIcon: const Icon(Icons.pin_drop_outlined))),
         ),
         if (cur['country'] != null) Padding(padding: const EdgeInsets.only(bottom: 12, left: 4), child: Muted('${context.t('Country')}: ${cur['country']}', size: 12.5)),
         const SizedBox(height: 4),
@@ -645,8 +643,17 @@ class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
   String? error;
 
   @override
+  void initState() {
+    super.initState();
+    // Fresh account info, so the "current password" box is right even for an old saved login.
+    ref.read(sessionProvider).refreshUser().catchError((_) {});
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasPw = ref.watch(sessionProvider).user?['hasPassword'] == true;
+    final u0 = ref.watch(sessionProvider).user ?? {};
+    // Everyone with a password types the old one first. Only a Google-only account (no password yet) skips it.
+    final hasPw = u0['hasPassword'] != false || u0['hasGoogle'] != true;
     Widget box(TextEditingController c, String label) => Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: TextField(
