@@ -896,7 +896,7 @@ describe('branches', () => {
     expect(qr2.body.joinText).toBe(`gymmantra-join:${br.body.code}`);
     const ci = await h.api.post('/me/checkin', { code: qr2.body.text }, mem.token);
     expect(ci.status).toBe(201);
-    expect(ci.body.gym.branchName).toBe('Dwarka');
+    expect(ci.body.gym.name).toBe('Dwarka'); // another branch shows only its own name
     expect((await h.api.get('/attendance/today', A.token, B)).body.checkins).toBe(1);
     expect((await h.api.get('/attendance/today', A.token)).body.checkins).toBe(0);
     // offers follow the branch
