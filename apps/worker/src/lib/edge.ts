@@ -7,7 +7,7 @@ const HOST = 'https://edge-cache.gymmantra.internal/';
 
 /** Cloudflare KV (shared by every Worker instance everywhere). Set by worker.ts when bound. */
 interface Kv {
-  get(key: string, type: 'json'): Promise<unknown>;
+  get(key: string, opts: { type: 'json'; cacheTtl?: number }): Promise<unknown>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
 }
 let kv: Kv | null = null;
@@ -26,7 +26,7 @@ function cacheApi(): Cache | null {
 export async function edgeGet<T>(key: string): Promise<T | null> {
   if (kv) {
     try {
-      const v = (await kv.get(key, 'json')) as T | null;
+      const v = (await kv.get(key, { type: 'json', cacheTtl: 300 })) as T | null; // kept hot in this data centre for 5 min
       if (v != null) return v;
     } catch {
       /* fall through */
