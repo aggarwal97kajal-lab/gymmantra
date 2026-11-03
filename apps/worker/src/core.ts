@@ -42,6 +42,9 @@ export interface UserDoc {
   country?: string | null;
   pincode?: string | null;
   createdByGym?: { tenantId: string; gymName: string } | null; // gym owner added this member; they set a password from the email link
+  mustSetPassword?: boolean; // gym-made account: first login (e.g. Google) asks for a password
+  initPw?: string | null; // server-only random first password of a gym-made account (never sent to apps)
+  detailsNeeded?: boolean; // signed up with Google: DOB, state, city, PIN still to fill
   staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean }>;
 }
 
@@ -390,7 +393,8 @@ export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
   const b = t.branches.find((x) => x.id === id) ?? null;
   const multi = t.branches.length > 1;
   return {
-    name: multi && b ? `${t.name} – ${b.name}` : t.name,
+    // Main (first) branch shows the gym's name; any other branch shows only its own name.
+    name: multi && b && b.id !== t.branches[0]?.id ? b.name : t.name,
     gymName: t.name,
     branchId: b?.id ?? null,
     branchName: b?.name ?? null,

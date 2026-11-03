@@ -49,18 +49,27 @@ async function uniqueGymCode(r: Reader, name: string) {
  * first time the gym is opened (the first branch keeps the gym's code).
  */
 export async function ensureBranchCodes(store: Store, tenantId: string, tenant: TenantDoc): Promise<TenantDoc> {
-  const missing = tenant.branches.filter((b, i) => i > 0 && !b.code);
-  if (!missing.length) return tenant;
+  // Every branch after the first needs a code that starts with its own name (Athelete → ATHE482).
+  // Old codes made from the gym name keep working for 30 days, then stop.
+  const base = (n: string) => n.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4).padEnd(3, 'X');
+  const fix = tenant.branches.filter((b, i) => i > 0 && (!b.code || !b.code.startsWith(base(b.name))));
+  if (!fix.length) return tenant;
   const codes = new Map<string, string>();
-  for (const b of missing) {
+  for (const b of fix) {
     let code = await uniqueGymCode(store, b.name);
     while ([...codes.values()].includes(code)) code = await uniqueGymCode(store, b.name);
     codes.set(b.id, code);
   }
+  const until = new Date(Date.now() + 30 * 86400000).toISOString();
   return store.tx(async (t) => {
     const cur = (await t.get<TenantDoc>(P.tenant(tenantId)))!;
-    const branches = cur.branches.map((b, i) => (i > 0 && !b.code && codes.has(b.id) ? { ...b, code: codes.get(b.id)! } : b));
-    for (const b of branches) if (codes.get(b.id) === b.code) t.create(P.gymCode(b.code!), { tenantId, branchId: b.id });
+    const branches = cur.branches.map((b) => {
+      const code = codes.get(b.id);
+      if (!code || (b.code && b.code.startsWith(base(b.name)))) return b;
+      if (b.code && b.code !== cur.gymCode) t.set(P.gymCode(b.code), { tenantId, branchId: b.id, expiresAt: until });
+      t.create(P.gymCode(code), { tenantId, branchId: b.id });
+      return { ...b, code };
+    });
     const next = { ...cur, branches };
     t.set(P.tenant(tenantId), next);
     return next;

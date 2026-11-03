@@ -99,7 +99,8 @@ export function meRoutes(app: App) {
     const u = await authenticate(c);
     const { store } = c.var.deps;
     const code = (c.req.query('code') ?? '').trim().toUpperCase();
-    const ref = code ? await store.get<{ tenantId: string; branchId?: string }>(P.gymCode(code)) : null;
+    const ref0 = code ? await store.get<{ tenantId: string; branchId?: string; expiresAt?: string }>(P.gymCode(code)) : null;
+    const ref = ref0 && (!ref0.expiresAt || Date.parse(ref0.expiresAt) > Date.now()) ? ref0 : null; // old branch codes stop after 30 days
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
     if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
     const bid = branchOf(t, ref.branchId);
@@ -129,7 +130,8 @@ export function meRoutes(app: App) {
     const { store } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const code = str(b, 'gymCode', { max: 20, label: 'the gym code' }).toUpperCase();
-    const ref = await store.get<{ tenantId: string; branchId?: string }>(P.gymCode(code));
+    const ref0 = await store.get<{ tenantId: string; branchId?: string; expiresAt?: string }>(P.gymCode(code));
+    const ref = ref0 && (!ref0.expiresAt || Date.parse(ref0.expiresAt) > Date.now()) ? ref0 : null; // old branch codes stop after 30 days
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
     if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
     const tid = ref.tenantId;
@@ -278,6 +280,9 @@ export function meRoutes(app: App) {
       const d = personDetails({ ...cur, ...Object.fromEntries(['state', 'city', 'country', 'pincode'].filter((k) => b[k] !== undefined).map((k) => [k, b[k]])) });
       Object.assign(parts, { state: d.state, city: d.city, country: d.country, pincode: d.pincode });
     }
+    // Google sign-up: the extra details are done once DOB, state, city and PIN are in.
+    const merged = { ...u, ...parts };
+    if (u.detailsNeeded && merged.dob && merged.state && merged.city && merged.pincode) parts.detailsNeeded = false;
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
     const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'NONE'] as const, true);
     const appRole = roleIn === 'NONE' ? null : roleIn;

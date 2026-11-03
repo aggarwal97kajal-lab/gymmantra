@@ -25,7 +25,8 @@ export interface CouponDoc {
 }
 
 export interface PlanPaymentDoc {
-  id: string;
+  id: string; // idempotency key from the app (one per "Pay" tap)
+  payId: string; // GM-LIFE951-4821, goes in the UPI note so the payment can be found in the bank history
   tenantId: string;
   gymName: string;
   gymCode: string;
@@ -35,15 +36,19 @@ export interface PlanPaymentDoc {
   rate: number;
   discount: number;
   couponCode: string | null;
-  amount: number; // what the owner paid (incl. GST if on)
-  utr: string;
+  amount: number; // what the owner pays (incl. GST if on)
+  upiId: string;
   app: string | null;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  upiStatus: string | null; // what the UPI app said (SUCCESS / FAILURE / SUBMITTED / none)
+  upiRef: string | null; // transaction ref from the UPI app, when it gives one
+  status: 'STARTED' | 'PAID' | 'FAILED' | 'CANCELLED';
   reason: string | null;
   billId: string | null;
+  before: Pick<TenantDoc, 'status' | 'saasPlanId' | 'planCycle' | 'planEndsAt'> | null; // to undo a cancelled payment
   byId: string;
   createdAt: string;
-  decidedAt: string | null;
+  paidAt: string | null;
+  cancelledAt: string | null;
 }
 
 const MAX_FAILS = 3;
@@ -67,6 +72,14 @@ export async function priceWithCoupon(r: Reader, o: { tenantId: string; plan: Sa
   if (c.oncePerGym && (c.usedBy[o.tenantId] ?? 0) > 0) throw bad('Your gym has already used this coupon');
   const discount = Math.min(rate, c.kind === 'PERCENT' ? Math.round((rate * c.value) / 100) : c.value);
   return { rate, discount, coupon: c };
+}
+
+/** One more failed / cancelled payment; 3 in 24 hours pause payments for 24 hours. */
+function withFail(tenant: TenantDoc): TenantDoc {
+  const since = Date.now() - LOCK_HOURS * 3600_000;
+  const fails = [...(tenant.payFails ?? []).filter((x) => Date.parse(x) > since), nowIso()];
+  const lock = fails.length >= MAX_FAILS ? new Date(Date.now() + LOCK_HOURS * 3600_000).toISOString() : tenant.payLockedUntil ?? null;
+  return { ...tenant, payFails: fails, payLockedUntil: lock };
 }
 
 function lockOf(t: TenantDoc) {
@@ -187,24 +200,31 @@ export function paymentRoutes(app: App) {
     return c.json(q.out);
   });
 
-  /** Owner paid by UPI and sends the transaction ID (UTR). Super admin checks it and turns the plan on. */
+  /**
+   * Owner taps Pay: makes (or returns) the payment for this idempotency key. The same key always
+   * gives the same payment, so a double tap or a retry never makes two.
+   */
   app.post('/api/v1/subscription/payments', async (c) => {
     const u = await authenticate(c);
     const b = body(await c.req.json().catch(() => null));
+    const key = str(b, 'key', { min: 8, max: 64, label: 'the payment key' });
+    if (!/^[A-Za-z0-9-]{8,64}$/.test(key)) throw bad('Payment key is not valid');
+    const existing = await c.var.deps.store.get<PlanPaymentDoc>(P.planPayment(key));
+    if (existing) {
+      const g0 = await gymOf(c, 'OWNER');
+      if (existing.tenantId !== g0.tenantId) throw forbidden('Not your payment');
+      return c.json(existing);
+    }
     const q = await quote(c as unknown as C, b);
-    const utr = str(b, 'utr', { min: 6, max: 30, label: 'the UPI transaction ID' }).replace(/\s/g, '');
-    if (!/^[A-Za-z0-9]{6,30}$/.test(utr)) throw bad('Enter the 12-digit UPI transaction ID (UTR) from your UPI app');
-    const appName = optStr(b, 'app', { max: 30 }) ?? null;
     const out = await c.var.deps.store.tx(async (t) => {
+      const again = await t.get<PlanPaymentDoc>(P.planPayment(key));
+      if (again) return again;
       const tenant = (await t.get<TenantDoc>(P.tenant(q.g.tenantId)))!;
       const locked = lockOf(tenant);
       if (locked) throw forbidden(`Payments are paused for 24 hours after 3 failed payments. Try again after ${new Date(locked).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', day: 'numeric', month: 'short' })}`);
-      const mine = await t.query<PlanPaymentDoc>(P.planPayments, [['tenantId', q.g.tenantId]]);
-      if (mine.some((r) => r.data.status === 'PENDING')) throw conflict('Your last payment is still being checked. You will get a notification soon');
-      const dupe = await t.query<PlanPaymentDoc>(P.planPayments, [['utr', utr]]);
-      if (dupe.some((r) => r.data.status !== 'REJECTED')) throw conflict('This transaction ID is already used');
       const doc: PlanPaymentDoc = {
-        id: uuid(),
+        id: key,
+        payId: `GM-${tenant.gymCode}-${1000 + Math.floor(Math.random() * 9000)}`,
         tenantId: q.g.tenantId,
         gymName: tenant.name,
         gymCode: tenant.gymCode,
@@ -215,75 +235,123 @@ export function paymentRoutes(app: App) {
         discount: q.out.discount,
         couponCode: q.out.coupon?.code ?? null,
         amount: q.out.total,
-        utr,
-        app: appName,
-        status: 'PENDING',
+        upiId: q.out.upiId,
+        app: null,
+        upiStatus: null,
+        upiRef: null,
+        status: 'STARTED',
         reason: null,
         billId: null,
+        before: null,
         byId: u.id,
         createdAt: nowIso(),
-        decidedAt: null,
+        paidAt: null,
+        cancelledAt: null,
       };
-      t.set(P.planPayment(doc.id), doc);
-      audit(t, q.g.tenantId, u.id, 'plan.payment', 'plan_payment', doc.id, null, doc);
+      t.create(P.planPayment(key), doc);
       return doc;
     });
-    return c.json(out, 201);
+    return c.json({ ...out, payeeName: q.out.payeeName }, 201);
+  });
+
+  /**
+   * Back from the UPI app: the plan turns on at once and the receipt is made.
+   * If the UPI app said the payment failed, nothing is turned on.
+   */
+  app.post('/api/v1/subscription/payments/:key/done', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const key = c.req.param('key');
+    const b = body(await c.req.json().catch(() => ({})));
+    const upiStatus = (optStr(b, 'upiStatus', { max: 30 }) ?? '').toUpperCase() || null;
+    const upiRef = optStr(b, 'upiRef', { max: 60 }) ?? null;
+    const appName = optStr(b, 'app', { max: 40 }) ?? null;
+    const out = await c.var.deps.store.tx(async (t) => {
+      const p = await t.get<PlanPaymentDoc>(P.planPayment(key));
+      if (!p || p.tenantId !== g.tenantId) throw notFound('Payment not found');
+      if (p.status !== 'STARTED') return { payment: p, bill: p.billId ? await t.get(P.bill(p.tenantId, p.billId)) : null }; // already done: same answer again
+      if (upiStatus === 'FAILURE' || upiStatus === 'FAILED') {
+        const tenant = (await t.get<TenantDoc>(P.tenant(p.tenantId)))!;
+        t.set(P.tenant(p.tenantId), withFail(tenant));
+        const failed: PlanPaymentDoc = { ...p, status: 'FAILED', app: appName, upiStatus, upiRef, reason: 'The UPI app said the payment failed' };
+        t.set(P.planPayment(key), failed);
+        return { payment: failed, bill: null };
+      }
+      const tenant = (await t.get<TenantDoc>(P.tenant(p.tenantId)))!;
+      let coupon: CouponDoc | null = null;
+      if (p.couponCode) {
+        const idx = await t.get<{ id: string }>(P.couponCode(p.couponCode));
+        coupon = idx ? await t.get<CouponDoc>(P.coupon(idx.id)) : null;
+      }
+      const bill = await activatePlan(t, { tenantId: p.tenantId, planId: p.planId, cycle: p.cycle, mode: 'UPI', ref: upiRef ?? p.payId, price: p.rate, discount: p.discount, couponCode: p.couponCode, byId: u.id });
+      if (coupon) t.set(P.coupon(coupon.id), { ...coupon, used: coupon.used + 1, usedBy: { ...coupon.usedBy, [p.tenantId]: (coupon.usedBy[p.tenantId] ?? 0) + 1 } });
+      const paid: PlanPaymentDoc = {
+        ...p,
+        status: 'PAID',
+        app: appName,
+        upiStatus,
+        upiRef,
+        billId: bill.id,
+        paidAt: nowIso(),
+        before: { status: tenant.status, saasPlanId: tenant.saasPlanId, planCycle: tenant.planCycle ?? null, planEndsAt: tenant.planEndsAt ?? null },
+      };
+      t.set(P.planPayment(key), paid);
+      return { payment: paid, bill };
+    });
+    return c.json(out);
   });
 
   app.get('/api/v1/subscription/payments', async (c) => {
     await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     const rows = await c.var.deps.store.query<PlanPaymentDoc>(P.planPayments, [['tenantId', g.tenantId]]);
-    return c.json({ lockedUntil: lockOf(g.tenant), payments: rows.map((r) => r.data).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20) });
+    return c.json({ lockedUntil: lockOf(g.tenant), payments: rows.map((r) => r.data).filter((p) => p.status !== 'STARTED').sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 30) });
   });
 
-  // ---------------- super admin: check UPI payments ----------------
+  // ---------------- super admin: every plan payment, and undo a payment that never came ----------------
   app.get('/api/v1/super/payments', async (c) => {
     await authenticate(c);
     requireSuper(c);
-    const status = oneOf({ s: c.req.query('status') ?? 'PENDING' }, 's', ['PENDING', 'APPROVED', 'REJECTED'] as const)!;
+    const status = oneOf({ s: c.req.query('status') ?? 'PAID' }, 's', ['PAID', 'CANCELLED', 'FAILED'] as const)!;
     const rows = await c.var.deps.store.query<PlanPaymentDoc>(P.planPayments, [['status', status]]);
-    return c.json(rows.map((r) => r.data).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 100));
+    const list = rows.map((r) => r.data).sort((a, b) => ((a.paidAt ?? a.createdAt) < (b.paidAt ?? b.createdAt) ? 1 : -1));
+    const month = todayIST().slice(0, 7);
+    const thisMonth = list.filter((p) => todayIST(new Date(p.paidAt ?? p.createdAt)).slice(0, 7) === month);
+    return c.json({ status, monthTotal: thisMonth.reduce((n, p) => n + p.amount, 0), monthCount: thisMonth.length, payments: list.slice(0, 200) });
   });
 
-  app.post('/api/v1/super/payments/:id/:action', async (c) => {
+  app.post('/api/v1/super/payments/:id/cancel', async (c) => {
     const u = await authenticate(c);
     requireSuper(c);
     const id = c.req.param('id');
-    const action = oneOf({ a: c.req.param('action') }, 'a', ['approve', 'reject'] as const)!;
     const b = body(await c.req.json().catch(() => ({})));
-    const reason = optStr(b, 'reason', { max: 200 }) ?? null;
+    const reason = optStr(b, 'reason', { max: 200 }) ?? 'Payment not received';
     const out = await c.var.deps.store.tx(async (t) => {
-      const p = isUuid(id) ? await t.get<PlanPaymentDoc>(P.planPayment(id)) : null;
+      const p = await t.get<PlanPaymentDoc>(P.planPayment(id));
       if (!p) throw notFound('Payment not found');
-      if (p.status !== 'PENDING') throw bad('This payment is already checked');
-      const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(p.tenantId), [['role', 'OWNER']])).filter((x) => x.data.active);
-      if (action === 'approve') {
-        // Coupon is counted only when the payment is real.
-        let coupon: CouponDoc | null = null;
-        if (p.couponCode) {
-          const idx = await t.get<{ id: string }>(P.couponCode(p.couponCode));
-          coupon = idx ? await t.get<CouponDoc>(P.coupon(idx.id)) : null;
-        }
-        const bill = await activatePlan(t, { tenantId: p.tenantId, planId: p.planId, cycle: p.cycle, mode: 'UPI', ref: p.utr, price: p.rate, discount: p.discount, couponCode: p.couponCode, byId: u.id });
-        if (coupon) t.set(P.coupon(coupon.id), { ...coupon, used: coupon.used + 1, usedBy: { ...coupon.usedBy, [p.tenantId]: (coupon.usedBy[p.tenantId] ?? 0) + 1 } });
-        const done: PlanPaymentDoc = { ...p, status: 'APPROVED', billId: bill.id, decidedAt: nowIso() };
-        t.set(P.planPayment(id), done);
-        return done;
-      }
+      if (p.status !== 'PAID') throw bad('Only a paid payment can be cancelled');
       const tenant = await t.get<TenantDoc>(P.tenant(p.tenantId));
       if (tenant) {
-        const since = Date.now() - LOCK_HOURS * 3600_000;
-        const fails = [...(tenant.payFails ?? []).filter((x) => Date.parse(x) > since), nowIso()];
-        const lock = fails.length >= MAX_FAILS ? new Date(Date.now() + LOCK_HOURS * 3600_000).toISOString() : tenant.payLockedUntil ?? null;
-        t.set(P.tenant(p.tenantId), { ...tenant, payFails: fails, payLockedUntil: lock });
-        for (const o of owners)
-          await notify(t, o.id, p.tenantId, 'Payment not received', `We could not find your UPI payment of ₹${p.amount} (UTR ${p.utr}).${reason ? ` ${reason}.` : ''}${fails.length >= MAX_FAILS ? ' Payments are paused for 24 hours.' : ' Check the UTR and try again.'}`);
+        const b4 = p.before ?? { status: 'TRIAL' as const, saasPlanId: null, planCycle: null, planEndsAt: null };
+        // Undo the plan only if this payment's plan is still the current one.
+        const undo = tenant.saasPlanId === p.planId;
+        const next: TenantDoc = withFail(undo ? { ...tenant, status: b4.status, saasPlanId: b4.saasPlanId, planCycle: b4.planCycle, planEndsAt: b4.planEndsAt } : tenant);
+        t.set(P.tenant(p.tenantId), next);
+        audit(t, p.tenantId, u.id, 'plan.payment.cancel', 'plan_payment', id, tenant, next);
       }
-      const done: PlanPaymentDoc = { ...p, status: 'REJECTED', reason, decidedAt: nowIso() };
+      if (p.billId) {
+        const bill = await t.get<Record<string, unknown>>(P.bill(p.tenantId, p.billId));
+        if (bill) t.set(P.bill(p.tenantId, p.billId), { ...bill, cancelledAt: nowIso(), cancelReason: reason });
+      }
+      if (p.couponCode) {
+        const idx = await t.get<{ id: string }>(P.couponCode(p.couponCode));
+        const cp = idx ? await t.get<CouponDoc>(P.coupon(idx.id)) : null;
+        if (cp) t.set(P.coupon(cp.id), { ...cp, used: Math.max(0, cp.used - 1), usedBy: { ...cp.usedBy, [p.tenantId]: Math.max(0, (cp.usedBy[p.tenantId] ?? 1) - 1) } });
+      }
+      const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(p.tenantId), [['role', 'OWNER']])).filter((x) => x.data.active);
+      for (const o of owners) await notify(t, o.id, p.tenantId, 'Payment not received', `We did not receive your UPI payment of ₹${p.amount} (${p.payId}). ${reason}. Your ${p.planName} plan is stopped — please pay again.`);
+      const done: PlanPaymentDoc = { ...p, status: 'CANCELLED', reason, cancelledAt: nowIso() };
       t.set(P.planPayment(id), done);
-      audit(t, p.tenantId, u.id, 'plan.payment.reject', 'plan_payment', id, p, done);
       return done;
     });
     return c.json(out);

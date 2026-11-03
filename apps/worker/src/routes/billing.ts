@@ -125,6 +125,8 @@ export interface BillDoc {
   gym: { name: string; address: string | null; state: string | null; stateCode: string | null; pincode: string | null; gstin: string | null; ownerName: string | null; ownerPhone: string | null };
   seller: { name: string; address: string | null; gstin: string | null; pan?: string | null };
   createdById: string;
+  cancelledAt?: string | null; // super admin: payment never came
+  cancelReason?: string | null;
 }
 
 function fyOf(ymd: string) {
@@ -141,7 +143,7 @@ async function nextNumber(t: Tx, kind: BillDoc['kind'], today: string) {
   return kind === 'TAX_INVOICE' ? `GM/${fyOf(today)}/${String(n).padStart(4, '0')}` : `GM-R-${String(n).padStart(5, '0')}`;
 }
 
-const billSummary = (b: BillDoc) => ({ id: b.id, number: b.number, kind: b.kind, planName: b.planName, cycle: b.cycle, periodStart: b.periodStart, periodEnd: b.periodEnd, total: b.total, paidAt: b.paidAt });
+const billSummary = (b: BillDoc) => ({ id: b.id, number: b.number, kind: b.kind, planName: b.planName, cycle: b.cycle, periodStart: b.periodStart, periodEnd: b.periodEnd, total: b.total, paidAt: b.paidAt, mode: b.mode, cancelledAt: b.cancelledAt ?? null });
 
 export function billingRoutes(app: App) {
   /** Owner: plan, trial meter, features, bills. */
@@ -155,14 +157,13 @@ export function billingRoutes(app: App) {
       store.query<BillDoc>(P.bills(g.tenantId)),
       store.get<PlatformSettings>(P.platform),
       store.query(P.trainers(g.tenantId), [['active', true]]),
-      store.query<{ status: string; createdAt: string }>(P.planPayments, [['tenantId', g.tenantId]]),
+      store.query<{ status: string; createdAt: string; payId: string; amount: number; planName: string; reason: string | null }>(P.planPayments, [['tenantId', g.tenantId]]),
     ]);
     const lockedUntil = g.tenant.payLockedUntil && Date.parse(g.tenant.payLockedUntil) > Date.now() ? g.tenant.payLockedUntil : null;
     return c.json({
       ...access,
       lockedUntil,
-      pendingPayment: pays.map((r) => r.data).find((x) => x.status === 'PENDING') ?? null,
-      lastPayment: pays.map((r) => r.data).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
+      lastPayment: pays.map((r) => r.data).filter((x) => x.status !== 'STARTED').sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
       plans: plans
         .map((p) => ({ id: p.id, name: p.data.name, monthlyPrice: p.data.monthlyPrice, annualPrice: p.data.annualPrice, memberLimit: p.data.memberLimit, branchLimit: p.data.branchLimit, features: p.data.features, unlocks: unlocksOf(p.data), sortOrder: p.data.sortOrder }))
         .sort((a, b) => a.sortOrder - b.sortOrder),

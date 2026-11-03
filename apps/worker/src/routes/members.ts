@@ -344,8 +344,8 @@ export function memberRoutes(app: App) {
     }
     // No GymMantra account yet: make one with these details. The member sets a password from the email link.
     let made: { uid: string; idToken?: string } | null = null;
+    const pw = `${crypto.randomUUID()}Aa1!`;
     if (!existingUser && full && input.email) {
-      const pw = `${crypto.randomUUID()}Aa1!`;
       try {
         made = await identity.signUp(input.email, pw);
       } catch {
@@ -380,6 +380,8 @@ export function memberRoutes(app: App) {
             gender: (input.gender as UserDoc['gender']) ?? null,
             ...full.details,
             createdByGym: { tenantId: g.tenantId, gymName: g.tenant.name },
+            mustSetPassword: true,
+            initPw: pw,
           };
           t.set(P.user(made.uid), nu);
           const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };

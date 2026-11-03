@@ -4,6 +4,7 @@ import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
 import { hasDetails, personDetails } from '../lib/person';
+import { rateLimit } from '../lib/ratelimit';
 import { accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
@@ -32,6 +33,8 @@ export function publicUser(id: string, u: UserDoc) {
     country: u.country ?? null,
     pincode: u.pincode ?? null,
     addedByGym: u.createdByGym?.gymName ?? null,
+    needsPassword: !!u.mustSetPassword,
+    needsDetails: !!u.detailsNeeded,
     isOwner: isDeskStaff(u),
     isTrainer: isTrainer(u),
     trainerPending: Object.keys(u.trainerRequested ?? {}).length > 0,
@@ -147,6 +150,33 @@ async function enforceRole(c: C, uid: string, user: UserDoc, chose: AppRole | nu
   });
 }
 
+/**
+ * The account for this Google sign-in: one made with Google, one already linked, or — when Google says
+ * the email is verified — the account with the same email (for example a member the gym owner added).
+ * That account gets linked to Google, so both Google and email+password work from then on.
+ */
+async function findGoogleUser(c: C, g: { sub: string; email: string | null }): Promise<{ uid: string; user: UserDoc } | null> {
+  const { store } = c.var.deps;
+  const own = await store.get<UserDoc>(P.user(`g_${g.sub}`));
+  if (own && !own.deleted) return { uid: `g_${g.sub}`, user: own };
+  const link = await store.get<{ uid: string }>(`googleSubs/${g.sub}`);
+  if (link) {
+    const u = await store.get<UserDoc>(P.user(link.uid));
+    if (u && !u.deleted) return { uid: link.uid, user: u };
+  }
+  if (!g.email) return null;
+  const row = (await store.query<UserDoc>('users', [['email', g.email]])).find((r) => !r.data.deleted);
+  if (!row) return null;
+  const user = await store.tx(async (t) => {
+    const u = (await t.get<UserDoc>(P.user(row.id)))!;
+    const n = { ...u, googleSub: u.googleSub ?? g.sub };
+    t.set(P.user(row.id), n);
+    t.set(`googleSubs/${g.sub}`, { uid: row.id });
+    return n;
+  });
+  return { uid: row.id, user };
+}
+
 export function authRoutes(app: App) {
   app.get('/api/v1/auth/config', async (c) => {
     const s = await c.var.deps.store.get<{ appUrl?: string | null }>(P.platform).catch(() => null);
@@ -155,6 +185,7 @@ export function authRoutes(app: App) {
 
   app.post('/api/v1/auth/signup', async (c) => {
     const b = body(await c.req.json().catch(() => null));
+    await rateLimit(c, 'signup', typeof b.email === 'string' ? b.email : null);
     const d = hasDetails(b) ? personDetails(b) : null;
     const name = d ? d.name : str(b, 'name', { min: 2, max: 80, label: 'your name' });
     const email = normalizeEmail(str(b, 'email', { label: 'your email' }));
@@ -174,6 +205,7 @@ export function authRoutes(app: App) {
     const password = str(b, 'password', { max: 100, label: 'your password' });
     const email = normalizeEmail(identifier);
     const phone = email ? null : normalizePhone(identifier);
+    await rateLimit(c, 'login', email ?? phone ?? identifier);
 
     // Find the GymMantra account first, so the lockout applies before Firebase is asked.
     let uid: string | null = null;
@@ -231,18 +263,23 @@ export function authRoutes(app: App) {
   app.post('/api/v1/auth/google/signup', async (c) => {
     const { store, identity, superAdminEmail } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
+    await rateLimit(c, 'google', null);
     const g = await identity.verifyGoogle(str(b, 'idToken', { max: 8000, label: 'the Google sign-in token' }));
     const uid = `g_${g.sub}`;
-    if (await store.get(P.user(uid))) throw conflict('You already signed up with this Google account. Please log in with Google');
-    if (g.email && (await store.query('users', [['email', g.email]])).length) {
-      throw conflict('This email is already registered with a password. Log in with your email and password');
+    // Already has an account (Google, or same verified email): just log in.
+    const have = await findGoogleUser(c, g);
+    if (have) {
+      if (isMobile(c) && isWebOnly(have.user)) throw forbidden(WEB_ONLY_MESSAGE);
+      const checked = await enforceRole(c, have.uid, have.user, chosenRole(c, b));
+      const token = await issueSession(c, have.uid);
+      return c.json({ token, user: publicUser(have.uid, checked), existing: true });
     }
     const phoneIn = optStr(b, 'phone');
     const phone = phoneIn ? normalizePhone(phoneIn) : null;
     if (phoneIn && !phone) throw bad('Enter a valid 10-digit mobile number');
     const user = newUser(
       g.name || (g.email ? g.email.split('@')[0] : 'GymMantra user'),
-      { email: g.email, phone, googleSub: g.sub, appRole: chosenRole(c, b) },
+      { email: g.email, phone, googleSub: g.sub, appRole: chosenRole(c, b), detailsNeeded: true },
       !!g.email && g.email === superAdminEmail,
     );
     await store.tx(async (t) => {
@@ -260,18 +297,44 @@ export function authRoutes(app: App) {
 
   /** Google log-in works only for accounts that signed up with Google first. */
   app.post('/api/v1/auth/google/login', async (c) => {
+    await rateLimit(c, 'google', null);
     const { store, identity } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const g = await identity.verifyGoogle(str(b, 'idToken', { max: 8000, label: 'the Google sign-in token' }));
-    const uid = `g_${g.sub}`;
-    const user = await store.get<UserDoc>(P.user(uid));
-    if (!user || user.deleted) throw notFound('No GymMantra account for this Google account. Please sign up with Google first');
+    const found = await findGoogleUser(c, g);
+    if (!found) throw notFound('No GymMantra account for this Google account. Please sign up with Google first');
+    const { uid, user } = found;
     if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
     if (isMobile(c) && isWebOnly(user)) throw forbidden(WEB_ONLY_MESSAGE);
     if (isAdminApp(c) && !user.isSuperAdmin) throw forbidden(ADMIN_ONLY_MESSAGE);
     const checked = await enforceRole(c, uid, user, chosenRole(c, b));
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, checked) });
+  });
+
+  /** Gym-made account, first login: the member chooses their own password once. */
+  app.post('/api/v1/auth/set-password', async (c) => {
+    const u = await authenticate(c);
+    await rateLimit(c, 'password', u.id);
+    const b = body(await c.req.json().catch(() => null));
+    const next = str(b, 'next', { min: 8, max: 100, label: 'new password' });
+    const { store, identity } = c.var.deps;
+    const cur = (await store.get<UserDoc>(P.user(u.id)))!;
+    if (!cur.mustSetPassword) throw bad('Your password is already set. Use Change password');
+    if (cur.authEmail && cur.initPw) await identity.changePassword(cur.authEmail, cur.initPw, next);
+    else {
+      const authEmail = cur.email ?? (cur.phone ? phoneAuthEmail(cur.phone) : null);
+      if (!authEmail) throw bad('Add an email first');
+      await identity.changePassword(authEmail, null, next);
+      cur.authEmail = authEmail;
+    }
+    const after = await store.tx(async (t) => {
+      const x = (await t.get<UserDoc>(P.user(u.id)))!;
+      const n: UserDoc = { ...x, authEmail: cur.authEmail, mustSetPassword: false, initPw: null };
+      t.set(P.user(u.id), n);
+      return n;
+    });
+    return c.json({ ok: true, user: publicUser(u.id, after) });
   });
 
   /** Forgot password: Firebase emails a reset link to the account's email. */
@@ -282,6 +345,7 @@ export function authRoutes(app: App) {
     const email = normalizeEmail(identifier);
     const phone = email ? null : normalizePhone(identifier);
     if (!email && !phone) throw bad('Enter a valid email or 10-digit mobile number');
+    await rateLimit(c, 'forgot', email ?? phone);
     let user: UserDoc | null = null;
     if (phone) {
       const uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid;
@@ -322,13 +386,14 @@ export function authRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const code = str(b, 'oobCode', { max: 2000, label: 'the reset code' });
     const password = str(b, 'password', { min: 8, max: 100, label: 'new password' });
+    await rateLimit(c, 'reset', code.slice(0, 40));
     const email = await identity.resetPassword(code, password);
     // A fresh password also clears any lockout.
     const row = (await store.query<UserDoc>('users', [['authEmail', email]]))[0];
-    if (row && (row.data.failed || row.data.lockedUntil)) {
+    if (row && (row.data.failed || row.data.lockedUntil || row.data.mustSetPassword)) {
       await store.tx(async (t) => {
         const u = await t.get<UserDoc>(P.user(row.id));
-        if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null });
+        if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null, mustSetPassword: false, initPw: null });
       });
     }
     return c.json({ ok: true });
@@ -347,6 +412,7 @@ export function authRoutes(app: App) {
   app.post('/api/v1/auth/change-password', async (c) => {
     const u = await authenticate(c);
     const b = body(await c.req.json().catch(() => null));
+    await rateLimit(c, 'password', u.id);
     const next = str(b, 'next', { min: 8, max: 100, label: 'new password' });
     const current = optStr(b, 'current', { max: 100 });
     const { store, identity } = c.var.deps;

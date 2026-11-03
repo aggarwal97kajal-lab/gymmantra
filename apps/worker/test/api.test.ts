@@ -124,12 +124,20 @@ describe('auth', () => {
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-1:g1@test.in' })).status).toBe(404);
     expect((await h.api.post('/auth/google/signup', { idToken: 'google:g-1:g1@test.in' })).status).toBe(201);
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-1:g1@test.in' })).status).toBe(200);
-    expect((await h.api.post('/auth/google/signup', { idToken: 'google:g-1:g1@test.in' })).status).toBe(409);
+    // Signing up again just logs in to the same account
+    const again = await h.api.post('/auth/google/signup', { idToken: 'google:g-1:g1@test.in' });
+    expect(again.status).toBe(200);
+    expect(again.body.existing).toBe(true);
   });
 
-  it('Google signup does not take over a password account', async () => {
+  it('Google with the same verified email opens the same password account (no second account)', async () => {
     const u = await h.signup();
-    expect((await h.api.post('/auth/google/signup', { idToken: `google:g-2:${u.email}` })).status).toBe(409);
+    const g = await h.api.post('/auth/google/signup', { idToken: `google:g-2:${u.email}` });
+    expect(g.status).toBe(200);
+    expect(g.body.user.email).toBe(u.email);
+    expect((await h.api.post('/auth/google/login', { idToken: `google:g-2:${u.email}` })).body.user.id).toBe(g.body.user.id);
+    // Google without a verified email cannot take an account
+    expect((await h.api.post('/auth/google/login', { idToken: 'google:g-3:' })).status).toBe(404);
   });
 
   it('cookie sessions need the client header for writes', async () => {
@@ -927,7 +935,7 @@ describe('Nov 3: coupons, UPI payments, full details, branch codes', () => {
     return r.body.token as string;
   };
 
-  it('coupon lowers the plan price; approved UPI payment makes the receipt; 3 rejects pause payments', async () => {
+  it('coupon lowers the price; UPI payment turns the plan on at once (idempotent); super admin can cancel; 3 fails pause', async () => {
     const sa = await boss();
     const o = await h.ownerWithGym('Coupon Gym');
     const plans = (await h.api.get('/saas-plans')).body.plans as any[];
@@ -941,34 +949,51 @@ describe('Nov 3: coupons, UPI payments, full details, branch codes', () => {
     expect(q.body.total).toBe(11192);
     expect(q.body.upiId).toBe('7827862630@ptaxis');
     expect((await h.api.post('/subscription/quote', { planId: pro.id, cycle: 'ANNUAL', coupon: 'NOPE' }, o.token)).status).toBe(400);
-    // pay → pending → approve
-    const pay = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20', utr: '123456789012', app: 'GPay' }, o.token);
+    // pay → back from the UPI app → plan on at once
+    const pay = await h.api.post('/subscription/payments', { key: 'key-aaaa-0001', planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20' }, o.token);
     expect(pay.status).toBe(201);
-    expect((await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'ANNUAL', utr: '123456789013' }, o.token)).status).toBe(409);
-    const ok = await h.api.post(`/super/payments/${pay.body.id}/approve`, {}, sa);
-    expect(ok.status).toBe(200);
+    expect(pay.body.payId).toMatch(/^GM-/);
+    expect(pay.body.amount).toBe(11192);
+    // same key again = same payment (idempotent)
+    const again = await h.api.post('/subscription/payments', { key: 'key-aaaa-0001', planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20' }, o.token);
+    expect(again.body.id).toBe(pay.body.id);
+    expect(again.body.payId).toBe(pay.body.payId);
+    const done = await h.api.post('/subscription/payments/key-aaaa-0001/done', { upiStatus: 'SUCCESS', app: 'Google Pay' }, o.token);
+    expect(done.status).toBe(200);
+    expect(done.body.payment.status).toBe('PAID');
+    const done2 = await h.api.post('/subscription/payments/key-aaaa-0001/done', { upiStatus: 'SUCCESS' }, o.token);
+    expect(done2.body.bill.id).toBe(done.body.bill.id); // no second receipt
     const sub = (await h.api.get('/subscription', o.token)).body;
     expect(sub.plan.name).toBe('Pro');
+    expect(sub.bills.length).toBe(1);
     const bill = (await h.api.get(`/subscription/bills/${sub.bills[0].id}`, o.token)).body;
     expect(bill.total).toBe(11192);
     expect(bill.discount).toBe(2798);
     expect(bill.couponCode).toBe('DIWALI20');
     const coupons = (await h.api.get('/super/coupons', sa)).body;
     expect(coupons[0].used).toBe(1);
+    // super admin sees it
+    const list = (await h.api.get('/super/payments?status=PAID', sa)).body;
+    expect(list.payments.length).toBe(1);
+    expect(list.monthTotal).toBe(11192);
     // once per gym
     expect((await h.api.post('/subscription/quote', { planId: pro.id, cycle: 'ANNUAL', coupon: 'DIWALI20' }, o.token)).status).toBe(400);
-    // 3 rejected payments → paused
-    for (let i = 0; i < 3; i++) {
-      const p = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'MONTHLY', utr: `99999999000${i}` }, o.token);
-      expect(p.status).toBe(201);
-      expect((await h.api.post(`/super/payments/${p.body.id}/reject`, { reason: 'Not found' }, sa)).status).toBe(200);
+    // super admin: payment never came → plan stopped, receipt cancelled
+    expect((await h.api.post(`/super/payments/${pay.body.id}/cancel`, { reason: 'Not in bank' }, sa)).status).toBe(200);
+    const after = (await h.api.get('/subscription', o.token)).body;
+    expect(after.plan).toBeNull();
+    expect(after.bills[0].cancelledAt).toBeTruthy();
+    // UPI app says failed → nothing turns on; 3 fails pause payments
+    for (let i = 0; i < 2; i++) {
+      const p = await h.api.post('/subscription/payments', { key: `key-fail-000${i}`, planId: pro.id, cycle: 'MONTHLY' }, o.token);
+      expect((await h.api.post(`/subscription/payments/${p.body.id}/done`, { upiStatus: 'FAILURE' }, o.token)).body.payment.status).toBe('FAILED');
     }
-    const locked = await h.api.post('/subscription/payments', { planId: pro.id, cycle: 'MONTHLY', utr: '888888888888' }, o.token);
+    const locked = await h.api.post('/subscription/payments', { key: 'key-lock-0001', planId: pro.id, cycle: 'MONTHLY' }, o.token);
     expect(locked.status).toBe(403);
     expect((await h.api.get('/subscription', o.token)).body.lockedUntil).toBeTruthy();
     // super admin report sees the income
     const rep = (await h.api.get('/super/reports?days=7', sa)).body;
-    expect(rep.totals.income).toBe(11192);
+    expect(rep.totals.income).toBe(11192); // income counts the day it came in
     expect(rep.totals.newGyms).toBeGreaterThanOrEqual(1);
   });
 
@@ -1005,5 +1030,37 @@ describe('Nov 3: coupons, UPI payments, full details, branch codes', () => {
     expect(r.body.days).toBe(6);
     expect(r.body.custom).toBe(true);
     expect((await h.api.get(`/reports?from=${todayIST()}&to=${from}`, o.token)).status).toBe(400);
+  });
+});
+
+describe('Nov 3 night: rate limit, Google link, set password', () => {
+  it('6th login try in a minute gets 429', async () => {
+    const u = await h.signup();
+    for (let i = 0; i < 5; i++) expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).status).toBe(200);
+    const r = await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' });
+    expect(r.status).toBe(429);
+    expect(r.body.message).toContain('Too many requests');
+  });
+
+  it('gym-added member logs in with Google (same email), then sets a password once', async () => {
+    const o = await h.ownerWithGym('Google Gym');
+    const d = { firstName: 'Neha', lastName: 'Gupta', dob: '1999-01-02', state: 'Delhi', city: 'New Delhi', country: 'India', pincode: '110001' };
+    const m = await h.api.post('/members', { ...d, phone: h.nextPhone(), email: 'neha@test.in' }, o.token);
+    expect(m.body.accountMade).toBe(true);
+    const g = await h.api.post('/auth/google/login', { idToken: 'google:sub-neha:neha@test.in' });
+    expect(g.status).toBe(200);
+    expect(g.body.user.needsPassword).toBe(true);
+    expect(g.body.user.email).toBe('neha@test.in');
+    const set = await h.api.post('/auth/set-password', { next: 'newpass123' }, g.body.token);
+    expect(set.status).toBe(200);
+    expect(set.body.user.needsPassword).toBe(false);
+    expect((await h.api.post('/auth/login', { identifier: 'neha@test.in', password: 'newpass123' })).status).toBe(200);
+    // Google again: same account, no password page
+    const g2 = await h.api.post('/auth/google/login', { idToken: 'google:sub-neha:neha@test.in' });
+    expect(g2.body.user.id).toBe(g.body.user.id);
+    expect(g2.body.user.needsPassword).toBe(false);
+    // Google sign-up with that email just logs in
+    const gs = await h.api.post('/auth/google/signup', { idToken: 'google:sub-neha:neha@test.in' });
+    expect(gs.body.user.id).toBe(g.body.user.id);
   });
 });

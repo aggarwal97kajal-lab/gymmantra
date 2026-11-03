@@ -30,6 +30,7 @@ export interface PtDoc {
   decidedById: string | null;
   decidedAt: string | null;
   log: Record<string, SessionMark>;
+  plans?: Record<string, { time: string | null; byId: string; byName: string; at: string }>; // details of Planned days
   payments: { id: string; amount: number; mode: string; at: string; byId: string }[];
   sharePercent: number; // trainer share fixed when approved
 }
@@ -80,6 +81,7 @@ export function ptView(p: PtDoc, extra: Record<string, unknown> = {}) {
     startDate: p.startDate,
     endDate: p.endDate,
     log: p.log,
+    plans: p.plans ?? {},
     payments: p.payments,
     ...ptState(p),
     ...extra,
@@ -352,10 +354,22 @@ export function ptRoutes(app: App) {
       const log = { ...p.log };
       if (mark === 'CLEAR') delete log[date];
       else log[date] = mark;
+      // Planned: keep the time (optional), who planned it and when.
+      const plans = { ...(p.plans ?? {}) };
+      const time = optStr(b, 'time', { max: 5 }) ?? null;
+      if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw bad('Time is not valid');
+      if (mark === 'PLANNED') {
+        const who = role.role === 'TRAINER' ? p.trainerName : (u.name ?? 'Gym owner');
+        plans[date] = { time: time ?? plans[date]?.time ?? null, byId: u.id, byName: who, at: nowIso() };
+      } else delete plans[date];
       const done = Object.values(log).filter((m) => m === 'DONE').length;
       if (done > p.sessions) throw bad(`All ${p.sessions} sessions are already done`);
-      const next = { ...p, log };
+      const next = { ...p, log, plans };
       t.set(P.pt(tid, p.id), next);
+      if (mark === 'PLANNED') {
+        const when = `${date}${plans[date]?.time ? ` at ${plans[date]!.time}` : ''}`;
+        await notify(t, p.memberUserId, tid, 'PT planned', `${p.trainerName} planned your PT for ${when}.`);
+      }
       if (mark === 'DONE' && p.sessions - done <= 2) {
         await notify(t, p.memberUserId, tid, 'PT sessions ending', `${p.sessions - done} PT session${p.sessions - done === 1 ? '' : 's'} left with ${p.trainerName}.`);
       }
