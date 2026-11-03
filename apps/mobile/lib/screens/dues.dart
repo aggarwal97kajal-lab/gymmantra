@@ -394,6 +394,10 @@ class MemberProfileScreen extends StatelessWidget {
       (Icons.mail_outline_rounded, context.t('Email'), (p['email'] ?? m['email']) as String?),
       (Icons.phone_iphone_rounded, context.t('Mobile number'), (p['phone'] ?? m['phone']) as String?),
       (Icons.place_outlined, context.t('Address'), p['address'] as String?),
+      (Icons.location_city_rounded, context.t('City'), p['city'] == null ? null : '${p['city']}${p['state'] != null ? ', ${p['state']}' : ''}'),
+      (Icons.pin_drop_outlined, context.t('PIN code'), p['pincode'] as String?),
+      (Icons.flag_outlined, context.t('Country'), p['country'] as String?),
+      (Icons.badge_outlined, context.t('Member ID'), m['memberCode'] as String?),
       (Icons.event_outlined, context.t('Joined'), fmtDate(m['joinedOn'] as String?)),
       (
         Icons.login_rounded,

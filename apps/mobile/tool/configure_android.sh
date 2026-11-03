@@ -10,6 +10,16 @@ for perm in ACCESS_FINE_LOCATION ACCESS_COARSE_LOCATION CAMERA; do
   grep -q "android.permission.$perm\"" "$M" || sed -i "s#<application#<uses-permission android:name=\"android.permission.$perm\"/>\n    <application#" "$M"
 done
 grep -q 'WRITE_EXTERNAL_STORAGE' "$M" || sed -i 's#<application#<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>\n    <application#' "$M"
+# Reports saved straight into the phone's Download folder (Android 10 needs legacy storage)
+grep -q 'requestLegacyExternalStorage' "$M" || sed -i 's#<application#<application android:requestLegacyExternalStorage="true"#' "$M"
+# UPI apps (GPay, PhonePe, Paytm, BHIM…) for paying the GymMantra plan
+if ! grep -q 'android:scheme="upi"' "$M"; then
+  if grep -q '</queries>' "$M"; then
+    sed -i 's#</queries>#    <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="upi"/></intent>\n        <package android:name="com.google.android.apps.nbu.paisa.user"/>\n        <package android:name="com.phonepe.app"/>\n        <package android:name="net.one97.paytm"/>\n        <package android:name="in.org.npci.upiapp"/>\n    </queries>#' "$M"
+  else
+    sed -i 's#</manifest>#    <queries>\n        <intent><action android:name="android.intent.action.VIEW"/><data android:scheme="upi"/></intent>\n    </queries>\n</manifest>#' "$M"
+  fi
+fi
 # Block screenshots on screens that show a trainer's PDF (method channel "gymmantra/secure")
 MA=$(find android/app/src/main -name 'MainActivity.kt' | head -1)
 if [ -n "$MA" ]; then

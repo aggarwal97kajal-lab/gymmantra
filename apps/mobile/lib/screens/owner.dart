@@ -17,6 +17,7 @@ import 'pt.dart';
 import 'branch.dart';
 import 'billing.dart';
 import 'auth.dart' show PhoneField;
+import 'person.dart';
 import 'dues.dart';
 import 'banner.dart';
 
@@ -396,41 +397,62 @@ class AddMemberScreen extends ConsumerStatefulWidget {
 }
 
 class _AddMemberState extends ConsumerState<AddMemberScreen> {
-  final name = TextEditingController();
+  final person = PersonDetails();
   final phone = TextEditingController();
+  final email = TextEditingController();
   bool busy = false;
   String? error;
+
+  Future<void> save() async {
+    final miss = person.missing(context);
+    String? bad = miss;
+    if (bad == null && phone.text.trim().length != 10) bad = context.t('Enter a valid 10-digit mobile number');
+    if (bad == null && !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email.text.trim())) bad = context.t('Enter a valid email address');
+    if (bad != null) {
+      setState(() => error = bad);
+      return;
+    }
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final m = await Api.instance.post('/members', {...person.toJson(), 'phone': phone.text.trim(), 'email': email.text.trim()});
+      ref.invalidate(ownerMembersProvider);
+      if (!mounted) return;
+      if (m['accountMade'] == true) {
+        toast(context, context.t('Member added. {name} can log in with this email — "Forgot password?" sets the password.', {'name': person.first.trim()}), kind: DripKind.ok);
+      }
+      context.pushReplacement('/o/member/${m['id']}');
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Add member'))),
-      body: ListView(padding: const EdgeInsets.all(16), children: [
-        TextField(controller: name, textCapitalization: TextCapitalization.words, decoration: InputDecoration(labelText: context.t('Full name'))),
-        const SizedBox(height: 14),
-        PhoneField(label: context.t('Mobile number'), controller: phone, bottom: 6),
-        Muted(context.t('If this person already uses the GymMantra app with this number, they get linked automatically.'), size: 12),
-        ErrorText(error),
-        const SizedBox(height: 16),
-        FilledButton(
-          onPressed: busy
-              ? null
-              : () async {
-                  setState(() {
-                    busy = true;
-                    error = null;
-                  });
-                  try {
-                    final m = await Api.instance.post('/members', {'name': name.text.trim(), 'phone': phone.text.trim()});
-                    ref.invalidate(ownerMembersProvider);
-                    if (context.mounted) context.pushReplacement('/o/member/${m['id']}');
-                  } catch (e) {
-                    setState(() => error = e.toString());
-                  } finally {
-                    if (mounted) setState(() => busy = false);
-                  }
-                },
-          child: Text(context.t('Save')),
-        ),
+      body: Stack(children: [
+        ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+          PersonFields(value: person, between: [
+            PhoneField(label: '${context.t('Mobile')} *', controller: phone, bottom: 12),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Padding(padding: const EdgeInsets.only(left: 2, bottom: 6), child: Text('${context.t('Email')} *', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.c.mut))),
+                TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(hintText: 'name@gmail.com')),
+              ]),
+            ),
+          ]),
+          Muted(context.t('The member sees these same details in their profile. If they already use GymMantra, they get linked.'), size: 12),
+          ErrorText(error),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: busy ? null : save, child: Text(context.t('Add member'))),
+        ]),
+        if (busy) BusyCover(text: context.t('Adding member…')),
       ]),
     );
   }
@@ -953,7 +975,12 @@ class _OwnerOffersState extends ConsumerState<OwnerOffersScreen> {
                 const SizedBox(height: 110),
                 Icon(Icons.local_offer_outlined, size: 56, color: context.c.mut),
                 const SizedBox(height: 10),
-                Muted(context.t('No offers yet. Create one — it shows on dashboards.'), align: TextAlign.center, size: 14),
+                Center(child: Text(context.t('No offers yet'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 48),
+                  child: Muted(context.t('Create one — it shows on your members’ dashboards.'), align: TextAlign.center, size: 13.5),
+                ),
               ]);
             }
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 90), children: [
@@ -1392,7 +1419,7 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
   Widget build(BuildContext context) {
     final t = widget.trainer;
     Widget field(TextEditingController c, String label, {String? prefix}) => Expanded(
-          child: TextField(controller: c, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: label, prefixText: prefix, isDense: true)),
+          child: TextField(controller: c, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: label, prefixText: prefix, isDense: true)),
         );
     return Scaffold(
       appBar: AppBar(title: Text(t['name'] as String)),
@@ -1408,8 +1435,27 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
           const SizedBox(width: 10),
           field(share, context.t('Trainer share %')),
         ]),
-        const SizedBox(height: 4),
-        Muted(context.t('Trainer share = the part of PT money you pay the trainer.'), size: 11.5),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, children: [
+          for (final pc in [0, 50, 80, 100])
+            ChoiceChip(
+              label: Text('$pc%'),
+              selected: share.text.trim() == '$pc',
+              onSelected: (_) => setState(() => share.text = '$pc'),
+            ),
+        ]),
+        const SizedBox(height: 6),
+        Builder(builder: (context) {
+          final pc = (int.tryParse(share.text.trim()) ?? 0).clamp(0, 100);
+          return Muted(
+            context.t('Trainer share = the part of PT money you pay the trainer. Example: on {fee} PT fees the trainer gets {t} and the gym keeps {g}. Changing it updates all PT money; payouts already made stay the same.', {
+              'fee': rupees(10000),
+              't': rupees(10000 * pc / 100),
+              'g': rupees(10000 - 10000 * pc / 100),
+            }),
+            size: 11.5,
+          );
+        }),
         const SizedBox(height: 18),
         SectionTitle(context.t('PT packages')),
         for (final (i, p) in pkgs.indexed)

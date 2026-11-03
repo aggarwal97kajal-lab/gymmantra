@@ -1,11 +1,9 @@
-import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:share_plus/share_plus.dart';
 import '../api.dart';
 import '../haptics.dart';
 import '../i18n.dart';
@@ -16,15 +14,18 @@ import '../ui.dart';
 import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
 import 'branch.dart';
+import 'reports_kit.dart';
 
 // Owner tools that used to be on the website only: reports, membership plans and gym settings.
 
-final reportsProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => branchGet(ref, '/reports?days=$days'));
+final reportsProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, q) => branchGet(ref, '/reports?$q'));
 final ownerPlansProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/plans'));
 
 // ============================================================ reports
 
-final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, int>((ref, days) => branchGet(ref, '/reports/entries?days=$days'));
+String _ymdR(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, q) => branchGet(ref, '/reports/entries?$q'));
 
 class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
@@ -34,7 +35,8 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsState extends ConsumerState<ReportsScreen> {
   int view = 0; // 0 entries, 1 summary
-  int days = 30;
+  ReportRange range = ReportRange.days(30);
+  ReportRange get summaryRange => !range.custom && range.days! > 90 ? ReportRange.days(90) : range;
   String tab = 'ALL';
   final q = TextEditingController();
   Set<String> types = {}; // MEMBERSHIP, PT (empty = all)
@@ -58,7 +60,7 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
 
   Future<void> filters() async {
     var t = {...types};
-    var d = days;
+    var d = range.custom ? 0 : range.days!;
     final min = TextEditingController(text: minAmount?.toString() ?? '');
     final ok = await showModalBottomSheet<bool>(
       context: context,
@@ -91,6 +93,7 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
             const SizedBox(height: 6),
             Wrap(spacing: 8, runSpacing: 8, children: [
               for (final (n, l) in [(7, '7 days'), (30, '30 days'), (90, '90 days'), (365, 'This year')]) chip(ctx.t(l), d == n, () => d = n),
+              if (range.custom) chip('${fmtDate(_ymdR(range.from!))} – ${fmtDate(_ymdR(range.to!))}', d == 0, () => d = 0),
             ]),
             const SizedBox(height: 14),
             Muted(ctx.t('Amount at least (₹)'), size: 13),
@@ -119,68 +122,117 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
     if (ok == true) {
       setState(() {
         types = t;
-        days = d;
+        if (d != 0) range = ReportRange.days(d);
         minAmount = int.tryParse(min.text.trim());
       });
     }
   }
 
-  Future<void> download(List<Map> rows) async {
-    final head = 'Date,Member,Code,Type,Item,Start,End,Total,Paid,Due,Status';
-    String cell(Object? v) => '"${'${v ?? ''}'.replaceAll('"', '""')}"';
-    final lines = [
-      head,
-      for (final e in rows) [e['date'], e['name'], e['memberCode'], e['type'], e['title'], e['startDate'], e['endDate'], e['total'], e['paid'], e['due'], e['status']].map(cell).join(','),
-    ];
+  String get rangeLabel => range.custom ? '${fmtDate(_ymdR(range.from!))} – ${fmtDate(_ymdR(range.to!))}' : 'last ${range.days} days';
+
+  Future<void> download(List<Map> rows, {required bool pdf}) async {
+    final gym = (ref.read(sessionProvider).myGym?['name'] as String?) ?? 'Gym';
+    final base = '${gym}_report_${range.custom ? '${_ymdR(range.from!)}_${_ymdR(range.to!)}' : '${range.days}d'}';
+    final safe = base.replaceAll(RegExp(r'[^A-Za-z0-9_-]+'), '_');
     try {
-      final dir = await getTemporaryDirectory();
-      final f = File('${dir.path}/gymmantra_report_${days}d.csv');
-      await f.writeAsString(lines.join('\n'));
-      await Share.shareXFiles([XFile(f.path, mimeType: 'text/csv')], text: 'GymMantra report · last $days days');
+      if (pdf) {
+        final bytes = await simplePdf(
+          '$gym · Report · $rangeLabel',
+          [for (final e in rows) ['${e['date']}', '${e['name']}', '${e['memberCode']}', '${e['title']}', rupees(e['total'] as num?), rupees(e['paid'] as num?), rupees(e['due'] as num?), '${e['status']}']],
+          head: ['Date', 'Member', 'Code', 'Item', 'Total', 'Paid', 'Due', 'Status'],
+        );
+        if (mounted) await saveAndOffer(context, '$safe.pdf', bytes, 'application/pdf');
+      } else {
+        String cell(Object? v) => '"${'${v ?? ''}'.replaceAll('"', '""')}"';
+        final lines = [
+          'Date,Member,Code,Type,Item,Start,End,Total,Paid,Due,Status',
+          for (final e in rows) [e['date'], e['name'], e['memberCode'], e['type'], e['title'], e['startDate'], e['endDate'], e['total'], e['paid'], e['due'], e['status']].map(cell).join(','),
+        ];
+        if (mounted) await saveAndOffer(context, '$safe.csv', utf8.encode('\uFEFF${lines.join('\n')}'), 'text/csv');
+      }
     } catch (e) {
       if (mounted) toastError(context, e);
     }
   }
 
+  Future<void> downloadSheet(List<Map> rows) => showModalBottomSheet(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(rangeLabel, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+              Muted(ctx.t('{n} entries', {'n': rows.length}), size: 12.5),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      download(rows, pdf: true);
+                    },
+                    icon: const Icon(Icons.download_rounded),
+                    label: Text(ctx.t('Download PDF')),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      download(rows, pdf: false);
+                    },
+                    child: Text(ctx.t('Excel (CSV)')),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              Muted(ctx.t('The file is saved in the phone\'s Downloads folder. Tap "Open" in the message to see it.'), size: 11.5),
+            ]),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final p = context.c;
-    final v = ref.watch(reportEntriesProvider(days));
+    final v = ref.watch(reportEntriesProvider(range.query));
     final all = ((v.valueOrNull as Map?)?['entries'] as List?)?.cast<Map>() ?? const <Map>[];
     final rows = apply(all);
     return Scaffold(
       appBar: AppBar(
         title: Text(context.t('Reports')),
-        actions: [if (view == 0) IconButton(tooltip: context.t('Download'), onPressed: rows.isEmpty ? null : () => download(rows), icon: const Icon(Icons.download_rounded))],
+        actions: [if (view == 0) IconButton(tooltip: context.t('Download'), onPressed: rows.isEmpty ? null : () => downloadSheet(rows), icon: const Icon(Icons.download_rounded))],
       ),
       body: RefreshIndicator(
         color: p.primary,
         onRefresh: () async {
-          ref.invalidate(reportEntriesProvider(days));
-          ref.invalidate(reportsProvider(days > 90 ? 90 : days));
+          ref.invalidate(reportEntriesProvider(range.query));
+          ref.invalidate(reportsProvider(summaryRange.query));
         },
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
           Seg<int>(value: view, items: [(0, context.t('Entries'), Icons.list_alt_rounded), (1, context.t('Summary'), Icons.bar_chart_rounded)], onChanged: (x) => setState(() => view = x)),
           const SizedBox(height: 12),
           if (view == 1) ...[
-            Seg<int>(
-              value: days > 90 ? 90 : days,
-              items: [(7, context.t('7 days'), null), (30, context.t('30 days'), null), (90, context.t('90 days'), null)],
-              onChanged: (d) {
+            RangePicker(
+              value: summaryRange,
+              onChanged: (r) {
                 TapHaptics.buzz();
-                setState(() => days = d);
+                setState(() => range = r);
               },
             ),
             const SizedBox(height: 14),
             AsyncBody(
-              value: ref.watch(reportsProvider(days > 90 ? 90 : days)),
-              onRetry: () => ref.invalidate(reportsProvider(days > 90 ? 90 : days)),
+              value: ref.watch(reportsProvider(summaryRange.query)),
+              onRetry: () => ref.invalidate(reportsProvider(summaryRange.query)),
               builder: (d) => _ReportBody(d: d as Map),
             ),
           ] else ...[
             if (v.valueOrNull != null)
               Muted(
-                context.t('{n} entries · {total} · last {d} days', {'n': all.length, 'total': rupees((v.valueOrNull as Map)['total'] as num?), 'd': days}),
+                range.custom
+                    ? '${context.t('{n} entries · {total}', {'n': all.length, 'total': rupees((v.valueOrNull as Map)['total'] as num?)})} · ${fmtDate(_ymdR(range.from!))} – ${fmtDate(_ymdR(range.to!))}'
+                    : context.t('{n} entries · {total} · last {d} days', {'n': all.length, 'total': rupees((v.valueOrNull as Map)['total'] as num?), 'd': range.days}),
                 size: 12.5,
               ),
             const SizedBox(height: 8),
@@ -218,10 +270,13 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
                 setState(() => tab = x);
               },
             ),
-            if (filterCount > 0 || days != 30) ...[
+            if (filterCount > 0 || range != ReportRange.days(30)) ...[
               const SizedBox(height: 10),
               Wrap(spacing: 6, runSpacing: 6, children: [
-                InputChip(label: Text('${context.t('Date')}: ${context.t(days == 365 ? 'This year' : '{n} days', {'n': days})}'), onDeleted: days == 30 ? null : () => setState(() => days = 30)),
+                InputChip(
+                  label: Text('${context.t('Date')}: ${range.custom ? '${fmtDate(_ymdR(range.from!))} – ${fmtDate(_ymdR(range.to!))}' : context.t(range.days == 365 ? 'This year' : '{n} days', {'n': range.days})}'),
+                  onDeleted: range == ReportRange.days(30) ? null : () => setState(() => range = ReportRange.days(30)),
+                ),
                 if (types.isNotEmpty) InputChip(label: Text('${context.t('Type')}: ${types.map((x) => x == 'PT' ? 'PT' : context.t('Membership')).join(', ')}'), onDeleted: () => setState(() => types = {})),
                 if (minAmount != null) InputChip(label: Text('${context.t('Amount')} ≥ ${rupees(minAmount)}'), onDeleted: () => setState(() => minAmount = null)),
               ]),
@@ -242,7 +297,7 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
             ]),
             AsyncBody(
               value: v,
-              onRetry: () => ref.invalidate(reportEntriesProvider(days)),
+              onRetry: () => ref.invalidate(reportEntriesProvider(range.query)),
               builder: (_) => rows.isEmpty
                   ? Padding(padding: const EdgeInsets.all(30), child: Muted(context.t('Nothing here'), align: TextAlign.center))
                   : Panel(

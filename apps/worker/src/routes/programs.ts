@@ -1,4 +1,4 @@
-import { App, authenticate, C, MemberDoc, notify, P, TenantDoc, UserDoc } from '../core';
+import { App, authenticate, C, gymFace, MemberDoc, notify, P, TenantDoc, UserDoc } from '../core';
 import { bad, forbidden, notFound, nowIso, uuid } from '../lib/http';
 import type { Reader } from '../store/store';
 import { body, str } from '../lib/validate';
@@ -288,11 +288,16 @@ export function programRoutes(app: App) {
     const u = await authenticate(c);
     const { store } = c.var.deps;
     const entries = Object.entries(u.memberships ?? {});
-    const [docs, tenants] = await Promise.all([store.getMany<ProgramDoc>(entries.map(([t, m]) => P.program(t, m))), store.getMany<TenantDoc>(entries.map(([t]) => P.tenant(t)))]);
+    const [docs, tenants, mems] = await Promise.all([
+      store.getMany<ProgramDoc>(entries.map(([t, m]) => P.program(t, m))),
+      store.getMany<TenantDoc>(entries.map(([t]) => P.tenant(t))),
+      store.getMany<MemberDoc>(entries.map(([t, m]) => P.member(t, m))),
+    ]);
     return c.json(
       entries
         .map(([tid, mid], i) => ({
-          gym: { id: tid, name: tenants[i]?.name ?? '' },
+          // "Gym – Branch" (also the PDF watermark)
+          gym: { id: tid, name: tenants[i] ? gymFace(tenants[i]!, mems[i]?.branchId).name : '' },
           memberId: mid,
           diet: docs[i]?.diet ?? null,
           workout: docs[i]?.workout ?? null,

@@ -10,6 +10,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'legal.dart' show AgreeLine;
+import 'person.dart';
 
 /// Label above a text field, as on the designs.
 class LabeledField extends StatelessWidget {
@@ -158,15 +159,18 @@ class LangSwitch extends StatelessWidget {
 }
 
 class _AuthFrame extends StatelessWidget {
-  const _AuthFrame({required this.title, required this.subtitle, required this.children, this.back = false});
+  const _AuthFrame({required this.title, required this.subtitle, required this.children, this.back = false, this.busyText, this.wave = false});
   final String title;
   final String subtitle;
   final List<Widget> children;
   final bool back;
+  final String? busyText; // shows the dumbbell spinner over the screen
+  final bool wave;
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
+      body: Stack(children: [
+        SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(22, 16, 22, 28), children: [
           Row(children: [
             if (back)
@@ -187,6 +191,8 @@ class _AuthFrame extends StatelessWidget {
           ...children,
         ]),
       ),
+        if (busyText != null) BusyCover(text: busyText!, wave: wave),
+      ]),
     );
   }
 }
@@ -286,6 +292,7 @@ class _LoginState extends ConsumerState<LoginScreen> with _Busy {
   Widget build(BuildContext context) {
     final s = ref.watch(sessionProvider);
     return _AuthFrame(
+      busyText: busy ? context.t('Logging in…') : null,
       title: context.t('Welcome back 👋'),
       subtitle: context.t('Log in to see your membership'),
       children: [
@@ -344,26 +351,88 @@ class SignupScreen extends ConsumerStatefulWidget {
 }
 
 class _SignupState extends ConsumerState<SignupScreen> with _Busy {
-  final name = TextEditingController();
+  final person = PersonDetails();
   final email = TextEditingController();
   final phone = TextEditingController();
   final pw = TextEditingController();
   final pw2 = TextEditingController();
   bool hide = true;
   bool agreed = false;
+  Map? addedBy; // the gym already made this account
+
+  void submit(Session s) {
+    final miss = person.missing(context);
+    if (miss != null) {
+      setState(() => error = miss);
+      return;
+    }
+    final mismatch = context.t('Passwords do not match');
+    run(() async {
+      if (pw.text != pw2.text) throw ApiException(400, mismatch);
+      try {
+        await s.signupFull(person.toJson(), email.text, phone.text, pw.text);
+      } on ApiException catch (e) {
+        if (e.data?['code'] == 'ADDED_BY_GYM') {
+          setState(() => addedBy = e.data);
+          return;
+        }
+        rethrow;
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = ref.watch(sessionProvider);
+    final p = context.c;
+    if (addedBy != null) {
+      return _AuthFrame(
+        back: true,
+        busyText: busy ? context.t('Sending link…') : null,
+        title: context.t('Create account'),
+        subtitle: email.text.trim(),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: C.red.withAlpha(22), borderRadius: BorderRadius.circular(16), border: Border.all(color: C.red.withAlpha(80))),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(context.t('An account with this email already exists'), style: const TextStyle(color: C.red, fontWeight: FontWeight.w800, fontSize: 16)),
+              const SizedBox(height: 6),
+              Text(context.t('{gym} has made you a member. Don\'t make a new account — just set your password and log in.', {'gym': addedBy!['gymName']}), style: TextStyle(color: p.mut, height: 1.4)),
+            ]),
+          ),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: busy
+                ? null
+                : () => run(() async {
+                      final to = await s.forgot(email.text);
+                      if (!mounted) return;
+                      toast(context, context.t('Link sent to {email}. Set your password, then log in.', {'email': to}), kind: DripKind.ok);
+                      context.go('/login');
+                    }),
+            child: Text(context.t('Set password & log in')),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(onPressed: () => context.go('/login'), child: Text(context.t('Log in'))),
+          const SizedBox(height: 10),
+          Muted(context.t('The password link goes to this email.'), size: 12),
+          ErrorText(error),
+        ],
+      );
+    }
     return _AuthFrame(
       back: true,
+      busyText: busy ? context.t('Creating your account…') : null,
+      wave: true,
       title: context.t('Create your account'),
-      subtitle: context.t('Takes less than a minute'),
+      subtitle: context.t('Member · Gym owner · Trainer — everyone fills the same details'),
       children: [
         const RoleBadge(),
-        LabeledField(label: context.t('Full name'), controller: name, icon: Icons.person_outline_rounded, caps: TextCapitalization.words, action: TextInputAction.next),
-        LabeledField(label: context.t('Email'), controller: email, icon: Icons.mail_outline_rounded, keyboard: TextInputType.emailAddress, action: TextInputAction.next),
-        PhoneField(label: context.t('Mobile number'), controller: phone, action: TextInputAction.next),
+        PersonFields(value: person, between: [
+          PhoneField(label: '${context.t('Mobile')} *', controller: phone, action: TextInputAction.next, bottom: 12),
+          LabeledField(label: '${context.t('Email')} *', controller: email, keyboard: TextInputType.emailAddress, action: TextInputAction.next),
+        ]),
         LabeledField(
           label: context.t('Password (at least 8 characters)'),
           controller: pw,
@@ -376,23 +445,7 @@ class _SignupState extends ConsumerState<SignupScreen> with _Busy {
         AgreeLine(value: agreed, onChanged: (v) => setState(() => agreed = v)),
         ErrorText(error),
         const SizedBox(height: 10),
-        FilledButton(
-          onPressed: busy || !agreed
-              ? null
-              : () {
-                  final mismatch = context.t('Passwords do not match');
-                  run(() async {
-                    if (pw.text != pw2.text) throw ApiException(400, mismatch);
-                    await s.signup(name.text, email.text, phone.text, pw.text);
-                  });
-                },
-          child: _spinnerOr(busy, context.t('Sign up')),
-        ),
-        if (s.googleClientId != null) ...[
-          const _OrDivider(),
-          GoogleButton(label: context.t('Sign up with Google'), onPressed: busy || !agreed ? null : () => run(() => s.google(signup: true, phone: phone.text))),
-          Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Muted(context.t('Fill in your mobile number above so your gym can find you.'), size: 12, align: TextAlign.center))),
-        ],
+        FilledButton(onPressed: busy || !agreed ? null : () => submit(s), child: Text(context.t('Sign up'))),
         const SizedBox(height: 18),
         Center(
           child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [

@@ -122,11 +122,15 @@ export function trainerRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const { store } = c.var.deps;
-    const all = await store.query<TrainerDoc>(P.trainers(g.tenantId), [['active', true]]);
-    const here = new Set(all.filter((r) => inBranch(g, r.data.branchId)).map((r) => r.data.userId));
-    const list = (await listTrainers(store, g.tenantId, false)).filter((t) => here.has(t.id));
-    // Trainer attendance from the gym check-in QR.
-    const days = await store.getMany<{ month: string; visits: number; lastAt: string | null; days: string[] }>(list.map((t) => P.trainerDays(g.tenantId, t.id)));
+    // One list read, then names/photos and check-in days together (fewer round trips = opens faster).
+    const rows = (await store.query<TrainerDoc>(P.trainers(g.tenantId), [['active', true]])).map((r) => r.data).filter((t) => inBranch(g, t.branchId));
+    const [users, days0] = await Promise.all([
+      store.getMany<UserDoc>(rows.map((t) => P.user(t.userId))),
+      store.getMany<{ month: string; visits: number; lastAt: string | null; days: string[] }>(rows.map((t) => P.trainerDays(g.tenantId, t.userId))),
+    ]);
+    const joined = rows.map((t, i) => ({ v: trainerView(t, users[i]), d: days0[i] })).sort((a, b) => a.v.name.localeCompare(b.v.name));
+    const list = joined.map((x) => x.v);
+    const days = joined.map((x) => x.d);
     const month = todayIST().slice(0, 7);
     return c.json(list.map((t, i) => ({ ...t, visitsThisMonth: days[i]?.month === month ? days[i]!.visits : 0, lastCheckinAt: days[i]?.lastAt ?? null, checkinDays: days[i]?.days.slice(0, 31) ?? [] })));
   });

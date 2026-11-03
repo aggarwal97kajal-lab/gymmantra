@@ -99,6 +99,13 @@ class Session extends ChangeNotifier {
     if (lang == 'hi') await setLanguage('hi');
   }
 
+  /// Sign-up with full details (first/middle/last name, DOB, state, city, PIN).
+  Future<void> signupFull(Map<String, dynamic> details, String email, String phone, String password) async {
+    final lang = AppSettings.instance.lang;
+    await _done(await api.post('/auth/signup', {...details, 'email': email.trim(), 'phone': phone.trim(), 'password': password, ..._roleBody}));
+    if (lang == 'hi') await setLanguage('hi');
+  }
+
   /// Sends a password reset link. Returns the masked email it went to.
   Future<String> forgot(String identifier) async {
     final r = await api.post('/auth/forgot', {'identifier': identifier.trim()});

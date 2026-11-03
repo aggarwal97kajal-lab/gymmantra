@@ -11,6 +11,8 @@ import 'api.dart';
 import 'i18n.dart';
 import 'prefs.dart';
 import 'screens/billing.dart';
+import 'screens/person.dart' show BusyCover;
+import 'admin_extra.dart';
 import 'screens/help.dart' show TicketScreen, TicketTile, ticketStatuses, ticketStatusLabel, ticketStatusColor, ticketStatusOf;
 import 'screens/home.dart' show openUrl;
 import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, ProfileDetailsScreen, ChangePasswordScreen;
@@ -84,6 +86,11 @@ GoRouter adminRouter(Session session, Listenable splash, Widget splashScreen, bo
         GoRoute(path: '/a/tickets', builder: (_, __) => const AdminTickets()),
         GoRoute(path: '/a/ticket/:id', builder: (_, s) => TicketScreen(id: s.pathParameters['id']!, admin: true)),
         GoRoute(path: '/a/settings', builder: (_, __) => const AdminSettings()),
+        GoRoute(path: '/a/coupons', builder: (_, __) => const AdminCoupons()),
+        GoRoute(path: '/a/coupon', builder: (_, s) => CouponEditScreen(coupon: s.extra as Map?)),
+        GoRoute(path: '/a/payments', builder: (_, __) => const AdminPayments()),
+        GoRoute(path: '/a/reports', builder: (_, __) => const AdminReports()),
+        GoRoute(path: '/a/receipt', builder: (_, __) => const AdminReceiptSettings()),
         GoRoute(path: '/a/profile', builder: (_, __) => const ProfileScreen()),
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
         GoRoute(path: '/profile/details', builder: (_, __) => const ProfileDetailsScreen()),
@@ -103,10 +110,59 @@ class _AdminLoginState extends ConsumerState<AdminLoginScreen> {
   bool busy = false;
   bool hide = true;
   String? error;
+  Future<void> forgot() async {
+    final e = TextEditingController(text: id.text.trim());
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        var sending = false;
+        String? err;
+        return StatefulBuilder(
+          builder: (ctx, set) => Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 24 + MediaQuery.of(ctx).viewInsets.bottom),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(ctx.t('Reset password'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Muted(ctx.t('The reset link goes to your super admin email. Forgot the email too? See SUPER_ADMIN_EMAIL in Cloudflare.'), size: 13),
+              const SizedBox(height: 14),
+              TextField(controller: e, keyboardType: TextInputType.emailAddress, decoration: InputDecoration(labelText: ctx.t('Email'), prefixIcon: const Icon(Icons.mail_outline_rounded))),
+              ErrorText(err),
+              const SizedBox(height: 14),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: C.indigo),
+                onPressed: sending
+                    ? null
+                    : () async {
+                        set(() {
+                          sending = true;
+                          err = null;
+                        });
+                        try {
+                          final to = await ref.read(sessionProvider).forgot(e.text);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) toast(context, context.t('Link sent to {email}. Set your password, then log in.', {'email': to}), kind: DripKind.ok);
+                        } catch (x) {
+                          set(() {
+                            sending = false;
+                            err = x.toString();
+                          });
+                        }
+                      },
+                child: sending ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white)) : Text(ctx.t('Send reset link')),
+              ),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
+      body: Stack(children: [
+        SafeArea(
         child: ListView(padding: const EdgeInsets.fromLTRB(24, 60, 24, 24), children: [
           const Center(child: AdminLogo(size: 104)),
           const SizedBox(height: 20),
@@ -131,8 +187,9 @@ class _AdminLoginState extends ConsumerState<AdminLoginScreen> {
               suffixIcon: IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => hide = !hide)),
             ),
           ),
+          Align(alignment: Alignment.centerRight, child: TextButton(onPressed: forgot, child: Text(context.t('Forgot password?')))),
           ErrorText(error),
-          const SizedBox(height: 18),
+          const SizedBox(height: 8),
           FilledButton(
             onPressed: busy
                 ? null
@@ -155,6 +212,8 @@ class _AdminLoginState extends ConsumerState<AdminLoginScreen> {
           Muted(context.t('Only for the GymMantra admin.'), align: TextAlign.center, size: 12),
         ]),
       ),
+        if (busy) BusyCover(text: context.t('Logging in…')),
+      ]),
     );
   }
 }
@@ -829,6 +888,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
   late Set<String> states = {...((widget.ad?['states'] as List?)?.cast<String>() ?? const [])};
   late String color = widget.ad?['color'] as String? ?? '#2563EB';
   late DateTime ends = DateTime.tryParse(widget.ad?['endsOn'] as String? ?? '') ?? DateTime.now().add(const Duration(days: 30));
+  late String? coupon = widget.ad?['couponCode'] as String?;
   String? imageUrl;
   Uint8List? localImage; // picked now, shown in the live preview, uploaded on Save
   bool busy = false;
@@ -855,6 +915,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
       'states': states.toList(),
       'endsOn': ymd,
       'color': color,
+      'couponCode': coupon,
     };
     final r = widget.ad == null ? await Api.instance.post('/super/ads', body) : await Api.instance.patch('/super/ads/${widget.ad!['id']}', body);
     return r['id'] as String?;
@@ -885,9 +946,7 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.c;
-    Widget check(String label, bool v, ValueChanged<bool> on) => Expanded(
-          child: FilterChip(label: SizedBox(width: double.infinity, child: Text(label, textAlign: TextAlign.center)), selected: v, onSelected: on),
-        );
+    Widget check(String label, bool v, ValueChanged<bool> on) => FilterChip(label: Text(label, softWrap: false), selected: v, onSelected: on);
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.ad == null ? context.t('New ad') : context.t('Edit ad')),
@@ -942,6 +1001,13 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
                 const Spacer(),
                 Text(title.text.isEmpty ? context.t('Ad title') : title.text, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
                 if (text.text.isNotEmpty) Text(text.text, style: const TextStyle(color: Color(0xEEFFFFFF), fontSize: 12.5)),
+                if (coupon != null)
+                  Container(
+                    margin: const EdgeInsets.only(top: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(6)),
+                    child: Text('${context.t('Code')}: $coupon', style: TextStyle(color: _hex(color), fontWeight: FontWeight.w800, letterSpacing: 1.2, fontSize: 12)),
+                  ),
               ]),
             ),
           ]),
@@ -968,14 +1034,45 @@ class _AdEditState extends ConsumerState<AdEditScreen> {
           const SizedBox(height: 10),
           TextField(controller: link, keyboardType: kind == 'URL' ? TextInputType.url : TextInputType.phone, decoration: InputDecoration(labelText: kind == 'URL' ? 'https://…' : context.t('Phone number'))),
         ],
+        const SizedBox(height: 12),
+        Panel(
+          padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(context.t('Add a coupon'), style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(context.t('The code shows on the ad. Gym owners tap it to use it on a plan.'), style: const TextStyle(fontSize: 12)),
+              value: coupon != null,
+              onChanged: (v) async {
+                if (!v) {
+                  setState(() => coupon = null);
+                  return;
+                }
+                final code = await pickCoupon(context);
+                if (code != null) setState(() => coupon = code);
+              },
+            ),
+            if (coupon != null)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.sell_rounded, color: C.indigo),
+                title: Text(coupon!, style: const TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                trailing: TextButton(
+                  onPressed: () async {
+                    final code = await pickCoupon(context);
+                    if (code != null) setState(() => coupon = code);
+                  },
+                  child: Text(context.t('Change')),
+                ),
+              ),
+          ]),
+        ),
         const SizedBox(height: 14),
         Muted(context.t('Who should see it?'), size: 12.5),
         const SizedBox(height: 6),
-        Row(children: [
+        Wrap(spacing: 8, runSpacing: 6, children: [
           check(context.t('Members'), members, (v) => setState(() => members = v)),
-          const SizedBox(width: 6),
           check(context.t('Trainers'), trainers, (v) => setState(() => trainers = v)),
-          const SizedBox(width: 6),
           check(context.t('Gym owners'), owners, (v) => setState(() => owners = v)),
         ]),
         const SizedBox(height: 12),
@@ -1290,8 +1387,12 @@ class AdminMore extends ConsumerWidget {
         Panel(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Column(children: [
+            row(Icons.bar_chart_rounded, context.t('Reports'), () => context.push('/a/reports')),
+            row(Icons.payments_rounded, context.t('Plan payments (UPI)'), () => context.push('/a/payments')),
+            row(Icons.sell_rounded, context.t('Coupons'), () => context.push('/a/coupons')),
             row(Icons.confirmation_number_rounded, context.t('Support tickets'), () => context.push('/a/tickets')),
-            row(Icons.receipt_long_rounded, context.t('GST and billing'), () => context.push('/a/settings')),
+            row(Icons.draw_rounded, context.t('Receipt & signature'), () => context.push('/a/receipt')),
+            row(Icons.receipt_long_rounded, context.t('GST'), () => context.push('/a/settings')),
             row(Icons.person_rounded, context.t('Profile & settings'), () => context.push('/a/profile')),
           ]),
         ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -13,6 +14,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show PhoneField;
+import 'billing.dart' show IndiaState, loadIndia, SearchList;
 
 class _Ratio4x5 implements CropAspectRatioPresetData {
   @override
@@ -118,6 +120,17 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(context.t('Profile photo'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             const SizedBox(height: 8),
+            if (hasPhoto)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const IconTile(Icons.visibility_outlined),
+                title: Text(context.t('View photo')),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  final u = ref.read(sessionProvider).user ?? {};
+                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => PhotoViewScreen(name: u['name'] as String? ?? '', url: u['photoUrl'] as String)));
+                },
+              ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const IconTile(Icons.photo_camera_rounded),
@@ -250,9 +263,11 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
             _Row(Icons.notifications_none_rounded, context.t('Notifications'), () => context.push('/notifications')),
             _Row(Icons.key_outlined, u['hasPassword'] == true ? context.t('Change password') : context.t('Set a password'), () => context.push('/profile/password')),
             if (s.mode == 'trainer') _Row(Icons.badge_outlined, context.t('About me'), () => context.push('/t/about')),
-            _Row(Icons.help_outline_rounded, context.t('FAQ & Support'), () => s.mode == 'member' ? context.go('/help') : context.push('/support')),
-            _Row(Icons.privacy_tip_outlined, context.t('Privacy Policy'), () => context.push('/legal/privacy')),
-            _Row(Icons.description_outlined, context.t('Terms & Conditions'), () => context.push('/legal/terms')),
+            if (!adminApp) ...[
+              _Row(Icons.help_outline_rounded, context.t('FAQ & Support'), () => s.mode == 'member' ? context.go('/help') : context.push('/support')),
+              _Row(Icons.privacy_tip_outlined, context.t('Privacy Policy'), () => context.push('/legal/privacy')),
+              _Row(Icons.description_outlined, context.t('Terms & Conditions'), () => context.push('/legal/terms')),
+            ],
             _Row(Icons.delete_outline_rounded, context.t('Delete my account'), deleteAccount, color: C.red, last: true),
           ]),
         ),
@@ -433,6 +448,10 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
   late final address = TextEditingController(text: u['address'] as String? ?? '');
   late String? dob = u['dob'] as String?;
   late String? gender = u['gender'] as String?;
+  late String? state = u['state'] as String?;
+  late String? city = u['city'] as String?;
+  late final pin = TextEditingController(text: u['pincode'] as String? ?? '');
+  List<IndiaState> states = const [];
   late final phone = TextEditingController(text: PhoneField.local(u['phone']));
   late final email = TextEditingController(text: u['email'] as String? ?? '');
   final pw = TextEditingController();
@@ -450,6 +469,7 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
       'dob': dob,
       'gender': gender,
       'address': address.text.trim(),
+      if (state != null && city != null && pin.text.trim().length == 6) ...{'state': state, 'city': city, 'country': 'India', 'pincode': pin.text.trim()},
     };
     final s = ref.read(sessionProvider);
     // Name / date of birth / address: show the change and close at once; save in the background.
@@ -495,8 +515,23 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    loadIndia().then((x) {
+      if (mounted) setState(() => states = x);
+    });
+  }
+
+  Future<String?> pick(String title, List<String> items, {bool other = false}) => showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => SearchList(title: title, items: items, allowOther: other),
+      );
+
+  @override
   Widget build(BuildContext context) {
     final cur = ref.watch(sessionProvider).user ?? {};
+    final st = states.where((x) => x.name == state).firstOrNull;
     Widget field(TextEditingController c, String label, {bool required = false, int lines = 1}) => Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: TextField(controller: c, maxLines: lines, textCapitalization: TextCapitalization.words, decoration: InputDecoration(labelText: required ? '$label *' : label)),
@@ -516,6 +551,17 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Personal details'))),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+        if (cur['addedByGym'] != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.ok.withAlpha(30), borderRadius: BorderRadius.circular(14)),
+            child: Row(children: [
+              const Icon(Icons.check_circle_outline_rounded, color: C.ok, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text(context.t('{gym} filled in these details. You can change them.', {'gym': cur['addedByGym']}), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+            ]),
+          ),
         field(first, context.t('First name'), required: true),
         field(middle, context.t('Middle name')),
         field(last, context.t('Last name')),
@@ -532,6 +578,25 @@ class _ProfileDetailsState extends ConsumerState<ProfileDetailsScreen> {
         ),
         const SizedBox(height: 12),
         field(address, context.t('Address'), lines: 2),
+        tap(Icons.map_outlined, context.t('State'), state ?? context.t('Choose'), () async {
+          final x = await pick(context.t('Choose state'), states.map((e) => e.name).toList());
+          if (x != null) {
+            setState(() {
+              state = x;
+              city = null;
+            });
+          }
+        }),
+        tap(Icons.location_city_rounded, context.t('City'), city ?? context.t('Choose'), () async {
+          if (st == null) return;
+          final x = await pick(context.t('{state} cities', {'state': st.name}), st.cities, other: true);
+          if (x != null) setState(() => city = x);
+        }),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: TextField(controller: pin, keyboardType: TextInputType.number, maxLength: 6, decoration: InputDecoration(labelText: context.t('PIN code'), counterText: '', prefixIcon: const Icon(Icons.pin_drop_outlined))),
+        ),
+        if (cur['country'] != null) Padding(padding: const EdgeInsets.only(bottom: 12, left: 4), child: Muted('${context.t('Country')}: ${cur['country']}', size: 12.5)),
         const SizedBox(height: 4),
         SectionTitle(context.t('Login details')),
         PhoneField(label: context.t('Mobile number'), controller: phone, onChanged: (_) => setState(() {}), bottom: 12),
@@ -639,4 +704,62 @@ class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
       ]),
     );
   }
+}
+
+
+const _secure = MethodChannel('gymmantra/secure');
+
+/// Big photo on black. Screenshots are blocked (members, trainers, owners); the GM Admin app allows them.
+class PhotoViewScreen extends StatefulWidget {
+  const PhotoViewScreen({super.key, required this.name, required this.url});
+  final String name;
+  final String url;
+  @override
+  State<PhotoViewScreen> createState() => _PhotoViewState();
+}
+
+class _PhotoViewState extends State<PhotoViewScreen> {
+  Uint8List? bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!adminApp) _secure.invokeMethod('on').catchError((_) => null);
+    PhotoCache.load(widget.url).then((b) {
+      if (mounted) setState(() => bytes = b);
+    });
+  }
+
+  @override
+  void dispose() {
+    if (!adminApp) _secure.invokeMethod('off').catchError((_) => null);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white, title: Text(widget.name, style: const TextStyle(color: Colors.white))),
+        body: Column(children: [
+          Expanded(
+            child: Center(
+              child: bytes == null
+                  ? const CircularProgressIndicator(color: Colors.white)
+                  : InteractiveViewer(maxScale: 4, child: Image.memory(bytes!, fit: BoxFit.contain, width: double.infinity)),
+            ),
+          ),
+          if (!adminApp)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.lock_outline_rounded, color: Color(0x99FFFFFF), size: 14),
+                  const SizedBox(width: 6),
+                  Text(context.t('Screenshots are off for this photo'), style: const TextStyle(color: Color(0x99FFFFFF), fontSize: 12)),
+                ]),
+              ),
+            ),
+        ]),
+      );
 }

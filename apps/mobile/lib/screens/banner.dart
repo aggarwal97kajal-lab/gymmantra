@@ -55,19 +55,33 @@ class BannerPickerBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.c;
+    if (!has) {
+      return OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46), side: BorderSide(color: p.primary, width: 1.3), foregroundColor: p.primary),
+        onPressed: onPick,
+        icon: const Icon(Icons.add_photo_alternate_outlined, size: 19),
+        label: Text(context.t('Add banner picture')),
+      );
+    }
+    // Big buttons under the picture (not a small icon in the corner).
     return Row(children: [
       Expanded(
         child: OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(46), side: BorderSide(color: p.primary, width: 1.3), foregroundColor: p.primary),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: p.fg),
           onPressed: onPick,
-          icon: const Icon(Icons.add_photo_alternate_outlined, size: 19),
-          label: Text(context.t(has ? 'Change banner' : 'Add banner picture')),
+          icon: const Icon(Icons.image_outlined, size: 19),
+          label: Text(context.t('Change photo')),
         ),
       ),
-      if (has) ...[
-        const SizedBox(width: 8),
-        IconButton.outlined(onPressed: onRemove, icon: const Icon(Icons.delete_outline_rounded, color: C.red)),
-      ],
+      const SizedBox(width: 10),
+      Expanded(
+        child: OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: C.red, side: BorderSide(color: C.red.withAlpha(110))),
+          onPressed: onRemove,
+          icon: const Icon(Icons.close_rounded, size: 19),
+          label: Text(context.t('Remove')),
+        ),
+      ),
     ]);
   }
 }

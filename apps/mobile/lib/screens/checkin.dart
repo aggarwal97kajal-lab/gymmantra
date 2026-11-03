@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -276,23 +277,27 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
             child: RepaintBoundary(key: key, child: p),
           ),
         );
+    // Icon on top, the full name below — so "Download" and "Copy code" are never cut.
     Widget actions(List<(IconData, String, VoidCallback, Color?)> items) => Row(children: [
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) const SizedBox(width: 8),
             Expanded(
-              child: i == 0
-                  ? FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: items[i].$4, minimumSize: const Size.fromHeight(48), padding: const EdgeInsets.symmetric(horizontal: 8)),
-                      onPressed: busy ? null : items[i].$3,
-                      icon: Icon(items[i].$1, size: 18),
-                      label: Text(items[i].$2, overflow: TextOverflow.ellipsis),
-                    )
-                  : OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), padding: const EdgeInsets.symmetric(horizontal: 8)),
-                      onPressed: busy ? null : items[i].$3,
-                      icon: Icon(items[i].$1, size: 18),
-                      label: Text(items[i].$2, overflow: TextOverflow.ellipsis),
-                    ),
+              child: Material(
+                color: i == 0 ? (items[i].$4 ?? context.c.primary) : context.c.surf,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: i == 0 ? BorderSide.none : BorderSide(color: context.c.line)),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: busy ? null : items[i].$3,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(items[i].$1, size: 20, color: i == 0 ? Colors.white : context.c.fg),
+                      const SizedBox(height: 4),
+                      Text(items[i].$2, maxLines: 1, softWrap: false, textAlign: TextAlign.center, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: i == 0 ? Colors.white : context.c.fg)),
+                    ]),
+                  ),
+                ),
+              ),
             ),
           ],
         ]);
@@ -536,6 +541,30 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
     startCam(fresh: !_running);
   }
 
+  /// Live camera not working on this phone: take a photo of the QR with the phone's camera app and read it.
+  Future<void> scanPhoto() async {
+    try {
+      if (_running) await cam?.stop();
+    } catch (_) {}
+    final f = await ImagePicker().pickImage(source: ImageSource.camera, maxWidth: 1600, imageQuality: 90);
+    if (f == null || !mounted) return;
+    setState(() => working = true);
+    BarcodeCapture? cap;
+    try {
+      cap = await (cam ?? _newCam()).analyzeImage(f.path);
+    } catch (_) {
+      cap = null;
+    }
+    if (!mounted) return;
+    setState(() => working = false);
+    final v = cap == null || cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
+    if (v == null) {
+      setState(() => error = context.t('No QR found in the photo. Hold the phone closer and keep the whole QR in the photo.'));
+      return;
+    }
+    await onCode(v);
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = result;
@@ -557,10 +586,10 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
               final v = cap.barcodes.isEmpty ? null : cap.barcodes.first.rawValue;
               if (v != null) onCode(v);
             },
-            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, onRetry: () => startCam(fresh: true)),
+            errorBuilder: (context, e, _) => _CamProblem(code: e.errorCode, detail: e.errorDetails?.message, onRetry: () => startCam(fresh: true), onPhoto: scanPhoto),
           ),
         ),
-        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, onRetry: () => startCam(fresh: true))),
+        if (camError != null) Positioned.fill(child: _CamProblem(code: camError!, detail: cam?.value.error?.errorDetails?.message, onRetry: () => startCam(fresh: true), onPhoto: scanPhoto)),
         // Frame
         if (camError == null && cam?.value.error == null)
         Center(
@@ -602,6 +631,13 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
                   setState(() => torch = !torch);
                 },
               ),
+              const SizedBox(width: 12),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size(0, 48), padding: const EdgeInsets.symmetric(horizontal: 18)),
+                onPressed: working ? null : scanPhoto,
+                icon: const Icon(Icons.photo_camera_rounded, size: 20),
+                label: Text(context.t('Scan with photo')),
+              ),
             ]),
           ]),
         ),
@@ -612,9 +648,11 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> with WidgetsBindingObs
 
 /// Camera could not start: ask for permission (or open settings if it was refused for good).
 class _CamProblem extends StatelessWidget {
-  const _CamProblem({required this.code, required this.onRetry});
+  const _CamProblem({required this.code, required this.onRetry, required this.onPhoto, this.detail});
   final MobileScannerErrorCode code;
   final VoidCallback onRetry;
+  final VoidCallback onPhoto;
+  final String? detail;
   @override
   Widget build(BuildContext context) {
     final perm = code == MobileScannerErrorCode.permissionDenied;
@@ -631,22 +669,46 @@ class _CamProblem extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Text(
-          perm ? context.t('Camera permission needed') : context.t('Camera did not start'),
+          perm ? context.t('Camera permission needed') : context.t('Live camera did not start'),
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 6),
         Text(
-          perm ? context.t('Allow GymMantra to use the camera to scan the QR') : context.t('Close other apps using the camera and try again'),
+          perm ? context.t('Allow GymMantra to use the camera to scan the QR') : context.t('No problem — take a photo of the QR and you are checked in.'),
           textAlign: TextAlign.center,
           style: const TextStyle(color: Color(0xB3FFFFFF), fontSize: 13),
         ),
         const SizedBox(height: 20),
-        FilledButton(
-          style: FilledButton.styleFrom(minimumSize: const Size(220, 48)),
-          onPressed: onRetry,
-          child: Text(perm ? context.t('Allow camera') : context.t('Try again')),
-        ),
+        if (!perm) ...[
+          FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size(240, 50)),
+            onPressed: onPhoto,
+            icon: const Icon(Icons.photo_camera_rounded),
+            label: Text(context.t('Take photo of QR')),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(minimumSize: const Size(240, 48), foregroundColor: Colors.white, side: const BorderSide(color: Color(0x55FFFFFF))),
+            onPressed: onRetry,
+            child: Text(context.t('Try live camera again')),
+          ),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: const Color(0xFF1A1D23), borderRadius: BorderRadius.circular(10)),
+            child: Text(
+              '${context.t('Error code')}: ${code.name}${detail != null ? ' · $detail' : ''}\n${context.t('Send a screenshot of this and we will fix it.')}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0x99FFFFFF), fontSize: 11),
+            ),
+          ),
+        ] else
+          FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(220, 48)),
+            onPressed: onRetry,
+            child: Text(context.t('Allow camera')),
+          ),
         if (perm) ...[
           const SizedBox(height: 8),
           TextButton(

@@ -488,8 +488,14 @@ export function memberRoutes(app: App) {
             email: user.email ?? m.email ?? null,
             phone: user.phone ?? m.phone,
             address: user.address ?? null,
+            city: user.city ?? m.city ?? null,
+            state: user.state ?? m.state ?? null,
+            country: user.country ?? m.country ?? null,
+            pincode: user.pincode ?? m.pincode ?? null,
           }
-        : null,
+        : m.firstName
+          ? { name: m.name, firstName: m.firstName, middleName: m.middleName ?? null, lastName: m.lastName ?? null, dob: m.dob ?? null, gender: m.gender, email: m.email, phone: m.phone, address: null, city: m.city ?? null, state: m.state ?? null, country: m.country ?? null, pincode: m.pincode ?? null }
+          : null,
       visits: { thisMonth: att?.month === month ? att.visits : 0, lastAt: att?.lastAllowedAt ?? null },
       state: {
         status: state.status,
