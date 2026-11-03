@@ -76,6 +76,7 @@ export class FirestoreStore implements Store {
   /** Database calls and time spent, for the slow-request log. */
   calls = 0;
   callMs = 0;
+  tokMs = 0;
   private async call(method: string, url: string, body?: unknown): Promise<any> {
     this.calls++;
     const t0 = Date.now();
@@ -87,9 +88,12 @@ export class FirestoreStore implements Store {
   }
 
   private async call0(method: string, url: string, body?: unknown): Promise<any> {
+    const tt = Date.now();
+    const tok = await this.token();
+    this.tokMs += Date.now() - tt;
     const res = await fetch(url, {
       method,
-      headers: { Authorization: `Bearer ${await this.token()}`, 'content-type': 'application/json' },
+      headers: { Authorization: `Bearer ${tok}`, 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text(); // always read the body so the connection is released

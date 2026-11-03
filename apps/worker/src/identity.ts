@@ -149,15 +149,20 @@ export class FakeIdentity implements Identity {
 }
 
 /** Gets (and caches) an ID token for the GymMantra server account, used to call Firestore. */
+/** Where the database sign-in came from (for the timing log). */
+export const tokenSrc = { kvTries: 0, kvHits: 0, signIns: 0 };
+
 export function serverToken(identity: Identity, email: string, password: string) {
   let cached: { token: string; until: number } | null = null;
   let pending: Promise<string> | null = null;
   return async () => {
     if (cached && cached.until > Date.now()) return cached.token;
+    tokenSrc.kvTries++;
     // Shared across Worker instances in this data centre (see lib/edge.ts).
     const shared = await edgeGet<{ token: string; until: number }>(`fb-token:${email}`);
     if (shared && shared.until > Date.now() + 60_000) {
       cached = shared;
+      tokenSrc.kvHits++;
       return shared.token;
     }
     // Many requests at once on a new instance: one sign-in, not one each.
@@ -166,6 +171,7 @@ export function serverToken(identity: Identity, email: string, password: string)
     return pending;
   };
   async function signInNow() {
+    tokenSrc.signIns++;
     const s = await identity.signIn(email, password).catch((e) => {
       if (e instanceof HttpError && e.status === 401) throw new HttpError(500, 'Server account not found. Add the server user in Firebase Authentication (see setup guide)');
       throw e;

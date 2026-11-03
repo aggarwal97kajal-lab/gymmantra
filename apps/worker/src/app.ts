@@ -1,3 +1,4 @@
+import { tokenSrc } from './identity';
 import { checkinRoutes } from './routes/checkin';
 import { dueRoutes } from './routes/dues';
 import { noticeRoutes } from './routes/notices';
@@ -55,16 +56,20 @@ export function createApp(getDeps: () => Deps) {
     const st = deps.store as unknown as { calls?: number; callMs?: number };
     const calls0 = st.calls ?? 0;
     const ms0 = st.callMs ?? 0;
+    const tk0 = (st as { tokMs?: number }).tokMs ?? 0;
+    const src0 = { ...tokenSrc };
     // Both are read once per Worker instance; do them together to save a round trip.
     const [secrets] = await Promise.all([loadSecrets(deps.store), ensureBaseData(deps.store)]);
     c.set('secrets', secrets);
     await next();
     c.header('cache-control', 'no-store');
     const ms = Date.now() - t0;
-    c.header('server-timing', `total;dur=${ms}, db;dur=${(st.callMs ?? 0) - ms0}`);
+    const tokMs = ((st as { tokMs?: number }).tokMs ?? 0) - tk0;
+    const tsrc = `kv${tokenSrc.kvHits - src0.kvHits}/${tokenSrc.kvTries - src0.kvTries} sign${tokenSrc.signIns - src0.signIns}`;
+    c.header('server-timing', `total;dur=${ms}, db;dur=${(st.callMs ?? 0) - ms0}, tok;dur=${tokMs};desc="${tsrc}"`);
     // Slow or failed requests go to a small log, so problems on real phones can be found.
     if ((ms > 1500 || c.res.status >= 500) && !c.req.path.startsWith('/api/v1/diag')) {
-      const entry = { at: new Date().toISOString(), src: 'server', m: c.req.method, p: c.req.path, s: c.res.status, ms, db: (st.calls ?? 0) - calls0, dbMs: (st.callMs ?? 0) - ms0 };
+      const entry = { at: new Date().toISOString(), src: 'server', m: c.req.method, p: c.req.path, s: c.res.status, ms, db: (st.calls ?? 0) - calls0, dbMs: (st.callMs ?? 0) - ms0, tokMs, tsrc };
       const w = logDiag(deps, [entry]);
       try {
         c.executionCtx.waitUntil(w);
