@@ -8,5 +8,5 @@ jobs:
     steps:
       - run: |
           B="https://gymmantra.aggarwal97kajal.workers.dev/api/v1"
-          for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -m 30 -D - -o /dev/null -w "config: %{http_code} %{time_total}s\n" "$B/auth/config" | grep -iE "config:|server-timing"; sleep 9; done
+          for i in 1 2 3 4 5 6 7 8 9 10; do curl -s -m 30 -D - -o /dev/null -w "config: %{http_code} %{time_total}s\n" "$B/auth/config" | grep -iE "config:|server-timing|cf-placement"; sleep 9; done
           for d in $(date -u +%F) $(date -u -d yesterday +%F); do echo "== $d"; curl -s -m 30 "$B/diag?key=gmdiag-5c81e2a7&day=$d" | python3 -c "import json,sys; [print(json.dumps(x)) for x in json.load(sys.stdin)[:80]]"; done
