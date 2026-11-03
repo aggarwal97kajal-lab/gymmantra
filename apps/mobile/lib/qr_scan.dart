@@ -25,8 +25,20 @@ Result? _tryDecode(LuminanceSource src) {
 /// Camera frame (Y plane) → QR text. Runs in a background isolate.
 String? decodeYPlane(Map<String, Object> f) {
   final y = f['y'] as Uint8List;
-  final src = PlanarYUVLuminanceSource(y, f['row'] as int, f['h'] as int, width: f['w'] as int, height: f['h'] as int);
-  return _tryDecode(src)?.text;
+  final row = f['row'] as int;
+  final w = f['w'] as int;
+  final h = f['h'] as int;
+  // Grey pixels from the brightness (Y) plane; rows may have padding at the end.
+  final px = Int32List(w * h);
+  for (var j = 0; j < h; j++) {
+    final o = j * row;
+    final t = j * w;
+    for (var i = 0; i < w; i++) {
+      final v = y[o + i];
+      px[t + i] = 0xFF000000 | (v << 16) | (v << 8) | v;
+    }
+  }
+  return _tryDecode(RGBLuminanceSource(w, h, px))?.text;
 }
 
 /// A photo (jpg/png bytes) → QR text. Runs in a background isolate.

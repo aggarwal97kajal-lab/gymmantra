@@ -298,7 +298,7 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(job.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                    Text(job!.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
                     Muted(progress >= 0.97 ? context.t('Saving…') : context.t('Uploading… you can scroll or leave this screen'), size: 11.5),
                   ]),
                 ),
@@ -310,7 +310,7 @@ class _PdfUploadBoxState extends State<PdfUploadBox> {
                 child: LinearProgressIndicator(value: progress, minHeight: 8, backgroundColor: p.line, valueColor: AlwaysStoppedAnimation(p.primary)),
               ),
               const SizedBox(height: 6),
-              Muted('${_size(job.size * progress)} ${context.t('of')} ${_size(job.size)}', size: 11),
+              Muted('${_size(job!.size * progress)} ${context.t('of')} ${_size(job.size)}', size: 11),
             ]),
           ),
         ] else if (m != null) ...[
