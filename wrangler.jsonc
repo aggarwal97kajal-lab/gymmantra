@@ -16,8 +16,8 @@
   // Keep the settings typed in the Cloudflare dashboard when deploying.
   "keep_vars": true,
   "observability": { "enabled": true },
-  // Run the Worker close to the database (Firestore). One request makes several
-  // database calls; doing those near the database instead of across the world is
-  // what makes saves and screens fast. Cloudflare decides this automatically.
-  "placement": { "mode": "smart" }
+  // No Smart Placement: it moved the Worker far away (every database call took ~1 s).
+  // The database is in Mumbai (asia-south1); Indian users already reach a Cloudflare
+  // data centre in India, which is close to it.
+  "placement": { "mode": "off" }
 }
