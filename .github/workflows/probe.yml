@@ -1,5 +1,5 @@
 name: probe
-# Checks the live server from GitHub (the dev sandbox cannot reach it).
+# Checks the live server from GitHub (the dev sandbox cannot reach it). Makes a throwaway account and deletes it.
 on:
   workflow_dispatch:
 jobs:
@@ -7,10 +7,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: |
-          B="https://gymmantra.aggarwal97kajal.workers.dev"
-          for n in 1 2 3; do
-            curl -s -m 60 -o /dev/null -w "config $n: %{http_code} %{time_total}s\n" "$B/api/v1/auth/config"
-            curl -s -m 60 -o /tmp/o -w "login $n: %{http_code} %{time_total}s " -H 'content-type: application/json' -H 'x-gm-client: mobile' -d '{"identifier":"probe'$n'@example.com","password":"x"}' "$B/api/v1/auth/login"; head -c 150 /tmp/o; echo
-            curl -s -m 60 -o /tmp/o -w "me-noauth $n: %{http_code} %{time_total}s " -H 'x-gm-client: mobile' -H 'Authorization: Bearer abc' "$B/api/v1/auth/me"; head -c 150 /tmp/o; echo
-            curl -s -m 60 -o /tmp/o -w "lookup $n: %{http_code} %{time_total}s " -H 'x-gm-client: mobile' "$B/api/v1/me/gym-lookup?code=LIFE951"; head -c 150 /tmp/o; echo
-          done
+          B="https://gymmantra.aggarwal97kajal.workers.dev/api/v1"
+          H=(-H 'content-type: application/json' -H 'x-gm-client: mobile')
+          T() { curl -s -m 90 -o /tmp/o -w "%{http_code} %{time_total}s" "$@"; echo -n " "; head -c 200 /tmp/o; echo; }
+          echo "setpw-noauth: $(T "${H[@]}" -X POST "$B/auth/set-password" -d '{}')"
+          N=$RANDOM$RANDOM; PH="9$(printf '%09d' $((N % 1000000000)))"
+          echo "signup: $(T "${H[@]}" -X POST "$B/auth/signup" -d '{"firstName":"Probe","lastName":"Check","dob":"1990-01-01","state":"Delhi","city":"New Delhi","country":"India","pincode":"110001","email":"probe'$N'@example.com","phone":"'$PH'","password":"probe12345","role":"MEMBER"}')"
+          TOK=$(python3 -c "import json;print(json.load(open('/tmp/o')).get('token',''))" 2>/dev/null)
+          echo "login: $(T "${H[@]}" -X POST "$B/auth/login" -d '{"identifier":"probe'$N'@example.com","password":"probe12345","role":"MEMBER"}')"
+          A=(-H "Authorization: Bearer $TOK" -H 'x-gm-client: mobile')
+          for p in /auth/me /me/gyms /me/notifications /me/pt /me/program /ads?role=MEMBER /exercises /auth/me /me/gyms; do echo "$p: $(T "${A[@]}" "$B$p")"; done
+          echo "delete: $(T "${A[@]}" -X DELETE "$B/me")"
