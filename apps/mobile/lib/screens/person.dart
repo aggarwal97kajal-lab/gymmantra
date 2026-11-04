@@ -103,20 +103,26 @@ class _PersonFieldsState extends State<PersonFields> {
         builder: (_) => SearchList(title: title, items: items, allowOther: other),
       );
 
-  Widget _select(String? value, String hint, VoidCallback? onTap) => InkWell(
-        borderRadius: BorderRadius.circular(14),
+  /// Every box in this form is the same kind of text box, so all of them are exactly the same
+  /// height (the old tap-to-choose boxes and "India" were drawn differently and came out shorter
+  /// than the PIN and name boxes).
+  Widget _select(String? value, String hint, VoidCallback? onTap) => TextField(
+        controller: TextEditingController(text: value ?? ''),
+        readOnly: true,
+        showCursor: false,
+        enableInteractiveSelection: false,
+        enabled: onTap != null,
         onTap: onTap,
-        child: InputDecorator(
-          decoration: InputDecoration(suffixIcon: Icon(Icons.expand_more_rounded, color: context.c.mut), enabled: onTap != null),
-          child: Text(value ?? hint, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: value == null ? context.c.mut : context.c.fg, fontWeight: FontWeight.w600)),
-        ),
+        maxLines: 1,
+        style: const TextStyle(fontWeight: FontWeight.w600),
+        decoration: InputDecoration(hintText: hint, suffixIcon: Icon(Icons.expand_more_rounded, color: context.c.mut)),
       );
 
   @override
   Widget build(BuildContext context) {
     final v = widget.value;
     Widget two(Widget a, Widget b) => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [Expanded(child: a), const SizedBox(width: 10), Expanded(child: b)]);
-    TextField text(TextEditingController c, ValueChanged<String> on) => TextField(controller: c, textCapitalization: TextCapitalization.words, onChanged: on);
+    TextField text(TextEditingController c, ValueChanged<String> on) => TextField(controller: c, textCapitalization: TextCapitalization.words, style: const TextStyle(fontWeight: FontWeight.w600), onChanged: on);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       two(
         _Box(label: '${context.t('First name')} *', child: text(first, (t) => v.first = t)),
@@ -172,7 +178,16 @@ class _PersonFieldsState extends State<PersonFields> {
         ),
       ),
       two(
-        _Box(label: context.t('Country'), child: InputDecorator(decoration: const InputDecoration(), child: Text(context.t('India'), style: const TextStyle(fontWeight: FontWeight.w600)))),
+        _Box(
+          label: context.t('Country'),
+          child: TextField(
+            controller: TextEditingController(text: context.t('India')),
+            readOnly: true,
+            showCursor: false,
+            enableInteractiveSelection: false,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
         _Box(
           label: '${context.t('PIN code')} *',
           // No maxLength (its hidden counter made this box taller than the others).
@@ -180,6 +195,7 @@ class _PersonFieldsState extends State<PersonFields> {
             controller: pin,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
+            style: const TextStyle(fontWeight: FontWeight.w600),
             onChanged: (t) => setState(() => v.pin = t),
           ),
         ),
