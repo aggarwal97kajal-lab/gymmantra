@@ -93,12 +93,12 @@ Future<void> editMemberSheet(BuildContext context, WidgetRef ref, String id, Map
   final email = TextEditingController(text: m['email'] as String? ?? '');
   final notes = TextEditingController(text: m['notes'] as String? ?? '');
   var gender = m['gender'] as String?;
+  var busy = false;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setState) {
-        var busy = false;
         return Padding(
           padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(ctx).viewInsets.bottom),
           child: SingleChildScrollView(
