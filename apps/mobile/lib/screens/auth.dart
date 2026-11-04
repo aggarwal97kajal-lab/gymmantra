@@ -333,12 +333,15 @@ class _LoginState extends ConsumerState<LoginScreen> with _Busy {
         const SizedBox(height: 16),
         const AgreeLine(prefix: 'By logging in you agree to our'),
         const SizedBox(height: 10),
-        Center(
-          child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
-            Muted(context.t('New here?'), size: 14),
-            TextButton(onPressed: () => context.push('/signup'), child: Text(context.t('Create an account'))),
-          ]),
-        ),
+        if (Prefs.getString('pendingRole') == 'STAFF')
+          Center(child: Muted(context.t('Gym staff accounts are made by the gym owner. Ask your owner to add you (More → Staff → Add staff).'), size: 12.5, align: TextAlign.center))
+        else
+          Center(
+            child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Muted(context.t('New here?'), size: 14),
+              TextButton(onPressed: () => context.push('/signup'), child: Text(context.t('Create an account'))),
+            ]),
+          ),
       ],
     );
   }
@@ -620,6 +623,7 @@ class RoleBadge extends StatelessWidget {
     final (icon, label) = switch (role) {
       'OWNER' => (Icons.storefront_rounded, context.t('Gym owner')),
       'TRAINER' => (Icons.sports_rounded, context.t('Trainer')),
+      'STAFF' => (Icons.badge_rounded, context.t('Gym staff')),
       _ => (Icons.person_rounded, context.t('Member')),
     };
     final p = context.c;

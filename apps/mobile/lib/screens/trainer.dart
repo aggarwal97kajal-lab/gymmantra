@@ -102,18 +102,23 @@ class TrainerHomeScreen extends ConsumerWidget {
                     for (final o in (g['offers'] as List).cast<Map>())
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: context.t('Only for trainers'), validTill: o['validTill'] as String?, imageUrl: o['imageUrl'] as String?),
                     Panel(
-                      onTap: () => context.push('/checkin'),
+                      onTap: () => context.push('/t/my-attendance'),
                       child: Row(children: [
-                        const IconTile(Icons.qr_code_scanner_rounded, color: C.ok),
+                        const IconTile(Icons.event_available_rounded, color: C.ok),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(context.t('Check in at the gym'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                            Muted(context.t('Scan the green check-in QR in the gym'), size: 12),
+                            Text(context.t('My attendance'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                            Muted(context.t('Mark Present at the gym every day'), size: 12),
                           ]),
                         ),
                         Icon(Icons.chevron_right_rounded, color: context.c.mut),
                       ]),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(onPressed: () => context.push('/checkin'), icon: const Icon(Icons.qr_code_scanner_rounded, size: 18), label: Text(context.t('Scan the gate QR'))),
                     ),
                     const SizedBox(height: 10),
                     Row(children: [

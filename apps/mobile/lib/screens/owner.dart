@@ -18,6 +18,7 @@ import 'branch.dart';
 import 'billing.dart';
 import 'auth.dart' show PhoneField;
 import 'person.dart';
+import 'member_tools.dart';
 import 'dues.dart';
 import 'banner.dart';
 
@@ -27,9 +28,13 @@ class OwnerShell extends ConsumerWidget {
   const OwnerShell({super.key, required this.child, required this.location});
   final Widget child;
   final String location;
-  static const tabs = ['/o/home', '/o/members', '/o/requests', '/o/offers', '/o/more'];
+  static const ownerTabs = ['/o/home', '/o/members', '/o/requests', '/o/offers', '/o/more'];
+  // Front desk: Attendance instead of Offers (board 58).
+  static const deskTabs = ['/o/home', '/o/members', '/o/desk', '/o/requests', '/o/more'];
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final desk = ref.watch(sessionProvider).isStaffDesk;
+    final tabs = desk ? deskTabs : ownerTabs;
     final i = tabs.indexWhere((t) => location.startsWith(t));
     final dash = ref.watch(dashboardProvider).valueOrNull;
     final pending = ((dash?['joinPending'] as int?) ?? 0) +
@@ -52,12 +57,13 @@ class OwnerShell extends ConsumerWidget {
           destinations: [
             NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
             NavigationDestination(icon: const Icon(Icons.groups_outlined), selectedIcon: const Icon(Icons.groups_rounded), label: context.t('Members')),
+            if (desk) NavigationDestination(icon: const Icon(Icons.fact_check_outlined), selectedIcon: const Icon(Icons.fact_check_rounded), label: context.t('Attendance')),
             NavigationDestination(
               icon: Badge(isLabelVisible: pending > 0, label: Text('$pending'), child: const Icon(Icons.how_to_reg_outlined)),
               selectedIcon: const Icon(Icons.how_to_reg_rounded),
               label: context.t('Requests'),
             ),
-            NavigationDestination(icon: const Icon(Icons.local_offer_outlined), selectedIcon: const Icon(Icons.local_offer_rounded), label: context.t('Offers')),
+            if (!desk) NavigationDestination(icon: const Icon(Icons.local_offer_outlined), selectedIcon: const Icon(Icons.local_offer_rounded), label: context.t('Offers')),
             NavigationDestination(icon: const Icon(Icons.more_horiz_rounded), label: context.t('More')),
           ],
         ),
@@ -624,6 +630,8 @@ class OwnerMemberScreen extends ConsumerWidget {
                 ),
               ]),
               const SizedBox(height: 10),
+              MemberToolsRow(id: id, data: d as Map),
+              const SizedBox(height: 10),
               FilledButton.icon(
                 onPressed: () async {
                   final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, builder: (_) => _RenewSheet(memberId: id));
@@ -637,6 +645,8 @@ class OwnerMemberScreen extends ConsumerWidget {
                 icon: const Icon(Icons.autorenew_rounded),
                 label: Text(history.isEmpty ? context.t('Start membership') : context.t('Renew membership')),
               ),
+              const SizedBox(height: 18),
+              RecentCheckins(data: d as Map),
               if (history.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 SectionTitle(context.t('History')),
@@ -1283,16 +1293,25 @@ class OwnerMoreScreen extends ConsumerWidget {
                             ? context.t('{plan} plan', {'plan': sub['plan']['name']})
                             : context.t('Trial ended — choose a plan'),
               ),
-            row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
-            row(Icons.campaign_rounded, context.t('Notices'), () => context.push('/o/notices'), sub: context.t('Gym closed, timing change… to members or trainers')),
+            if (gym['role'] == 'FRONT_DESK') row(Icons.event_available_rounded, context.t('My attendance'), () => context.push('/o/my-attendance'), sub: context.t('Mark Present at the gym every day')),
+            if (gym['role'] == 'OWNER') row(Icons.badge_rounded, context.t('Staff'), () => context.push('/o/staff'), sub: context.t('Front desk of this branch · rights')),
+            if (gym['role'] == 'OWNER') row(Icons.event_available_rounded, context.t('Staff attendance'), () => context.push('/o/staff-attendance'), sub: context.t('Who was present, month by month')),
+            if (gym['role'] == 'OWNER') row(Icons.fact_check_rounded, context.t('Attendance'), () => context.push('/o/attendance'), sub: context.t('Today’s check-ins · scan member QR')),
+            if (s.can('memberEdit')) row(Icons.upload_file_rounded, context.t('Import members'), () => context.push('/o/import'), sub: context.t('From an Excel / CSV file')),
+            if (s.can('checkin')) row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
+            if (s.can('checkin')) row(Icons.door_sliding_rounded, context.t('Gate'), () => context.push('/o/gate'), sub: context.t('Opens after a check-in')),
+            if (s.can('offers')) row(Icons.campaign_rounded, context.t('Notices'), () => context.push('/o/notices'), sub: context.t('Gym closed, timing change… to members or trainers')),
             row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices'), lock: 'pt'),
             row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer'), lock: 'pt'),
             if (gym['role'] == 'OWNER') row(Icons.account_balance_wallet_rounded, context.t('PT accounts'), () => context.push('/o/pt-accounts'), sub: context.t('What each trainer gets'), lock: 'pt'),
-            row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers'), lock: 'offers'),
-            row(Icons.bar_chart_rounded, context.t('Reports'), () => context.push('/o/reports'), sub: context.t('Money, visits and plans'), lock: 'reports'),
-            row(Icons.store_mall_directory_rounded, context.t('Branches'), () => context.push('/o/branches'), sub: context.t('Every branch: code, address, QR · Edit / Delete')),
-            row(Icons.receipt_long_rounded, context.t('Membership plans'), () => context.push('/o/plans'), sub: context.t('Prices, freeze days, what is included')),
-            row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => context.push('/o/settings'), sub: context.t('Name, numbers, branches, join poster')),
+            if (s.can('offers')) row(Icons.local_offer_rounded, context.t('Offers'), () => context.go('/o/offers'), lock: 'offers'),
+            if (s.can('reports')) row(Icons.bar_chart_rounded, context.t('Reports'), () => context.push('/o/reports'), sub: context.t('Money, visits and plans'), lock: 'reports'),
+            if (gym['role'] == 'OWNER') ...[
+              row(Icons.store_mall_directory_rounded, context.t('Branches'), () => context.push('/o/branches'), sub: context.t('Every branch: code, address, QR · Edit / Delete')),
+              row(Icons.receipt_long_rounded, context.t('Membership plans'), () => context.push('/o/plans'), sub: context.t('Prices, freeze days, what is included')),
+              row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => context.push('/o/settings'), sub: context.t('Name, numbers, branches, join poster')),
+              row(Icons.swap_horiz_rounded, context.t('Transfer gym'), () => context.push('/o/transfer-gym'), sub: context.t('Give this gym to a new owner')),
+            ],
             row(Icons.language_rounded, context.t('Full panel on the website'), () => openUrl(Api.instance.base)),
           ]),
         ),

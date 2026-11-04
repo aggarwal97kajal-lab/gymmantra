@@ -216,6 +216,7 @@ class Session extends ChangeNotifier {
       'OWNER' => 'registerGym',
       'TRAINER' => 'trainerJoin',
       'MEMBER' => 'member',
+      'STAFF' => 'staffNone',
       _ => 'role',
     };
   }
@@ -227,6 +228,19 @@ class Session extends ChangeNotifier {
       if (g is Map && (g['role'] == 'OWNER' || g['role'] == 'FRONT_DESK')) return Map<String, dynamic>.from(g);
     }
     return null;
+  }
+
+  /// True for front desk staff (not the owner).
+  bool get isStaffDesk => myGym?['role'] == 'FRONT_DESK';
+
+  /// What this person may do at their gym (owners: everything). Mirrors the server's rights.
+  bool can(String right) {
+    final g = myGym;
+    if (g == null) return false;
+    if (g['role'] == 'OWNER') return true;
+    final r = g['rights'];
+    if (r is List) return r.contains(right);
+    return const ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers'].contains(right);
   }
 
   /// The server checks that the account really has the role picked on the first screen.

@@ -97,6 +97,7 @@ class _RolePickState extends ConsumerState<RolePickScreen> {
           card('MEMBER', Icons.person_rounded, context.t('Member'), context.t('Membership, check-in QR, PT and diet plan')),
           card('OWNER', Icons.storefront_rounded, context.t('Gym owner'), context.t('Members, money, trainers, offers — all in one place')),
           card('TRAINER', Icons.sports_rounded, context.t('Trainer'), context.t('Your PT clients, sessions, diet and workouts')),
+          card('STAFF', Icons.badge_rounded, context.t('Gym staff'), context.t('Front desk: members, payments, check-in, attendance')),
           ErrorText(error),
           const SizedBox(height: 12),
           FilledButton(onPressed: busy ? null : go, child: Text(context.t('Continue'))),

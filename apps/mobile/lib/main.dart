@@ -20,6 +20,7 @@ import 'screens/profile.dart';
 import 'screens/program.dart';
 import 'screens/pt.dart';
 import 'screens/owner.dart';
+import 'screens/desk.dart';
 import 'screens/qr.dart';
 import 'screens/role.dart';
 import 'screens/trainer.dart';
@@ -87,6 +88,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
           // A trainer who has not joined a gym yet still gets the trainer dashboard.
           'waiting' || 'trainerJoin' => ('/t/home', '/t/'),
           'registerGym' => ('/register-gym', '/register-gym'),
+          'staffNone' => ('/staff-none', '/staff-none'),
           'role' => ('/role', '/role'),
           _ => ('/home', ''),
         };
@@ -144,6 +146,19 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/branches', builder: (_, __) => const BranchesScreen()),
+        GoRoute(path: '/o/staff', builder: (_, __) => const StaffListScreen()),
+        GoRoute(path: '/o/staff/new', builder: (_, __) => const AddStaffScreen()),
+        GoRoute(path: '/o/staff/edit', builder: (_, s) => StaffEditScreen(staff: s.extra as Map)),
+        GoRoute(path: '/o/attendance', builder: (_, __) => const DeskAttendanceScreen()),
+        GoRoute(path: '/o/attendance/scan', builder: (_, __) => const DeskScanScreen()),
+        GoRoute(path: '/o/attendance/manual', builder: (_, __) => const ManualCheckinScreen()),
+        GoRoute(path: '/o/my-attendance', builder: (_, __) => const MyAttendanceScreen()),
+        GoRoute(path: '/t/my-attendance', builder: (_, __) => const MyAttendanceScreen()),
+        GoRoute(path: '/o/staff-attendance', builder: (_, __) => const StaffAttendanceScreen()),
+        GoRoute(path: '/o/import', builder: (_, __) => const ImportMembersScreen()),
+        GoRoute(path: '/o/gate', builder: (_, __) => const GateScreen()),
+        GoRoute(path: '/o/transfer-gym', builder: (_, __) => const TransferGymScreen()),
+        GoRoute(path: '/staff-none', builder: (_, __) => const StaffNoneScreen()),
         GoRoute(path: '/set-password', builder: (_, __) => const SetPasswordScreen()),
         GoRoute(path: '/complete-details', builder: (_, __) => const CompleteDetailsScreen()),
         GoRoute(path: '/o/reports', builder: (_, __) => const ReportsScreen()),
@@ -169,6 +184,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
             GoRoute(path: '/o/requests', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerRequestsScreen())),
             GoRoute(path: '/o/offers', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerOffersScreen())),
             GoRoute(path: '/o/more', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerMoreScreen())),
+            GoRoute(path: '/o/desk', pageBuilder: (_, __) => const NoTransitionPage(child: DeskAttendanceScreen(tab: true))),
           ],
         ),
         GoRoute(path: '/o/members/new', builder: (_, __) => const AddMemberScreen()),

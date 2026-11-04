@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'api.dart';
+import 'screens/billing.dart' show loadIndia;
 import 'i18n.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -905,4 +906,240 @@ class _AdminPeopleState extends State<AdminPeople> {
               ),
         ]),
       );
+}
+
+// ============================================================ gym transfer / close (board 54)
+
+Future<void> adminTransferGym(BuildContext context, WidgetRef ref, String id, VoidCallback done) async {
+  final phone = TextEditingController();
+  var oldOwner = 'remove';
+  Map? found;
+  String? err;
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => Padding(
+        padding: EdgeInsets.fromLTRB(18, 16, 18, 16 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text(ctx.t('Transfer gym'), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+          Muted(ctx.t('Members, plans, money and history stay the same. Only the owner changes.'), size: 12.5),
+          const SizedBox(height: 12),
+          TextField(
+            controller: phone,
+            keyboardType: TextInputType.phone,
+            decoration: InputDecoration(labelText: ctx.t('New owner’s mobile *'), prefixText: '+91 '),
+            onChanged: (t) async {
+              final ph = t.replaceAll(RegExp(r'\D'), '');
+              if (ph.length != 10) return;
+              try {
+                final r = await Api.instance.get('/transfer-owner/lookup?phone=$ph');
+                setState(() {
+                  found = r as Map;
+                  err = null;
+                });
+              } catch (e) {
+                setState(() {
+                  found = null;
+                  err = e.toString();
+                });
+              }
+            },
+          ),
+          if (found != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('${found!['name']} ✓', style: const TextStyle(color: C.ok, fontWeight: FontWeight.w800))),
+          if (err != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(err!, style: const TextStyle(color: C.red, fontSize: 12.5))),
+          const SizedBox(height: 10),
+          Text(ctx.t('Old owner'), style: const TextStyle(fontWeight: FontWeight.w700)),
+          RadioListTile<String>(value: 'remove', groupValue: oldOwner, onChanged: (v) => setState(() => oldOwner = v!), title: Text(ctx.t('Remove from the gym'))),
+          RadioListTile<String>(value: 'frontdesk', groupValue: oldOwner, onChanged: (v) => setState(() => oldOwner = v!), title: Text(ctx.t('Make front desk'))),
+          const SizedBox(height: 8),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: C.indigo),
+            onPressed: found == null || found!['trainer'] == true
+                ? null
+                : () async {
+                    try {
+                      await Api.instance.post('/super/gyms/$id/transfer', {'phone': phone.text.replaceAll(RegExp(r'\D'), ''), 'oldOwner': oldOwner});
+                      done();
+                      if (ctx.mounted) {
+                        Navigator.pop(ctx);
+                        toast(ctx, ctx.t('Gym transferred'));
+                      }
+                    } catch (e) {
+                      setState(() => err = e.toString());
+                    }
+                  },
+            child: Text(found == null ? ctx.t('Transfer') : ctx.t('Transfer to {name}', {'name': found!['name']})),
+          ),
+        ]),
+      ),
+    ),
+  );
+}
+
+Future<void> adminCloseGym(BuildContext context, String id, String code, VoidCallback done) async {
+  final confirm = TextEditingController();
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(ctx.t('Close this gym?')),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(ctx.t('Nobody can use the gym any more: no check-in, payment or join. Members see "This gym is closed". Owner and staff leave the gym, so their accounts can then be deleted from People. All records stay. You can reopen within 30 days.')),
+        const SizedBox(height: 12),
+        TextField(controller: confirm, textCapitalization: TextCapitalization.characters, decoration: InputDecoration(labelText: ctx.t('Type the gym code to confirm'), hintText: code)),
+      ]),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+        TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Close gym'), style: const TextStyle(color: C.red))),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  try {
+    await Api.instance.post('/super/gyms/$id/close', {'confirm': confirm.text.trim()});
+    done();
+    if (context.mounted) toast(context, context.t('Gym closed'));
+  } catch (e) {
+    if (context.mounted) toastError(context, e);
+  }
+}
+
+Future<void> adminReopenGym(BuildContext context, String id, VoidCallback done) async {
+  try {
+    await Api.instance.post('/super/gyms/$id/reopen', {});
+    done();
+    if (context.mounted) toast(context, context.t('Gym reopened'));
+  } catch (e) {
+    if (context.mounted) toastError(context, e);
+  }
+}
+
+// ============================================================ send notification (board 59)
+
+final _broadcasts = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/broadcasts'));
+
+class AdminBroadcast extends ConsumerStatefulWidget {
+  const AdminBroadcast({super.key});
+  @override
+  ConsumerState<AdminBroadcast> createState() => _AdminBroadcastState();
+}
+
+class _AdminBroadcastState extends ConsumerState<AdminBroadcast> {
+  final title = TextEditingController();
+  final message = TextEditingController();
+  Set<String> roles = {'ALL'};
+  String? state;
+  bool busy = false;
+
+  Future<void> send() async {
+    if (title.text.trim().length < 2 || message.text.trim().length < 2) {
+      toast(context, context.t('Write the title and the message'));
+      return;
+    }
+    setState(() => busy = true);
+    try {
+      await Api.instance.post('/super/broadcasts', {'title': title.text.trim(), 'message': message.text.trim(), 'roles': roles.toList(), if (state != null) 'state': state});
+      title.clear();
+      message.clear();
+      ref.invalidate(_broadcasts);
+      if (mounted) toast(context, context.t('Sent'));
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = ((ref.watch(_broadcasts).valueOrNull as List?) ?? const []).cast<Map>();
+    Widget chip(String k, String l) => ChoiceChip(
+          label: Text(l),
+          selected: roles.contains(k),
+          showCheckmark: false,
+          selectedColor: C.indigo,
+          labelStyle: TextStyle(color: roles.contains(k) ? Colors.white : context.c.fg, fontWeight: FontWeight.w700),
+          onSelected: (_) => setState(() {
+            if (k == 'ALL') {
+              roles = {'ALL'};
+            } else {
+              roles.remove('ALL');
+              roles.contains(k) ? roles.remove(k) : roles.add(k);
+              if (roles.isEmpty) roles = {'ALL'};
+            }
+          }),
+        );
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Send notification'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+        Text(context.t('Who gets it'), style: TextStyle(color: context.c.mut, fontWeight: FontWeight.w600, fontSize: 13)),
+        const SizedBox(height: 6),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          chip('ALL', context.t('Everyone')),
+          chip('OWNER', context.t('Owners')),
+          chip('STAFF', context.t('Staff')),
+          chip('TRAINER', context.t('Trainers')),
+          chip('MEMBER', context.t('Members')),
+        ]),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: () async {
+            final states = await loadIndia();
+            if (!context.mounted) return;
+            final s = await showModalBottomSheet<String>(
+              context: context,
+              isScrollControlled: true,
+              builder: (ctx) => SafeArea(
+                child: SizedBox(
+                  height: MediaQuery.of(ctx).size.height * 0.7,
+                  child: ListView(children: [
+                    ListTile(title: Text(ctx.t('All states')), onTap: () => Navigator.pop(ctx, '')),
+                    for (final st in states) ListTile(title: Text(st.name), onTap: () => Navigator.pop(ctx, st.name)),
+                  ]),
+                ),
+              ),
+            );
+            if (s != null) setState(() => state = s.isEmpty ? null : s);
+          },
+          icon: const Icon(Icons.place_rounded),
+          label: Text(state ?? context.t('All states')),
+        ),
+        const SizedBox(height: 12),
+        TextField(controller: title, decoration: InputDecoration(labelText: context.t('Title'))),
+        const SizedBox(height: 10),
+        TextField(controller: message, maxLines: 4, decoration: InputDecoration(labelText: context.t('Message'))),
+        const SizedBox(height: 14),
+        FilledButton.icon(style: FilledButton.styleFrom(backgroundColor: C.indigo), onPressed: busy ? null : send, icon: const Icon(Icons.campaign_rounded), label: Text(context.t('Send notification'))),
+        const SizedBox(height: 6),
+        Muted(context.t('It shows in Notifications in their app.'), size: 12),
+        if (list.isNotEmpty) ...[
+          const SizedBox(height: 18),
+          SectionTitle(context.t('Sent')),
+          for (final b in list)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Panel(
+                padding: const EdgeInsets.all(12),
+                child: Row(children: [
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(b['title'] as String, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      Muted(b['body'] as String, size: 12.5),
+                      Muted('${(b['roles'] as List).join(', ')}${b['state'] == null ? '' : ' · ${b['state']}'} · ${fmtDate(b['createdAt'] as String?)}', size: 11.5),
+                    ]),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline_rounded, color: C.red),
+                    onPressed: () async {
+                      await Api.instance.delete('/super/broadcasts/${b['id']}');
+                      ref.invalidate(_broadcasts);
+                    },
+                  ),
+                ]),
+              ),
+            ),
+        ],
+      ]),
+    );
+  }
 }

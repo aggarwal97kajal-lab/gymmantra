@@ -205,7 +205,23 @@ class HomeScreen extends ConsumerWidget {
                       OfferBanner(title: o['title'] as String, details: o['details'] as String?, who: m['gym']['name'] as String?, validTill: o['validTill'] as String?, imageUrl: o['imageUrl'] as String?),
                   for (final m in list)
                     if (((m['due'] as num?) ?? 0) > 0) ...[_DueBanner(m), const SizedBox(height: 12)],
-                  for (final m in list) ...[_MembershipCard(m), const SizedBox(height: 12)],
+                  for (final m in list)
+                    if ((m['gym'] as Map?)?['closed'] == true)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Panel(
+                          child: Column(children: [
+                            const Icon(Icons.lock_rounded, size: 34),
+                            const SizedBox(height: 6),
+                            Text(context.t('{gym} is closed', {'gym': m['gym']['name']}), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                            const SizedBox(height: 4),
+                            Muted(context.t('Your membership history stays here. To join another gym, enter its gym code.'), align: TextAlign.center),
+                            const SizedBox(height: 10),
+                            FilledButton.icon(onPressed: () => context.push('/join'), icon: const Icon(Icons.add_rounded), label: Text(context.t('Join another gym'))),
+                          ]),
+                        ),
+                      )
+                    else ...[_MembershipCard(m), const SizedBox(height: 12)],
                   for (final p in ((ref.watch(myPtProvider).valueOrNull as List?) ?? const []).cast<Map>().where((p) => p['state'] == 'ACTIVE'))
                     Padding(padding: const EdgeInsets.only(bottom: 12), child: MyTrainerCard(pt: p, tenantId: (p['gym'] as Map)['id'] as String)),
                   for (final p in pending) ...[

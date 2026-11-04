@@ -690,6 +690,14 @@ class _ResultView extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Muted('${gym['name'] ?? ''}${gym['branchName'] == null ? '' : ' – ${gym['branchName']}'}${time.isEmpty ? '' : ' · $time'}', align: TextAlign.center),
+        if (!blocked && r['gate'] == 'opened') ...[
+          const SizedBox(height: 8),
+          Text(context.t('Gate opened — go in'), textAlign: TextAlign.center, style: const TextStyle(color: C.ok, fontWeight: FontWeight.w800, fontSize: 16)),
+        ],
+        if (!blocked && r['gate'] == 'offline') ...[
+          const SizedBox(height: 8),
+          Text(context.t('Gate is offline — ask the front desk'), textAlign: TextAlign.center, style: const TextStyle(color: C.warn, fontWeight: FontWeight.w800)),
+        ],
         if (blocked && r['reason'] != null) ...[
           const SizedBox(height: 6),
           Text(context.t(r['reason'] as String), textAlign: TextAlign.center, style: const TextStyle(color: C.red, fontWeight: FontWeight.w700)),

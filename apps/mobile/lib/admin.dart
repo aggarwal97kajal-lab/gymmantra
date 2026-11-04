@@ -88,6 +88,7 @@ GoRouter adminRouter(Session session, Listenable splash, Widget splashScreen, bo
         GoRoute(path: '/a/settings', builder: (_, __) => const AdminSettings()),
         GoRoute(path: '/a/coupons', builder: (_, __) => const AdminCoupons()),
         GoRoute(path: '/a/people', builder: (_, __) => const AdminPeople()),
+        GoRoute(path: '/a/broadcast', builder: (_, __) => const AdminBroadcast()),
         GoRoute(path: '/a/coupon', builder: (_, s) => CouponEditScreen(coupon: s.extra as Map?)),
         GoRoute(path: '/a/payments', builder: (_, __) => const AdminPayments()),
         GoRoute(path: '/a/reports', builder: (_, __) => const AdminReports()),
@@ -377,6 +378,7 @@ class _GymStatus extends StatelessWidget {
     final (label, col) = switch (s) {
       'ACTIVE' => ((g['saasPlan'] as Map?)?['name'] as String? ?? context.t('Paid'), C.ok),
       'SUSPENDED' => (context.t('Suspended'), C.red),
+      'CLOSED' => (context.t('Closed'), C.red),
       _ => (context.t('Trial'), C.warn),
     };
     return Container(
@@ -485,6 +487,33 @@ class AdminGym extends ConsumerWidget {
                     style: OutlinedButton.styleFrom(foregroundColor: g['status'] == 'SUSPENDED' ? C.ok : C.red),
                     onPressed: () => patch(context, ref, {'status': g['status'] == 'SUSPENDED' ? (access['plan'] != null ? 'ACTIVE' : 'TRIAL') : 'SUSPENDED'}),
                     child: Text(g['status'] == 'SUSPENDED' ? context.t('Turn back on') : context.t('Suspend gym')),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 10),
+              Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: g['status'] == 'CLOSED' ? null : () => adminTransferGym(context, ref, id, () => ref.invalidate(_gym(id))),
+                    icon: const Icon(Icons.swap_horiz_rounded),
+                    label: Text(context.t('Transfer gym')),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(foregroundColor: g['status'] == 'CLOSED' ? C.ok : C.red),
+                    onPressed: () => g['status'] == 'CLOSED'
+                        ? adminReopenGym(context, id, () {
+                            ref.invalidate(_gym(id));
+                            ref.invalidate(_gyms);
+                          })
+                        : adminCloseGym(context, id, (g['gymCode'] as String?) ?? '', () {
+                            ref.invalidate(_gym(id));
+                            ref.invalidate(_gyms);
+                          }),
+                    icon: Icon(g['status'] == 'CLOSED' ? Icons.lock_open_rounded : Icons.power_settings_new_rounded),
+                    label: Text(g['status'] == 'CLOSED' ? context.t('Reopen gym') : context.t('Close gym')),
                   ),
                 ),
               ]),
@@ -1399,6 +1428,7 @@ class AdminMore extends ConsumerWidget {
             row(Icons.payments_rounded, context.t('Plan payments'), () => context.push('/a/payments')),
             row(Icons.sell_rounded, context.t('Coupons'), () => context.push('/a/coupons')),
             row(Icons.manage_accounts_rounded, context.t('People'), () => context.push('/a/people')),
+            row(Icons.campaign_rounded, context.t('Send notification'), () => context.push('/a/broadcast')),
             row(Icons.confirmation_number_rounded, context.t('Support tickets'), () => context.push('/a/tickets')),
             row(Icons.draw_rounded, context.t('Receipt & signature'), () => context.push('/a/receipt')),
             row(Icons.receipt_long_rounded, context.t('GST'), () => context.push('/a/settings')),
