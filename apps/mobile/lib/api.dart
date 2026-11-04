@@ -214,7 +214,11 @@ class Api {
     final key = '${token.hashCode}|${_k(path)}';
     final running = _inFlight[key];
     if (running != null) return running;
-    final f = _send('GET', path).whenComplete(() => _inFlight.remove(key));
+    // The braces matter: `() => _inFlight.remove(key)` returned this same future to whenComplete,
+    // which then waited on itself for ever — every shared screen request hung (builds 27–31).
+    final f = _send('GET', path).whenComplete(() {
+      _inFlight.remove(key);
+    });
     _inFlight[key] = f;
     return f;
   }
