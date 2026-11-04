@@ -1,0 +1,16 @@
+name: mobile-test
+# Runs only the app's tests (quick check, no APK).
+on:
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter pub get
+      - run: flutter test -r expanded
