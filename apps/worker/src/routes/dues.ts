@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, inBranch, MemberDoc, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, inBranch, MemberDoc, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc, need } from '../core';
 import { diffDays, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { validSubs } from '../lib/status';
@@ -56,6 +56,7 @@ export function dueRoutes(app: App) {
   app.get('/api/v1/dues', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const list = dueList(g, await readRoster(c.var.deps.store, g.tenantId));
     return c.json({ total: list.reduce((n, m) => n + m.due, 0), count: list.length, remindedAt: g.tenant.dueRemindedAt ?? null, members: list });
   });
@@ -64,6 +65,7 @@ export function dueRoutes(app: App) {
   app.post('/api/v1/dues/remind', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const ids = strList(b, 'memberIds', 1000);
     const { store } = c.var.deps;
@@ -119,6 +121,7 @@ export function dueRoutes(app: App) {
   app.get('/api/v1/leads', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'members');
     const rows = (await c.var.deps.store.query<LeadDoc>(P.leads(g.tenantId), [['status', 'OPEN']])).map((r) => r.data).filter((l) => inBranch(g, l.branchId));
     return c.json(
       rows
@@ -130,6 +133,7 @@ export function dueRoutes(app: App) {
   app.post('/api/v1/leads/:id/done', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'members');
     const id = c.req.param('id');
     await c.var.deps.store.tx(async (t) => {
       const l = isUuid(id) ? await t.get<LeadDoc>(P.lead(g.tenantId, id)) : null;

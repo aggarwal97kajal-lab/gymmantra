@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, MemberDoc, memberCodeFor, notify, P, readRoster, rosterEntry, TenantDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, MemberDoc, memberCodeFor, notify, P, readRoster, rosterEntry, TenantDoc, need } from '../core';
 import { bad, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, str } from '../lib/validate';
 import { ownerIds } from './pt';
@@ -107,6 +107,7 @@ export function transferRoutes(app: App) {
   app.get('/api/v1/transfers', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'requests');
     const rows = (await c.var.deps.store.query<TransferDoc>(P.transfers(g.tenantId), [['status', 'PENDING']])).map((r) => r.data);
     return c.json({
       allowTransfer: g.tenant.allowTransfer ?? false,

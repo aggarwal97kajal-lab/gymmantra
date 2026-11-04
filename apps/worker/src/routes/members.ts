@@ -27,8 +27,7 @@ import {
   SubDoc,
   TenantDoc,
   UserDoc,
-  userNames,
-} from '../core';
+  userNames, need, notifyDesk } from '../core';
 import { addDays, diffDays, isYmd, planEndDate, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
@@ -298,6 +297,7 @@ export function memberRoutes(app: App) {
   app.get('/api/v1/members', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'members');
     const tab = (c.req.query('tab') ?? 'all') as Tab;
     if (!TABS.includes(tab)) throw bad('Unknown tab');
     const needle = (c.req.query('q') ?? '').trim().toLowerCase();
@@ -334,6 +334,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/members', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'memberEdit');
     const b = body(await c.req.json().catch(() => null));
     const full = hasDetails(b) ? fullInput(g, b) : null;
     const input = full ?? memberInput(g, b);
@@ -391,6 +392,9 @@ export function memberRoutes(app: App) {
         }
         return r.m;
       });
+      if (g.role !== 'OWNER') {
+        await c.var.deps.store.tx(async (t) => notifyDesk(t, g, u.id, 'New member added', `${m.name} (${m.memberCode}) was added by ${u.name}`, branchOf(g.tenant, m.branchId)));
+      }
       return c.json({ ...m, accountMade: !!made }, 201);
     } catch (e) {
       if (made?.idToken) await identity.deleteAccount(made.idToken).catch(() => {});
@@ -401,6 +405,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/members/import', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'memberEdit');
     const b = body(await c.req.json().catch(() => null));
     if (!Array.isArray(b.rows) || b.rows.length > 2000) throw bad('Invalid rows');
     const branchId = optStr(b, 'branchId') ?? null;
@@ -457,6 +462,7 @@ export function memberRoutes(app: App) {
   app.get('/api/v1/members/:id', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'members');
     const { store } = c.var.deps;
     const id = c.req.param('id');
     if (!isUuid(id)) throw notFound('Member not found');
@@ -529,6 +535,7 @@ export function memberRoutes(app: App) {
   app.patch('/api/v1/members/:id', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'memberEdit');
     const b = body(await c.req.json().catch(() => null));
     const out = await c.var.deps.store.tx(async (t) => {
       const before = await memberFor(t, g, c.req.param('id'));
@@ -566,9 +573,9 @@ export function memberRoutes(app: App) {
   });
 
   /**
-   * Owner deletes a member who deleted their own GymMantra account ("No longer available").
-   * The member leaves the list, so the same mobile number can be added or join again as new.
-   * Money already received stays in the gym's records and reports.
+   * Owner removes a member from the gym (board 60). The member's GymMantra login stays as it is —
+   * only this gym goes from their app. Money already received stays in the gym's records and reports,
+   * and the mobile number is free to be added or to join again.
    */
   app.delete('/api/v1/members/:id', async (c) => {
     const u = await authenticate(c);
@@ -576,12 +583,18 @@ export function memberRoutes(app: App) {
     await c.var.deps.store.tx(async (t) => {
       const before = await memberFor(t, g, c.req.param('id'));
       const roster = await readRoster(t, g.tenantId);
-      if (!before.gone && !roster.members[before.id]?.gone) throw conflict('Only members who deleted their GymMantra account can be deleted');
+      const mu = before.userId ? await t.get<UserDoc>(P.user(before.userId)) : null;
       delete roster.members[before.id];
       const tenant = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
       t.set(P.tenant(g.tenantId), { ...tenant, memberCount: Object.values(roster.members).filter((e) => !e.archived).length });
-      t.set(P.member(g.tenantId, before.id), { ...before, archived: true, removed: true });
+      t.set(P.member(g.tenantId, before.id), { ...before, userId: null, archived: true, removed: true });
       t.set(P.roster(g.tenantId), roster);
+      if (mu && before.userId && mu.memberships?.[g.tenantId] === before.id) {
+        const ms = { ...mu.memberships };
+        delete ms[g.tenantId];
+        t.set(P.user(before.userId), { ...mu, memberships: ms });
+        await notify(t, before.userId, null, 'Removed from gym', `${g.tenant.name} removed you from the gym. Your GymMantra account stays the same — join any gym with its gym code.`);
+      }
       audit(t, g.tenantId, u.id, 'member.delete', 'member', before.id, before, null);
     });
     return c.json({ ok: true });
@@ -591,6 +604,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/members/reminders', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const ids = strList(b, 'memberIds', 500) ?? [];
     const all = summaries(g, await readRoster(c.var.deps.store, g.tenantId));
@@ -616,6 +630,7 @@ export function memberRoutes(app: App) {
   app.get('/api/v1/join-requests', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'requests');
     const status = ['PENDING', 'APPROVED', 'DECLINED'].includes(c.req.query('status') ?? '') ? c.req.query('status')! : 'PENDING';
     const { store } = c.var.deps;
     const rows = (await store.query<{ userId: string; createdAt: string; branchId: string | null }>(P.joins(g.tenantId), [['status', status]])).filter((r) => inBranch(g, r.data.branchId));
@@ -634,6 +649,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/join-requests/:id/approve', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'requests');
     const b = body((await c.req.json().catch(() => ({}))) ?? {});
     const id = c.req.param('id');
     const member = await c.var.deps.store.tx(async (t) => {
@@ -689,6 +705,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/join-requests/:id/decline', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'requests');
     const id = c.req.param('id');
     await c.var.deps.store.tx(async (t) => {
       const jr = isUuid(id) ? await t.get<{ userId: string; status: string }>(P.join(g.tenantId, id)) : null;
@@ -714,6 +731,7 @@ export function memberRoutes(app: App) {
   app.get('/api/v1/members/:id/membership-preview', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const { store } = c.var.deps;
     const m = await memberFor(store, g, c.req.param('id'));
     const planId = c.req.query('planId') ?? '';
@@ -730,6 +748,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/members/:id/memberships', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     return c.json(await saveMembership(c, g, u.id, c.req.param('id'), b, null), 201);
   });
@@ -738,6 +757,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/memberships/:id/correct', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const id = c.req.param('id');
     const old = isUuid(id) ? await c.var.deps.store.get<SubDoc>(P.sub(g.tenantId, id)) : null;
@@ -748,6 +768,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/memberships/:id/payments', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const amount = int(b, 'amount', { min: 1, max: 10_000_000, label: 'amount' });
     const mode = oneOf(b, 'mode', PAY_MODES)!;
@@ -770,6 +791,10 @@ export function memberRoutes(app: App) {
       t.set(P.roster(g.tenantId), roster);
       await bumpDaily(t, g.tenantId, { collected: amount, payments: 1 }, branchOf(g.tenant, roster.members[s.memberId]?.branchId));
       audit(t, g.tenantId, u.id, 'payment.create', 'payment', p.id, null, p);
+      const who = roster.members[s.memberId];
+      const bid = branchOf(g.tenant, who?.branchId);
+      if (who?.userId) await notify(t, who.userId, g.tenantId, 'Payment received', `${g.tenant.name} received ${inr(amount)} for your ${s.planName} membership. Thank you!${due - amount > 0 ? ` ${inr(due - amount)} is still due.` : ''}`);
+      await notifyDesk(t, g, u.id, 'Payment received', `${who?.name ?? 'A member'} paid ${inr(amount)} (${mode}) · entered by ${u.name}`, bid);
       return { payment: p, due: due - amount };
     });
     return c.json(out, 201);
@@ -778,6 +803,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/memberships/:id/freeze', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const days = int(b, 'days', { min: 1, max: 365, label: 'days' });
     const reason = optStr(b, 'reason', { max: 300 }) ?? null;
@@ -815,6 +841,7 @@ export function memberRoutes(app: App) {
   app.post('/api/v1/freezes/:id/end', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const fid = c.req.param('id');
     const subId = fid.slice(0, 36);
     const today = todayIST();

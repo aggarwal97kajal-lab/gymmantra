@@ -1,4 +1,4 @@
-import { App, authenticate, dailyFor, gymOf, P, readRoster } from '../core';
+import { App, authenticate, dailyFor, gymOf, P, readRoster, need } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad } from '../lib/http';
 import { validSubs } from '../lib/status';
@@ -38,6 +38,7 @@ export function reportRoutes(app: App) {
   app.get('/api/v1/reports/entries', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'reports');
     const { store } = c.var.deps;
     await requireFeature(store, g.tenant, 'reports');
     const { from, to: today, days, custom } = reportRange((k) => c.req.query(k), ENTRY_RANGES);
@@ -110,6 +111,7 @@ export function reportRoutes(app: App) {
   app.get('/api/v1/reports', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'reports');
     const { store } = c.var.deps;
     await requireFeature(store, g.tenant, 'reports');
     const { from, to: today, days, custom } = reportRange((k) => c.req.query(k), RANGES);

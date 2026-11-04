@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc, need } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, optBool, str } from '../lib/validate';
@@ -107,6 +107,7 @@ export function noticeRoutes(app: App) {
   app.get('/api/v1/notices', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'offers');
     const rows = (await c.var.deps.store.query<NoticeDoc>(P.notices(g.tenantId), [['active', true]])).map((x) => x.data).filter((n) => !n.branchIds?.length || n.branchIds.includes(g.branchId));
     const today = todayIST();
     return c.json(rows.map((n) => ({ ...n, live: n.showTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 50));
@@ -116,6 +117,7 @@ export function noticeRoutes(app: App) {
   app.get('/api/v1/notices/audience', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'offers');
     const filter = (FILTERS as readonly string[]).includes(c.req.query('filter') ?? '') ? (c.req.query('filter') as NoticeDoc['memberFilter']) : 'ALL';
     const list = audienceOf(summaries(g, await readRoster(c.var.deps.store, g.tenantId)), filter);
     return c.json({
@@ -131,6 +133,7 @@ export function noticeRoutes(app: App) {
   app.post('/api/v1/notices', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'offers');
     const b = body(await c.req.json().catch(() => null));
     const title = str(b, 'title', { min: 3, max: 80, label: 'the heading' });
     const message = str(b, 'message', { min: 3, max: 600, label: 'the message' });
@@ -161,6 +164,7 @@ export function noticeRoutes(app: App) {
   app.delete('/api/v1/notices/:id', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'offers');
     const id = c.req.param('id');
     await c.var.deps.store.tx(async (t) => {
       const before = isUuid(id) ? await t.get<NoticeDoc>(P.notice(g.tenantId, id)) : null;

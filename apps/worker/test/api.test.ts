@@ -1069,14 +1069,57 @@ describe('Nov 3 night: rate limit, Google link, set password', () => {
 });
 
 describe('deleted accounts', () => {
+  it('owner removes a member, trainer or staff from the gym: their login stays', async () => {
+    const owner = await h.ownerWithGym('Remove Gym');
+    const mem = await h.signup('Removed Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    const m = await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    expect((await h.api.del(`/members/${m.body.id}`, owner.token)).status).toBe(200);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships).toEqual([]);
+    expect((await h.api.post('/auth/login', { identifier: mem.email, password: 'secret123' })).status).toBe(200);
+    // Joins again as new
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const r2 = await h.api.get('/join-requests', owner.token);
+    expect((await h.api.post(`/join-requests/${r2.body[0].id}/approve`, {}, owner.token)).status).toBe(201);
+    // Staff added with full details, then removed: login stays
+    const ph = h.nextPhone();
+    const add = await h.api.post('/gym/staff', { firstName: 'Desk', lastName: 'Person', dob: '1998-03-12', state: 'Delhi', city: 'New Delhi', pincode: '110075', phone: ph, email: `d${ph}@test.in`, preset: 'CHECKIN' }, owner.token);
+    expect(add.status).toBe(201);
+    expect(add.body.rights).toEqual(['members', 'checkin']);
+    const staffList = await h.api.get('/gym/staff', owner.token);
+    expect(staffList.body.some((x: any) => x.id === add.body.id && x.user.waitingForLogin)).toBe(true);
+    expect((await h.api.del(`/gym/staff/${add.body.id}`, owner.token)).status).toBe(200);
+    const su = await h.store.get<any>(P.user(add.body.id));
+    expect(su.deleted).toBeFalsy();
+    expect(su.staffOf[owner.gym.id].active).toBe(false);
+  });
+
+  it('staff rights limit what front desk can do; staff cannot sign up themselves', async () => {
+    const owner = await h.ownerWithGym('Rights Gym');
+    const ph = h.nextPhone();
+    const add = await h.api.post('/gym/staff', { name: 'Check Only', phone: ph, role: 'FRONT_DESK', tempPassword: 'desk12345', preset: 'CHECKIN' }, owner.token);
+    expect(add.status).toBe(201);
+    const tok = (await h.api.post('/auth/login', { identifier: ph, password: 'desk12345' })).body.token;
+    expect((await h.api.get('/members', tok)).status).toBe(200);
+    expect((await h.api.post('/members', { name: 'Nope', phone: h.nextPhone() }, tok)).status).toBe(403);
+    expect((await h.api.get('/reports?days=7', tok)).status).toBe(403);
+    await h.api.patch(`/gym/staff/${add.body.id}`, { preset: 'MANAGER' }, owner.token);
+    expect((await h.api.post('/members', { name: 'Yes Now', phone: h.nextPhone() }, tok)).status).toBe(201);
+    const M = { 'x-gm-client': 'mobile' };
+    const s = await h.api.post('/auth/signup', { name: 'Self Staff', email: `s${h.nextPhone()}@test.in`, phone: h.nextPhone(), password: 'secret123', role: 'STAFF' }, undefined, M);
+    expect(s.status).toBe(400);
+    // Logging in as Gym staff works; as Gym owner it does not
+    expect((await h.api.post('/auth/login', { identifier: ph, password: 'desk12345', role: 'STAFF' }, undefined, M)).status).toBe(200);
+    expect((await h.api.post('/auth/login', { identifier: ph, password: 'desk12345', role: 'OWNER' }, undefined, M)).status).toBe(403);
+  });
+
   it('member deletes account: gym sees "No longer available", can delete them, and the same email/mobile can sign up again', async () => {
     const owner = await h.ownerWithGym('Gone Gym');
     const mem = await h.signup('Leaving Member');
     await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
     const reqs = await h.api.get('/join-requests', owner.token);
     const m = await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
-    // Not a "gone" member yet: the owner cannot delete them.
-    expect((await h.api.del(`/members/${m.body.id}`, owner.token)).status).toBe(409);
     expect((await h.api.del('/me', mem.token)).status).toBe(400); // password needed
     expect((await h.api.del('/me', mem.token, { password: 'nope12345' })).body.message).toMatch(/Wrong password/);
     expect((await h.api.del('/me', mem.token, { password: 'secret123' })).status).toBe(200);
@@ -1108,5 +1151,98 @@ describe('deleted accounts', () => {
     expect(again.status).toBe(201);
     const login = await h.api.post('/auth/login', { identifier: p.email, password: 'different99' });
     expect(login.status).toBe(200);
+  });
+});
+
+describe('staff attendance', () => {
+  it('staff marks Present only at the gym location; owner sees the month', async () => {
+    const owner = await h.ownerWithGym('Present Gym');
+    const ph = h.nextPhone();
+    const add = await h.api.post('/gym/staff', { name: 'Desk Day', phone: ph, role: 'FRONT_DESK', tempPassword: 'desk12345' }, owner.token);
+    const tok = (await h.api.post('/auth/login', { identifier: ph, password: 'desk12345' })).body.token;
+    // No gym location yet
+    expect((await h.api.post('/me/staff-attendance', { lat: 28.6, lng: 77.0 }, tok)).status).toBe(403);
+    await h.api.get('/gym/checkin-qr', owner.token);
+    expect((await h.api.put('/gym/location', { lat: 28.6, lng: 77.0 }, owner.token)).status).toBeLessThan(300);
+    // Far away
+    const far = await h.api.post('/me/staff-attendance', { lat: 28.7, lng: 77.0 }, tok);
+    expect(far.status).toBe(403);
+    expect(far.body.message).toMatch(/away/);
+    const ok = await h.api.post('/me/staff-attendance', { lat: 28.60005, lng: 77.0, accuracy: 10 }, tok);
+    expect(ok.status).toBe(201);
+    const mine = await h.api.get('/me/staff-attendance', tok);
+    expect(mine.body.markedToday).toBe(true);
+    const all = await h.api.get('/staff-attendance', owner.token);
+    expect(all.body.rows.find((r: any) => r.id === add.body.id).present.length).toBe(1);
+  });
+});
+
+describe('gym transfer, close, broadcasts and gate', () => {
+  const boss = async () => {
+    const r = await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' });
+    if (r.status === 200) return r.body.token as string;
+    return (await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' })).body.token as string;
+  };
+
+  it('owner transfers the gym; old owner is free and can be deleted', async () => {
+    const owner = await h.ownerWithGym('Sell Gym');
+    const buyer = await h.signup('Buyer');
+    const r = await h.api.post('/gym/transfer', { phone: buyer.phone, oldOwner: 'remove' }, owner.token);
+    expect(r.status).toBe(200);
+    expect((await h.api.get('/gym', buyer.token)).body.id).toBe(owner.gym.id);
+    expect((await h.api.get('/gym', owner.token)).status).toBe(403);
+    const sup = await boss();
+    expect((await h.api.post(`/super/users/${owner.user.id}/delete`, {}, sup)).status).toBe(200);
+  });
+
+  it('super admin closes and reopens a gym', async () => {
+    const owner = await h.ownerWithGym('Close Gym');
+    const mem = await h.signup('Close Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    const sup = await boss();
+    expect((await h.api.post(`/super/gyms/${owner.gym.id}/close`, { confirm: 'wrong' }, sup)).status).toBe(400);
+    expect((await h.api.post(`/super/gyms/${owner.gym.id}/close`, { confirm: owner.gym.gymCode }, sup)).status).toBe(200);
+    expect((await h.api.get('/gym', owner.token)).status).toBe(403);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym.closed).toBe(true);
+    expect((await h.api.post(`/super/gyms/${owner.gym.id}/reopen`, {}, sup)).status).toBe(200);
+    expect((await h.api.get('/gym', owner.token)).status).toBe(200);
+  });
+
+  it('broadcast reaches only the chosen roles', async () => {
+    const owner = await h.ownerWithGym('Bc Gym');
+    const mem = await h.signup('Bc Member');
+    await h.api.patch('/me/profile', { appRole: 'MEMBER' }, mem.token);
+    const sup = await boss();
+    expect((await h.api.post('/super/broadcasts', { title: 'For owners', message: 'Hello owners', roles: ['OWNER'] }, sup)).status).toBe(201);
+    const on = await h.api.get('/me/notifications', owner.token);
+    expect(on.body.some((n: any) => n.title === 'For owners')).toBe(true);
+    const mn = await h.api.get('/me/notifications', mem.token);
+    expect(mn.body.some((n: any) => n.title === 'For owners')).toBe(false);
+  });
+
+  it('gate opens after an allowed desk check-in', async () => {
+    const owner = await h.ownerWithGym('Gate Gym');
+    const plan = (await h.api.post('/plans', { name: 'Monthly', months: 1, price: 1000 }, owner.token)).body;
+    const m = (await h.api.post('/members', { name: 'Gate Member', phone: h.nextPhone() }, owner.token)).body;
+    await h.api.post(`/members/${m.id}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, owner.token);
+    expect((await h.api.put('/gym/gate', { type: 'webhook', url: 'https://relay.example/open?key=abc' }, owner.token)).status).toBe(200);
+    const calls: string[] = [];
+    const real = global.fetch;
+    (global as any).fetch = async (u: any) => {
+      calls.push(String(u));
+      return new Response('ok');
+    };
+    try {
+      const r = await h.api.post('/attendance/manual', { memberId: m.id }, owner.token);
+      expect(r.body.result).toBe('ALLOWED');
+      expect(r.body.gate).toBe('opened');
+      expect(calls).toEqual(['https://relay.example/open?key=abc']);
+    } finally {
+      (global as any).fetch = real;
+    }
+    const g = await h.api.get('/gym/gate', owner.token);
+    expect(g.body.url).not.toContain('abc');
   });
 });

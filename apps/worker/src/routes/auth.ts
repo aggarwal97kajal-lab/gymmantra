@@ -5,7 +5,7 @@ import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
 import { hasDetails, personDetails } from '../lib/person';
 import { rateLimit } from '../lib/ratelimit';
-import { accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
+import { cleanRights, RIGHTS, accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
 export const LOCK_MINUTES = 15;
@@ -77,11 +77,12 @@ export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phon
 /** The gym made this account: don't sign up again, set a password from the email link. */
 function addedByGym(u: UserDoc) {
   const gym = u.createdByGym!.gymName;
-  return new HttpError(409, `An account with this email already exists. ${gym} has made you a member. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: gym, email: u.email });
+  const asStaff = u.appRole === 'STAFF';
+  return new HttpError(409, `An account with this email already exists. ${gym} has made you ${asStaff ? 'gym staff' : 'a member'}. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: gym, email: u.email, asStaff });
 }
 
 /** A second login address for the same inbox: name@gmail.com → name+gm4821@gmail.com. */
-function aliasEmail(email: string) {
+export function aliasEmail(email: string) {
   const [local, domain] = email.split('@');
   return `${local.split('+')[0]}+gm${Math.floor(1000 + Math.random() * 9000)}@${domain}`;
 }
@@ -135,7 +136,8 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
   return { uid, user };
 }
 
-const APP_ROLES = ['MEMBER', 'OWNER', 'TRAINER'] as const;
+const APP_ROLES = ['MEMBER', 'OWNER', 'TRAINER', 'STAFF'] as const;
+const STAFF_NO_SIGNUP = 'Gym staff accounts are made by the gym owner. Ask your gym owner to add you (More → Staff → Add staff), then log in here';
 /** The role picked on the app's first screen (mobile app only). */
 function chosenRole(c: C, b: Record<string, unknown>): AppRole | null {
   if (!isMobile(c) || isAdminApp(c)) return null;
@@ -201,6 +203,16 @@ export function authRoutes(app: App) {
     const phone = normalizePhone(str(b, 'phone', { label: 'your mobile number' }));
     if (!phone) throw bad('Enter a valid 10-digit mobile number');
     const password = str(b, 'password', { min: 8, max: 100, label: 'password' });
+    if (chosenRole(c, b) === 'STAFF') {
+      // Staff never sign up themselves. If the owner already made their account, send them to set a password.
+      const { store } = c.var.deps;
+      const byEmail = (await store.query<UserDoc>('users', [['email', email]])).find((r) => !r.data.deleted)?.data;
+      const ref = await store.get<{ uid: string }>(P.phone(phone));
+      const byPhone = ref ? await store.get<UserDoc>(P.user(ref.uid)) : null;
+      const made = [byEmail, byPhone].find((x) => x && !x.deleted && x.createdByGym);
+      if (made) throw addedByGym(made);
+      throw bad(STAFF_NO_SIGNUP);
+    }
     const { uid, user } = await createPasswordUser(c, { name, email, phone, password, appRole: chosenRole(c, b), details: d ? { firstName: d.firstName, middleName: d.middleName, lastName: d.lastName, dob: d.dob, gender: d.gender, state: d.state, city: d.city, country: d.country, pincode: d.pincode } : undefined });
     const token = await issueSession(c, uid);
     return c.json({ token, user: publicUser(uid, user) }, 201);
@@ -282,6 +294,7 @@ export function authRoutes(app: App) {
       const token = await issueSession(c, have.uid);
       return c.json({ token, user: publicUser(have.uid, checked), existing: true });
     }
+    if (chosenRole(c, b) === 'STAFF') throw bad(STAFF_NO_SIGNUP);
     const phoneIn = optStr(b, 'phone');
     const phone = phoneIn ? normalizePhone(phoneIn) : null;
     if (phoneIn && !phone) throw bad('Enter a valid 10-digit mobile number');
@@ -455,7 +468,7 @@ export async function meResponse(c: C, u: AuthUser) {
   return {
     user: publicUser(u.id, u),
     gyms: ids
-      .map(([id, s], i) => (tenants[i] ? { id, name: tenants[i].name, gymCode: tenants[i].gymCode, status: tenants[i].status, logoUrl: tenants[i].logoUrl, role: s.role, branchIds: s.branchIds } : null))
+      .map(([id, s], i) => (tenants[i] ? { id, name: tenants[i].name, gymCode: tenants[i].gymCode, status: tenants[i].status, logoUrl: tenants[i].logoUrl, role: s.role, branchIds: s.branchIds, rights: s.role === 'OWNER' ? [...RIGHTS] : cleanRights(s.rights) } : null))
       .filter(Boolean),
   };
 }

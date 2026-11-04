@@ -1,4 +1,5 @@
-import { App, audit, authenticate, branchCode, gymOf, MemberDoc, P, TenantDoc } from '../core';
+import { openGate } from './gate';
+import { App, audit, authenticate, branchCode, gymOf, MemberDoc, P, TenantDoc, need } from '../core';
 import { todayIST } from '../lib/dates';
 import { bad, forbidden, notFound, nowIso, uuid } from '../lib/http';
 import { body, str } from '../lib/validate';
@@ -80,6 +81,7 @@ export function checkinRoutes(app: App) {
   app.get('/api/v1/gym/checkin-qr', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'checkin');
     g.tenant = await ensureBranchCodes(c.var.deps.store, g.tenantId, g.tenant);
     const spot = await c.var.deps.store.tx(async (t) => {
       const r = spotOf(await t.get<CheckinDoc>(P.checkin(g.tenantId)), g.tenant, g.branchId);
@@ -169,7 +171,8 @@ export function checkinRoutes(app: App) {
         // The visit counts for the branch whose QR was scanned.
         return recordMemberCheckIn(t, tenantId, mem, { method: 'SELF', byId: u.id, branchId: hit.branchId, oncePerDay: true });
       });
-      return c.json({ kind: 'MEMBER', gym, ...out }, 201);
+      const gate = out.result === 'ALLOWED' ? await openGate(c.var.deps, tenantId, hit.branchId) : null;
+      return c.json({ kind: 'MEMBER', gym, ...out, gate }, 201);
     }
     // Trainer attendance
     const today = todayIST();
@@ -183,6 +186,7 @@ export function checkinRoutes(app: App) {
       t.set(P.attendanceEv(tenantId, uuid()), { memberId: null, trainerId: u.id, memberName: u.name, memberCode: 'TRAINER', branchId: hit.branchId, day: today, at, result: 'ALLOWED', reason: 'Trainer', method: 'SELF', scannedById: u.id });
       return { duplicate: false, visitsThisMonth: next.visits, at };
     });
-    return c.json({ kind: 'TRAINER', gym, result: 'ALLOWED', reason: out.duplicate ? 'Already checked in today' : null, ...out }, 201);
+    const gate = await openGate(c.var.deps, tenantId, hit.branchId);
+    return c.json({ kind: 'TRAINER', gym, result: 'ALLOWED', reason: out.duplicate ? 'Already checked in today' : null, ...out, gate }, 201);
   });
 }

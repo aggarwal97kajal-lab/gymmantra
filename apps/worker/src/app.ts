@@ -1,3 +1,6 @@
+import { gateRoutes } from './routes/gate';
+import { ownershipRoutes } from './routes/ownership';
+import { staffDayRoutes } from './routes/staffdays';
 import { tokenSrc } from './identity';
 import { checkinRoutes } from './routes/checkin';
 import { dueRoutes } from './routes/dues';
@@ -129,6 +132,9 @@ export function createApp(getDeps: () => Deps) {
   transferRoutes(app);
   checkinRoutes(app);
   dueRoutes(app);
+  staffDayRoutes(app);
+  ownershipRoutes(app);
+  gateRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

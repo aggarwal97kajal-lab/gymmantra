@@ -31,7 +31,7 @@ export interface UserDoc {
   memberships: Record<string, string>; // tenantId -> memberId
   requested: Record<string, boolean>; // tenantIds with join requests (as a member)
   trainerRequested?: Record<string, boolean>; // tenantIds with join requests as a trainer
-  appRole?: 'MEMBER' | 'OWNER' | 'TRAINER' | null; // what the person chose in the app
+  appRole?: 'MEMBER' | 'OWNER' | 'TRAINER' | 'STAFF' | null; // what the person chose in the app
   firstName?: string | null;
   middleName?: string | null;
   lastName?: string | null;
@@ -46,7 +46,7 @@ export interface UserDoc {
   mustSetPassword?: boolean; // gym-made account: first login (e.g. Google) asks for a password
   initPw?: string | null; // server-only random first password of a gym-made account (never sent to apps)
   detailsNeeded?: boolean; // signed up with Google: DOB, state, city, PIN still to fill
-  staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean }>;
+  staffOf: Record<string, { role: Role; branchIds: string[]; active: boolean; rights?: string[] }>;
 }
 
 export interface Branch {
@@ -65,7 +65,9 @@ export interface TenantDoc {
   phone: string | null;
   address: string | null;
   whatsappNumber: string | null;
-  status: 'TRIAL' | 'ACTIVE' | 'SUSPENDED';
+  status: 'TRIAL' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
+  closedAt?: string | null; // super admin closed the gym (can reopen within 30 days)
+  closedStaff?: { uid: string; role: Role; branchIds: string[]; rights?: string[] }[];
   verified: boolean;
   trialEndsAt: string | null;
   saasPlanId: string | null;
@@ -236,6 +238,7 @@ export const P = {
   secrets: 'settings/secrets',
   stats: 'settings/stats',
   platformAudit: 'platformAudit',
+  broadcasts: 'settings/broadcasts',
   coupons: 'coupons',
   coupon: (id: string) => `coupons/${id}`,
   couponCode: (code: string) => `couponCodes/${code}`,
@@ -355,12 +358,34 @@ export const isWebOnly = (u: Pick<UserDoc, 'isSuperAdmin' | 'staffOf'>) => u.isS
 export const isDeskStaff = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && DESK_ROLES.includes(s.role));
 /** True if the person is a trainer at any gym. */
 export const isTrainer = (u: Pick<UserDoc, 'staffOf'>) => Object.values(u.staffOf ?? {}).some((s) => s.active && s.role === 'TRAINER');
-export type AppRole = 'MEMBER' | 'OWNER' | 'TRAINER';
-const ROLE_LABEL: Record<AppRole, string> = { MEMBER: 'Member', OWNER: 'Gym owner', TRAINER: 'Trainer' };
+export type AppRole = 'MEMBER' | 'OWNER' | 'TRAINER' | 'STAFF';
+const ROLE_LABEL: Record<AppRole, string> = { MEMBER: 'Member', OWNER: 'Gym owner', TRAINER: 'Trainer', STAFF: 'Gym staff' };
+
+/**
+ * What a front desk person may do. The owner switches these on/off per staff (board 58).
+ * members: see members · memberEdit: add/edit members · payments: memberships and payments ·
+ * checkin: attendance, scan, gate · requests: join/transfer requests · offers: offers and notices ·
+ * reports: money reports and dues · plans: plans and gym settings.
+ */
+export const RIGHTS = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'] as const;
+export type Right = (typeof RIGHTS)[number];
+export const RIGHT_PRESETS: Record<string, Right[]> = {
+  RECEPTION: ['members', 'memberEdit', 'payments', 'checkin', 'requests'],
+  CHECKIN: ['members', 'checkin'],
+  MANAGER: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'],
+};
+/** Front desk added before rights existed: what they could always do. */
+export const DEFAULT_DESK_RIGHTS: Right[] = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers'];
+export function cleanRights(list: unknown): Right[] {
+  return Array.isArray(list) ? RIGHTS.filter((r) => list.includes(r)) : [...DEFAULT_DESK_RIGHTS];
+}
 const nonEmpty = (o?: Record<string, unknown>) => !!o && Object.keys(o).length > 0;
 /** The role this account belongs to, worked out from what it really is in gyms. null = not decided yet. */
 export function accountRole(u: UserDoc): AppRole | null {
-  if (isDeskStaff(u)) return 'OWNER';
+  const live = Object.values(u.staffOf ?? {}).filter((s) => s.active);
+  if (live.some((s) => s.role === 'OWNER')) return 'OWNER';
+  if (live.some((s) => s.role === 'FRONT_DESK')) return 'STAFF';
+  if (u.appRole === 'STAFF') return 'STAFF'; // removed from a gym: still a staff account, waiting to be added again
   if (isTrainer(u) || nonEmpty(u.trainerRequested)) return 'TRAINER';
   if (u.appRole) return u.appRole;
   if (nonEmpty(u.memberships) || nonEmpty(u.requested)) return 'MEMBER';
@@ -384,6 +409,14 @@ export interface GymCtx {
   tenant: TenantDoc;
   /** The branch the staff app is looking at (x-branch-id); lists, dashboards and new offers follow it. */
   branchId: string;
+  /** What this person may do here (owners: everything). */
+  rights: Right[];
+}
+
+/** Stops front desk staff from doing what their owner has not allowed. */
+export function need(g: GymCtx, right: Right) {
+  if (g.role === 'OWNER' || g.role === 'TRAINER') return;
+  if (!g.rights.includes(right)) throw forbidden('Your gym owner has not given you access to this');
 }
 
 /** Branch a record belongs to; old records without one belong to the first branch. */
@@ -430,11 +463,13 @@ export async function gymOf(c: C, ...roles: Role[]): Promise<GymCtx> {
   const tenant = await c.var.deps.store.get<TenantDoc>(P.tenant(tenantId));
   if (!tenant) throw forbidden('Gym not found');
   if (tenant.status === 'SUSPENDED') throw forbidden('This gym is suspended. Contact GymMantra support');
+  if (tenant.status === 'CLOSED') throw forbidden('This gym is closed');
   if (roles.length && !roles.includes(s.role)) throw forbidden('Only the gym owner can do this');
   const allowed = s.role === 'OWNER' || !(s.branchIds ?? []).length ? tenant.branches.map((b) => b.id) : tenant.branches.map((b) => b.id).filter((id) => s.branchIds.includes(id));
   const askedBranch = c.req.header('x-branch-id');
   const branchId = askedBranch && allowed.includes(askedBranch) ? askedBranch : allowed[0] ?? tenant.branches[0]?.id ?? '';
-  return { tenantId, role: s.role, branchIds: s.branchIds ?? [], tenant, branchId };
+  const rights: Right[] = s.role === 'OWNER' ? [...RIGHTS] : cleanRights(s.rights);
+  return { tenantId, role: s.role, branchIds: s.branchIds ?? [], tenant, branchId, rights };
 }
 
 export function canSeeBranch(g: GymCtx, branchId: string | null) {
@@ -460,11 +495,49 @@ export interface NoteItem {
   readAt: string | null;
 }
 
+/** A super admin message to everyone or to some roles (read live, not copied per person). */
+export interface Broadcast {
+  id: string;
+  title: string;
+  body: string;
+  roles: string[]; // ALL | OWNER | STAFF | TRAINER | MEMBER
+  state: string | null;
+  createdAt: string;
+  byId: string;
+}
+
+/** Which broadcast roles a person belongs to. */
+export function broadcastRolesOf(u: UserDoc): string[] {
+  const live = Object.values(u.staffOf ?? {}).filter((s) => s.active);
+  const out = new Set<string>();
+  if (live.some((s) => s.role === 'OWNER') || u.appRole === 'OWNER') out.add('OWNER');
+  if (live.some((s) => s.role === 'FRONT_DESK') || u.appRole === 'STAFF') out.add('STAFF');
+  if (live.some((s) => s.role === 'TRAINER') || u.appRole === 'TRAINER') out.add('TRAINER');
+  if (Object.keys(u.memberships ?? {}).length || u.appRole === 'MEMBER') out.add('MEMBER');
+  return [...out];
+}
+
 /** In-app notification (kept as the last 50 per user in one document). */
 export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string, branchId: string | null = null) {
   if (!userId) return;
   const doc = (await t.get<{ items: NoteItem[] }>(P.notes(userId))) ?? { items: [] };
   t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, branchId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
+}
+
+/**
+ * Tells the gym's owners (and front desk of that branch who have [right]) about something that happened,
+ * except the person who did it. Used for payments, new members, join requests, staff attendance…
+ */
+export async function notifyDesk(t: Tx, g: Pick<GymCtx, 'tenantId'> & { tenant: TenantDoc }, actorId: string | null, title: string, body: string, branchId: string | null, right?: Right) {
+  const staff = await t.query<{ role: Role; active: boolean; branchIds: string[]; rights?: string[] }>(P.staffCol(g.tenantId), [['active', true]]);
+  const first = g.tenant.branches[0]?.id ?? null;
+  for (const s of staff) {
+    if (s.id === actorId) continue;
+    const d = s.data;
+    const owner = d.role === 'OWNER';
+    const desk = d.role === 'FRONT_DESK' && !!right && cleanRights(d.rights).includes(right) && (!branchId || (d.branchIds[0] ?? first) === branchId);
+    if (owner || desk) await notify(t, s.id, g.tenantId, title, body, branchId);
+  }
 }
 
 // ---------- Roster ----------

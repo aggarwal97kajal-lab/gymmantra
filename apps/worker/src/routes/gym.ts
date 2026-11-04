@@ -1,10 +1,11 @@
-import { App, audit, authenticate, Branch, branchCode, gymOf, isTrainer, P, Role, Roster, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Branch, branchCode, cleanRights, gymOf, isTrainer, notify, P, RIGHT_PRESETS, RIGHTS, Role, Roster, TenantDoc, UserDoc } from '../core';
+import { personDetails } from '../lib/person';
 import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optBool, optStr, str, strList } from '../lib/validate';
 import type { Reader, Store } from '../store/store';
-import { createPasswordUser } from './auth';
+import { aliasEmail, createPasswordUser } from './auth';
 import { pinMatchesState, stateByName } from '../lib/india';
 
 export interface SaasPlan {
@@ -252,12 +253,17 @@ export function gymRoutes(app: App) {
     return c.json(out);
   });
 
+  type StaffDoc = { userId: string; role: Role; branchIds: string[]; active: boolean; createdAt: string; rights?: string[] };
+
+  /** Staff of the branch the owner is looking at (each branch has its own staff), plus the gym's owners. */
   app.get('/api/v1/gym/staff', async (c) => {
     await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     const { store } = c.var.deps;
-    const rows = await store.query<{ userId: string; role: Role; branchIds: string[]; active: boolean; createdAt: string }>(P.staffCol(g.tenantId));
-    rows.sort((a, b) => (a.data.createdAt < b.data.createdAt ? -1 : 1));
+    const rows = (await store.query<StaffDoc>(P.staffCol(g.tenantId), [['active', true]])).filter(
+      (r) => r.data.role === 'OWNER' || (r.data.role === 'FRONT_DESK' && (!(r.data.branchIds ?? []).length || r.data.branchIds.includes(g.branchId))),
+    );
+    rows.sort((a, b) => (a.data.role === b.data.role ? (a.data.createdAt < b.data.createdAt ? -1 : 1) : a.data.role === 'OWNER' ? -1 : 1));
     const users = await store.getMany<UserDoc>(rows.map((r) => P.user(r.id)));
     return c.json(
       rows.map((r, i) => ({
@@ -265,47 +271,127 @@ export function gymRoutes(app: App) {
         role: r.data.role,
         active: r.data.active,
         branchIds: r.data.branchIds,
-        user: { id: r.id, name: users[i]?.name ?? 'Staff', email: users[i]?.email ?? null, phone: users[i]?.phone ?? null, photoUrl: users[i]?.photoV ? `/api/v1/photos/${r.id}?v=${users[i]!.photoV}` : null },
+        rights: r.data.role === 'OWNER' ? [...RIGHTS] : cleanRights(r.data.rights),
+        user: {
+          id: r.id,
+          name: users[i]?.name ?? 'Staff',
+          email: users[i]?.email ?? null,
+          phone: users[i]?.phone ?? null,
+          photoUrl: users[i]?.photoV ? `/api/v1/photos/${r.id}?v=${users[i]!.photoV}` : null,
+          waitingForLogin: !!users[i]?.mustSetPassword,
+        },
       })),
     );
   });
 
-  /** Owner adds a front desk (or co-owner) account. */
+  const rightsFrom = (b: Record<string, unknown>) => {
+    const preset = typeof b.preset === 'string' ? RIGHT_PRESETS[b.preset] : undefined;
+    return preset ? [...preset] : cleanRights(b.rights);
+  };
+
+  /**
+   * Owner adds staff with full details, like Add member (board 62). A new person gets a GymMantra account
+   * made by the gym: they log in as "Gym staff" with Google, or set a password first (same as gym-made members).
+   */
   app.post('/api/v1/gym/staff', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
-    const { store } = c.var.deps;
+    const { store, identity } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
-    const name = str(b, 'name', { min: 2, max: 80, label: 'the name' });
+    const role = oneOf(b, 'role', ['OWNER', 'FRONT_DESK'] as const, true) ?? 'FRONT_DESK';
+    const d = typeof b.firstName === 'string' ? personDetails(b) : null;
+    const name = d ? d.name : str(b, 'name', { min: 2, max: 80, label: 'the name' });
     const phone = normalizePhone(str(b, 'phone', { label: 'the mobile number' }));
     if (!phone) throw bad('Enter a valid 10-digit mobile number');
     const emailIn = optStr(b, 'email');
     const email = emailIn ? normalizeEmail(emailIn) : null;
     if (emailIn && !email) throw bad('Enter a valid email address');
-    const role = oneOf(b, 'role', ['OWNER', 'FRONT_DESK'] as const)!;
-    const branchIds = checkBranches(g.tenant, strList(b, 'branchIds', 20) ?? []);
+    let branchIds: string[] = [];
+    if (role === 'FRONT_DESK') {
+      const bid = optStr(b, 'branchId') ?? (strList(b, 'branchIds', 20) ?? [])[0] ?? g.branchId;
+      branchIds = checkBranches(g.tenant, [bid]);
+    }
+    const rights = role === 'OWNER' ? [] : rightsFrom(b);
     const limits = await gymLimits(store, g.tenant);
     const count = (await store.query<{ role: Role }>(P.staffCol(g.tenantId), [['active', true]])).filter((r) => r.data.role !== 'TRAINER').length;
     if (count >= limits.staffLimit) throw forbidden(`Your ${limits.planName} plan allows ${limits.staffLimit} staff accounts`);
 
     let uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid ?? null;
-    if (!uid && email) uid = (await store.query<UserDoc>('users', [['email', email]]))[0]?.id ?? null;
-    if (!uid) {
-      const pw = optStr(b, 'tempPassword', { max: 100 });
-      if (!pw || pw.length < 8) throw bad('Set a temporary password (at least 8 characters) for the new staff account');
-      uid = (await createPasswordUser(c, { name, email, phone, password: pw })).uid;
+    if (uid && (await store.get<UserDoc>(P.user(uid)))?.deleted) uid = null;
+    if (!uid && email) uid = (await store.query<UserDoc>('users', [['email', email]])).find((r) => !r.data.deleted)?.id ?? null;
+    let made: { uid: string; idToken?: string; authEmail: string; pw: string } | null = null;
+    const tempPw = optStr(b, 'tempPassword', { max: 100 });
+    if (!uid && tempPw) {
+      // Website: the owner gives a first password.
+      if (tempPw.length < 8) throw bad('Set a temporary password (at least 8 characters) for the new staff account');
+      uid = (await createPasswordUser(c, { name, email, phone, password: tempPw, appRole: role === 'OWNER' ? 'OWNER' : 'STAFF' })).uid;
     }
-    const staffUid = uid;
-    await store.tx(async (t) => {
-      if (await t.get(P.staff(g.tenantId, staffUid))) throw conflict('This person is already staff at your gym');
-      const target = (await t.get<UserDoc>(P.user(staffUid)))!;
-      if (isTrainer(target)) throw bad('This person is a trainer. A trainer cannot be gym staff');
-      const s = { userId: staffUid, role, branchIds, active: true, createdAt: nowIso() };
-      t.set(P.staff(g.tenantId, staffUid), s);
-      t.set(P.user(staffUid), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { role, branchIds, active: true } } });
-      audit(t, g.tenantId, u.id, 'staff.create', 'staff', staffUid, null, s);
-    });
-    return c.json({ id: staffUid, role, branchIds, active: true }, 201);
+    if (!uid) {
+      if (!email) throw bad('Enter the email ID');
+      const pw = `${crypto.randomUUID()}Aa1!`;
+      let authEmail = email;
+      let fb: { uid: string; idToken?: string };
+      try {
+        fb = await identity.signUp(authEmail, pw);
+      } catch (e) {
+        if (!(e instanceof HttpError && e.message === 'EMAIL_EXISTS')) throw e;
+        authEmail = aliasEmail(email); // an old login with no live account: give them a fresh one
+        fb = await identity.signUp(authEmail, pw);
+      }
+      made = { ...fb, authEmail, pw };
+    }
+    const staffUid = uid ?? made!.uid;
+    try {
+      await store.tx(async (t) => {
+        const prev = await t.get<StaffDoc>(P.staff(g.tenantId, staffUid));
+        if (prev?.active) throw conflict('This person is already staff at your gym');
+        const s: StaffDoc = { userId: staffUid, role, branchIds, active: true, createdAt: nowIso(), rights };
+        if (made) {
+          if (await t.get(P.phone(phone))) throw conflict('This mobile number already has a GymMantra account');
+          t.create(P.phone(phone), { uid: staffUid });
+          const nu: UserDoc = {
+            name,
+            email,
+            authEmail: made.authEmail,
+            fbUid: made.uid,
+            phone,
+            googleSub: null,
+            photoV: null,
+            language: 'en',
+            isSuperAdmin: false,
+            failed: 0,
+            lockedUntil: null,
+            createdAt: nowIso(),
+            memberships: {},
+            requested: {},
+            staffOf: { [g.tenantId]: { role, branchIds, active: true, rights } },
+            appRole: role === 'OWNER' ? 'OWNER' : 'STAFF',
+            ...(d ? { firstName: d.firstName, middleName: d.middleName, lastName: d.lastName, dob: d.dob, gender: d.gender, state: d.state, city: d.city, country: d.country, pincode: d.pincode } : {}),
+            createdByGym: { tenantId: g.tenantId, gymName: g.tenant.name },
+            mustSetPassword: true,
+            initPw: made.pw,
+          } as UserDoc;
+          t.set(P.user(staffUid), nu);
+          const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };
+          t.set(P.stats, { ...st, users: (st.users ?? 0) + 1 });
+        } else {
+          const target = (await t.get<UserDoc>(P.user(staffUid)))!;
+          if (isTrainer(target)) throw bad('This person is a trainer. A trainer cannot be gym staff');
+          t.set(P.user(staffUid), {
+            ...target,
+            appRole: target.appRole && target.appRole !== 'MEMBER' ? target.appRole : role === 'OWNER' ? 'OWNER' : 'STAFF',
+            staffOf: { ...target.staffOf, [g.tenantId]: { role, branchIds, active: true, rights } },
+          });
+        }
+        t.set(P.staff(g.tenantId, staffUid), s);
+        audit(t, g.tenantId, u.id, 'staff.create', 'staff', staffUid, null, s);
+        await notify(t, staffUid, g.tenantId, 'You are gym staff now', `${g.tenant.name} added you as ${role === 'OWNER' ? 'an owner' : 'staff'}. Log in as "Gym staff".`);
+      });
+    } catch (e) {
+      if (made?.idToken) await identity.deleteAccount(made.idToken).catch(() => {});
+      throw e;
+    }
+    return c.json({ id: staffUid, role, branchIds, rights, active: true, accountMade: !!made }, 201);
   });
 
   app.patch('/api/v1/gym/staff/:id', async (c) => {
@@ -315,24 +401,49 @@ export function gymRoutes(app: App) {
     const b = body(await c.req.json().catch(() => null));
     const role = oneOf(b, 'role', ['OWNER', 'FRONT_DESK'] as const, true);
     const active = optBool(b, 'active');
-    const branchIds = b.branchIds !== undefined ? checkBranches(g.tenant, strList(b, 'branchIds', 20) ?? []) : undefined;
+    const bid = optStr(b, 'branchId');
+    const branchIds = bid ? checkBranches(g.tenant, [bid]) : b.branchIds !== undefined ? checkBranches(g.tenant, strList(b, 'branchIds', 20) ?? []) : undefined;
+    const rights = b.rights !== undefined || b.preset !== undefined ? rightsFrom(b) : undefined;
     const { store } = c.var.deps;
     const out = await store.tx(async (t) => {
-      const before = await t.get<{ userId: string; role: Role; branchIds: string[]; active: boolean; createdAt: string }>(P.staff(g.tenantId, id));
+      const before = await t.get<StaffDoc>(P.staff(g.tenantId, id));
       if (!before) throw notFound('Staff not found');
-      if (before.role === 'TRAINER' && role) throw bad('Use the Trainers page to manage trainers');
+      if (before.role === 'TRAINER') throw bad('Use the Trainers page to manage trainers');
       if (before.role === 'OWNER' && (role === 'FRONT_DESK' || active === false)) {
+        const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(g.tenantId), [['role', 'OWNER']])).filter((r) => r.data.active);
+        if (owners.length <= 1) throw forbidden('A gym needs at least one owner. Make someone else owner first, or ask GymMantra support to transfer the gym');
+      }
+      const after: StaffDoc = { ...before, role: role ?? before.role, active: active ?? before.active, branchIds: branchIds ?? before.branchIds, rights: rights ?? before.rights };
+      const target = (await t.get<UserDoc>(P.user(id)))!;
+      t.set(P.staff(g.tenantId, id), after);
+      t.set(P.user(id), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { role: after.role, branchIds: after.branchIds, active: after.active, rights: after.rights } } });
+      audit(t, g.tenantId, u.id, active === false ? 'staff.remove' : 'staff.update', 'staff', id, before, after);
+      if (active === false) await notify(t, id, g.tenantId, 'Removed from gym staff', `${g.tenant.name} removed you from its staff. Your GymMantra login stays the same.`);
+      return after;
+    });
+    return c.json({ id, ...out, rights: out.role === 'OWNER' ? [...RIGHTS] : cleanRights(out.rights) });
+  });
+
+  /** Owner removes staff from the gym. Their GymMantra login stays (board 60). */
+  app.delete('/api/v1/gym/staff/:id', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const id = c.req.param('id');
+    if (id === u.id) throw bad('You cannot remove yourself');
+    await c.var.deps.store.tx(async (t) => {
+      const before = await t.get<StaffDoc>(P.staff(g.tenantId, id));
+      if (!before || !before.active || before.role === 'TRAINER') throw notFound('Staff not found');
+      if (before.role === 'OWNER') {
         const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(g.tenantId), [['role', 'OWNER']])).filter((r) => r.data.active);
         if (owners.length <= 1) throw forbidden('A gym needs at least one owner');
       }
-      const after = { ...before, role: role ?? before.role, active: active ?? before.active, branchIds: branchIds ?? before.branchIds };
-      const target = (await t.get<UserDoc>(P.user(id)))!;
-      t.set(P.staff(g.tenantId, id), after);
-      t.set(P.user(id), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { role: after.role, branchIds: after.branchIds, active: after.active } } });
-      audit(t, g.tenantId, u.id, 'staff.update', 'staff', id, before, after);
-      return after;
+      const target = await t.get<UserDoc>(P.user(id));
+      t.set(P.staff(g.tenantId, id), { ...before, active: false });
+      if (target) t.set(P.user(id), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { ...target.staffOf[g.tenantId], role: before.role, branchIds: before.branchIds, active: false } } });
+      audit(t, g.tenantId, u.id, 'staff.remove', 'staff', id, before, null);
+      await notify(t, id, g.tenantId, 'Removed from gym staff', `${g.tenant.name} removed you from its staff. Your GymMantra login stays the same.`);
     });
-    return c.json({ id, ...out });
+    return c.json({ ok: true });
   });
 
   app.get('/api/v1/gym/audit', async (c) => {

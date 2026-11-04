@@ -1,4 +1,5 @@
-import { App, authenticate, branchOf, bumpDaily, C, gymOf, inBranch, MemberDoc, TenantDoc, P, readRoster, rosterEntry, stateOf } from '../core';
+import { openGate } from './gate';
+import { App, authenticate, branchOf, bumpDaily, C, gymOf, inBranch, MemberDoc, TenantDoc, P, readRoster, rosterEntry, stateOf, need } from '../core';
 import type { Tx } from '../store/store';
 import { todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -70,13 +71,17 @@ export async function recordMemberCheckIn(
 async function checkIn(c: C, memberId: string, method: 'QR' | 'MANUAL', branchIdIn?: string) {
   const u = c.var.user;
   const g = await gymOf(c);
+  need(g, 'checkin');
   if (branchIdIn && !g.tenant.branches.some((b) => b.id === branchIdIn)) throw bad('Unknown branch');
-  return c.var.deps.store.tx(async (t) => {
+  const out = await c.var.deps.store.tx(async (t) => {
     const m = isUuid(memberId) ? await t.get<MemberDoc>(P.member(g.tenantId, memberId)) : null;
     // A QR from another gym (or another branch for front desk) is not accepted here.
-    if (!m || (g.role === 'FRONT_DESK' && g.branchIds.length && m.branchId && !g.branchIds.includes(m.branchId))) throw notFound('This member is not part of your gym');
+    if (!m || m.removed || (g.role === 'FRONT_DESK' && g.branchIds.length && m.branchId && !g.branchIds.includes(m.branchId))) throw notFound('This member is not part of your gym');
     return recordMemberCheckIn(t, g.tenantId, m, { method, byId: u.id, branchId: branchIdIn ?? g.branchId });
   });
+  // Allowed at the desk: open this branch's gate too.
+  const gate = out.result === 'ALLOWED' ? await openGate(c.var.deps, g.tenantId, branchIdIn ?? g.branchId) : null;
+  return { ...out, gate };
 }
 
 export function attendanceRoutes(app: App) {
@@ -97,6 +102,7 @@ export function attendanceRoutes(app: App) {
   app.get('/api/v1/attendance/today', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'checkin');
     const rows = await c.var.deps.store.query<{ memberId: string; memberName: string; memberCode: string; at: string; result: string; reason: string | null; method: string; branchId?: string | null }>(P.attendance(g.tenantId), [['day', todayIST()]]);
     const events = rows
       .filter((r) => inBranch(g, r.data.branchId))

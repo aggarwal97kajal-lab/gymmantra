@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc, gymFace } from '../core';
+import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc, gymFace, need, notify } from '../core';
 import { noticesFor } from './notices';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -175,6 +175,7 @@ export function trainerRoutes(app: App) {
       t.set(P.staff(g.tenantId, id), { ...st, active: false });
       if (tu) t.set(P.user(id), { ...tu, staffOf: { ...tu.staffOf, [g.tenantId]: { role: 'TRAINER', branchIds: [], active: false } } });
       audit(t, g.tenantId, u.id, 'trainer.remove', 'trainer', id, tr, null);
+      if (tu && !tu.deleted) await notify(t, id, null, 'Removed from gym', `${g.tenant.name} removed you from its trainers. Your GymMantra login stays the same — join another gym with its gym code.`);
     });
     return c.json({ ok: true });
   });
@@ -226,6 +227,7 @@ export function trainerRoutes(app: App) {
   app.get('/api/v1/offers', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'offers');
     const rows = (await c.var.deps.store.query<OfferDoc>(P.offers(g.tenantId))).map((x) => x.data).filter((o) => !o.branchIds?.length || o.branchIds.includes(g.branchId));
     const today = todayIST();
     return c.json(rows.map((o) => ({ ...o, imageUrl: offerImageUrl(g.tenantId, o), live: o.active && o.validTill >= today })).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)));
@@ -255,7 +257,8 @@ export function trainerRoutes(app: App) {
 
   app.post('/api/v1/offers', async (c) => {
     const u = await authenticate(c);
-    const g = await gymOf(c, 'OWNER');
+    const g = await gymOf(c);
+    need(g, 'offers');
     await requireFeature(c.var.deps.store, g.tenant, 'offers');
     const b = body(await c.req.json().catch(() => null));
     const o: OfferDoc = { id: uuid(), ...readOffer(b), branchIds: readBranches(b, g), active: true, createdById: u.id, createdAt: nowIso() };
@@ -269,7 +272,8 @@ export function trainerRoutes(app: App) {
 
   app.patch('/api/v1/offers/:id', async (c) => {
     const u = await authenticate(c);
-    const g = await gymOf(c, 'OWNER');
+    const g = await gymOf(c);
+    need(g, 'offers');
     const id = c.req.param('id');
     const b = body(await c.req.json().catch(() => null));
     const out = await c.var.deps.store.tx(async (t) => {
@@ -285,7 +289,8 @@ export function trainerRoutes(app: App) {
 
   app.delete('/api/v1/offers/:id', async (c) => {
     const u = await authenticate(c);
-    const g = await gymOf(c, 'OWNER');
+    const g = await gymOf(c);
+    need(g, 'offers');
     const id = c.req.param('id');
     await c.var.deps.store.tx(async (t) => {
       const before = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;

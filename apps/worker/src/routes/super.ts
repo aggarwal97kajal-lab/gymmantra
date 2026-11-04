@@ -1,5 +1,5 @@
 import { edgeGet, edgePut } from '../lib/edge';
-import { App, audit, authenticate, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Broadcast, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
 import { removeAccount } from './me';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { isYmd } from '../lib/dates';
@@ -276,6 +276,41 @@ export function superRoutes(app: App) {
         .sort((a, b) => b.members - a.members)
         .slice(0, 10),
     });
+  });
+
+  /** Super admin → notification to everyone, or to owners / staff / trainers / members, optionally one state. */
+  app.get('/api/v1/super/broadcasts', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const d = await c.var.deps.store.get<{ items: Broadcast[] }>(P.broadcasts);
+    return c.json(d?.items ?? []);
+  });
+  app.post('/api/v1/super/broadcasts', async (c) => {
+    const u = await authenticate(c);
+    requireSuper(c);
+    const b = body(await c.req.json().catch(() => null));
+    const title = str(b, 'title', { min: 2, max: 80, label: 'the title' });
+    const message = str(b, 'message', { min: 2, max: 500, label: 'the message' });
+    const roles = (strList(b, 'roles', 5) ?? ['ALL']).filter((r) => ['ALL', 'OWNER', 'STAFF', 'TRAINER', 'MEMBER'].includes(r));
+    if (!roles.length) throw bad('Choose who gets it');
+    const state = optStr(b, 'state', { max: 60 }) ?? null;
+    const item: Broadcast = { id: uuid(), title, body: message, roles: roles.includes('ALL') ? ['ALL'] : roles, state, createdAt: nowIso(), byId: u.id };
+    await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<{ items: Broadcast[] }>(P.broadcasts)) ?? { items: [] };
+      t.set(P.broadcasts, { items: [item, ...cur.items].slice(0, 40) });
+      audit(t, null, u.id, 'broadcast.create', 'broadcast', item.id, null, item);
+    });
+    return c.json(item, 201);
+  });
+  app.delete('/api/v1/super/broadcasts/:id', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<{ items: Broadcast[] }>(P.broadcasts)) ?? { items: [] };
+      t.set(P.broadcasts, { items: cur.items.filter((x) => x.id !== id) });
+    });
+    return c.json({ ok: true });
   });
 
   /** Find a person by mobile number or email (GM Admin → People). */

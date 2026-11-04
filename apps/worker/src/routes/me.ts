@@ -1,5 +1,5 @@
 import { personDetails } from '../lib/person';
-import { Deps, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { Broadcast, broadcastRolesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -67,7 +67,7 @@ export function meRoutes(app: App) {
           memberCode: e.memberCode,
           gym: (() => {
             const f = gymFace(tn, e.branchId);
-            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address };
+            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED' };
           })(),
           ...(() => {
             const bid = branchOf(tn, e.branchId);
@@ -102,7 +102,7 @@ export function meRoutes(app: App) {
     const ref0 = code ? await store.get<{ tenantId: string; branchId?: string; expiresAt?: string }>(P.gymCode(code)) : null;
     const ref = ref0 && (!ref0.expiresAt || Date.parse(ref0.expiresAt) > Date.now()) ? ref0 : null; // old branch codes stop after 30 days
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
-    if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
+    if (!ref || !t || t.status === 'SUSPENDED' || t.status === 'CLOSED') throw notFound('No gym found with this code');
     const bid = branchOf(t, ref.branchId);
     const br = t.branches.find((b) => b.id === bid) ?? null;
     // Already in another branch of this gym? The app offers a transfer instead of a join.
@@ -133,7 +133,7 @@ export function meRoutes(app: App) {
     const ref0 = await store.get<{ tenantId: string; branchId?: string; expiresAt?: string }>(P.gymCode(code));
     const ref = ref0 && (!ref0.expiresAt || Date.parse(ref0.expiresAt) > Date.now()) ? ref0 : null; // old branch codes stop after 30 days
     const t = ref ? await store.get<TenantDoc>(P.tenant(ref.tenantId)) : null;
-    if (!ref || !t || t.status === 'SUSPENDED') throw notFound('No gym found with this code');
+    if (!ref || !t || t.status === 'SUSPENDED' || t.status === 'CLOSED') throw notFound('No gym found with this code');
     const tid = ref.tenantId;
     const as = oneOf(b, 'as', ['MEMBER', 'TRAINER'] as const, true) ?? 'MEMBER';
     // The code decides the branch (each branch has its own code); old codes mean the first branch.
@@ -172,6 +172,8 @@ export function meRoutes(app: App) {
       tx.set(P.join(tid, id), jr);
       if (as === 'TRAINER') tx.set(P.user(u.id), { ...cur, appRole: 'TRAINER', trainerRequested: { ...(cur.trainerRequested ?? {}), [tid]: true } });
       else tx.set(P.user(u.id), { ...cur, requested: { ...(cur.requested ?? {}), [tid]: true } });
+      const tn = await tx.get<TenantDoc>(P.tenant(tid));
+      if (tn) await notifyDesk(tx, { tenantId: tid, tenant: tn }, u.id, as === 'TRAINER' ? 'New trainer request' : 'New join request', `${u.name} wants to join ${as === 'TRAINER' ? 'as a trainer' : 'as a member'}. Open Requests to approve.`, branchId ?? null, 'requests');
     });
     return c.json({ id, ...jr }, 201);
   });
@@ -284,7 +286,7 @@ export function meRoutes(app: App) {
     const merged = { ...u, ...parts };
     if (u.detailsNeeded && merged.dob && merged.state && merged.city && merged.pincode) parts.detailsNeeded = false;
     const language = oneOf(b, 'language', ['en', 'hi'] as const, true);
-    const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'NONE'] as const, true);
+    const roleIn = oneOf(b, 'appRole', ['MEMBER', 'OWNER', 'TRAINER', 'STAFF', 'NONE'] as const, true);
     const appRole = roleIn === 'NONE' ? null : roleIn;
     if (appRole === 'OWNER' && isTrainer(u)) throw bad('A trainer cannot be a gym owner');
     if (appRole === 'TRAINER' && isDeskStaff(u)) throw bad('A gym owner cannot be a trainer');
@@ -473,10 +475,18 @@ export function meRoutes(app: App) {
     const { store } = c.var.deps;
     const doc = await store.get<{ items: NoteItem[]; noticesReadAt?: string }>(P.notes(u.id));
     const notices = await noticeNotes(store, u, doc?.noticesReadAt ?? null);
+    // Messages from GymMantra (super admin) to this person's role(s) and state.
+    const bc = await store.get<{ items: Broadcast[] }>(P.broadcasts);
+    const mine = broadcastRolesOf(u);
+    const since = u.createdAt ?? '';
+    const readAt = doc?.noticesReadAt ?? null;
+    const fromGm = (bc?.items ?? [])
+      .filter((x) => x.createdAt >= since && (x.roles.includes('ALL') || x.roles.some((r) => mine.includes(r))) && (!x.state || x.state === u.state))
+      .map((x) => ({ id: `bc_${x.id}`, tenantId: null, title: x.title, body: x.body, createdAt: x.createdAt, readAt: readAt && readAt >= x.createdAt ? readAt : null, fromGymMantra: true }));
     // Gym owners and staff see the notes of the branch they picked in the app (x-branch-id).
     const branch = c.req.header('x-branch-id');
     const items = (doc?.items ?? []).filter((n) => !branch || !n.branchId || !u.staffOf?.[n.tenantId ?? '']?.active || n.branchId === branch);
-    return c.json([...items, ...notices].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
+    return c.json([...items, ...notices, ...fromGm].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
   });
 
   app.post('/api/v1/me/notifications/read', async (c) => {

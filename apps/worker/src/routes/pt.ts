@@ -1,4 +1,4 @@
-import { App, audit, authenticate, branchOf, C, gymOf, MemberDoc, notify, P, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, branchOf, C, gymOf, MemberDoc, notify, P, TenantDoc, UserDoc, need } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, int, oneOf, optInt, optStr, str } from '../lib/validate';
@@ -310,6 +310,7 @@ export function ptRoutes(app: App) {
   app.post('/api/v1/pt/:id/payments', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c);
+    need(g, 'payments');
     const b = body(await c.req.json().catch(() => null));
     const amount = int(b, 'amount', { min: 1, max: 10_000_000, label: 'amount' });
     const mode = oneOf(b, 'mode', PAY_MODES)!;
