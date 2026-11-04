@@ -1230,7 +1230,8 @@ describe('gym transfer, close, broadcasts and gate', () => {
     expect((await h.api.put('/gym/gate', { type: 'webhook', url: 'https://relay.example/open?key=abc' }, owner.token)).status).toBe(200);
     const calls: string[] = [];
     const real = global.fetch;
-    (global as any).fetch = async (u: any) => {
+    (global as any).fetch = async (u: any, init?: any) => {
+      if (!String(u).startsWith('https://relay.example/')) return real(u, init); // the emulator store uses fetch too
       calls.push(String(u));
       return new Response('ok');
     };
