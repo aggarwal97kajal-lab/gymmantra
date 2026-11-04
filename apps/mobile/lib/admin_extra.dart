@@ -794,3 +794,115 @@ class _SigPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SigPainter o) => true; // the stroke list grows in place, so always repaint
 }
+
+// ============================================================ people
+
+/// GM Admin → People: find anyone by mobile number or email and delete their account,
+/// so the same mobile and email can sign up again.
+class AdminPeople extends StatefulWidget {
+  const AdminPeople({super.key});
+  @override
+  State<AdminPeople> createState() => _AdminPeopleState();
+}
+
+class _AdminPeopleState extends State<AdminPeople> {
+  final q = TextEditingController();
+  List<Map>? rows;
+  bool busy = false;
+  String? error;
+
+  Future<void> search() async {
+    final text = q.text.trim();
+    if (text.length < 3) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final r = await Api.instance.get('/super/users?q=${Uri.encodeQueryComponent(text)}');
+      setState(() => rows = (r as List).cast<Map>());
+    } catch (e) {
+      setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> delete(Map p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.t('Delete {name}?', {'name': p['name']})),
+        content: Text(ctx.t('Their login and personal details are deleted. Gyms see them as "No longer available". The same mobile number and email can sign up again.')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Delete'), style: const TextStyle(color: C.red))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Api.instance.post('/super/users/${p['id']}/delete', {});
+      if (!mounted) return;
+      toast(context, context.t('Account deleted'));
+      setState(() => rows = rows?.where((x) => x['id'] != p['id']).toList());
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    }
+  }
+
+  String roleName(BuildContext context, String? r) => switch (r) {
+        'OWNER' => context.t('Gym owner'),
+        'FRONT_DESK' => context.t('Front desk'),
+        'TRAINER' => context.t('Trainer'),
+        'MEMBER' => context.t('Member'),
+        _ => context.t('Member'),
+      };
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(context.t('People'))),
+        body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+          TextField(
+            controller: q,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => search(),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: context.t('Full mobile number or email'),
+              suffixIcon: IconButton(icon: const Icon(Icons.arrow_forward_rounded), onPressed: search),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Muted(context.t('Delete an account when someone asks, so they can sign up again with the same mobile number and email.'), size: 12),
+          const SizedBox(height: 12),
+          if (busy) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator(color: C.indigo))),
+          if (error != null) ErrorText(error),
+          if (!busy && rows != null && rows!.isEmpty) Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('No account with this mobile number or email.'), align: TextAlign.center)),
+          if (!busy)
+            for (final p in rows ?? const <Map>[])
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Panel(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(p['name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                    const SizedBox(height: 2),
+                    Muted([p['phone'], p['email'], roleName(context, p['appRole'] as String?), if (p['google'] == true) 'Google'].where((x) => x != null).join(' · '), size: 12.5),
+                    for (final g in ((p['gyms'] as List?) ?? const []).cast<Map>()) Muted('${g['name']} · ${roleName(context, g['role'] as String?)}', size: 12),
+                    const SizedBox(height: 10),
+                    if (p['runsGym'] == true)
+                      Muted(context.t('Runs a gym — remove them from the gym first.'), size: 12)
+                    else
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red)),
+                        onPressed: () => delete(p),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                        label: Text(context.t('Delete account')),
+                      ),
+                  ]),
+                ),
+              ),
+        ]),
+      );
+}

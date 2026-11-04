@@ -128,6 +128,7 @@ const statusColors = {
   'EXPIRED': C.red,
   'NO_PLAN': Color(0xFF8B95A5),
   'UPCOMING': C.blue,
+  'GONE': Color(0xFF6B7280),
 };
 
 String statusLabel(BuildContext context, String s) => switch (s) {
@@ -137,6 +138,7 @@ String statusLabel(BuildContext context, String s) => switch (s) {
       'EXPIRED' => context.t('Expired'),
       'NO_PLAN' => context.t('No plan'),
       'UPCOMING' => context.t('Starts later'),
+      'GONE' => context.t('No longer available'),
       _ => s,
     };
 

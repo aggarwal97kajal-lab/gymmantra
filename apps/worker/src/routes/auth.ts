@@ -80,6 +80,12 @@ function addedByGym(u: UserDoc) {
   return new HttpError(409, `An account with this email already exists. ${gym} has made you a member. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: gym, email: u.email });
 }
 
+/** A second login address for the same inbox: name@gmail.com → name+gm4821@gmail.com. */
+function aliasEmail(email: string) {
+  const [local, domain] = email.split('@');
+  return `${local.split('+')[0]}+gm${Math.floor(1000 + Math.random() * 9000)}@${domain}`;
+}
+
 export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string; appRole?: AppRole | null; details?: Partial<UserDoc> }) {
   const { store, identity, superAdminEmail } = c.var.deps;
   // The email and the mobile number must be free. Records of removed accounts do not count.
@@ -90,7 +96,7 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
   const phoneRef = await store.get<{ uid: string }>(P.phone(input.phone));
   const phoneOwner = phoneRef ? await store.get<UserDoc>(P.user(phoneRef.uid)) : null;
   if (phoneOwner && !phoneOwner.deleted) throw phoneOwner.createdByGym ? addedByGym(phoneOwner) : conflict(PHONE_TAKEN);
-  const authEmail = input.email ?? phoneAuthEmail(input.phone);
+  let authEmail = input.email ?? phoneAuthEmail(input.phone);
   let fb: { uid: string; idToken?: string };
   let fresh = true;
   try {
@@ -99,13 +105,15 @@ export async function createPasswordUser(c: C, input: { name: string; email: str
     if (!(e instanceof HttpError && e.message === 'EMAIL_EXISTS')) throw e;
     const owner = (await store.query<UserDoc>('users', [['authEmail', authEmail]])).find((r) => !r.data.deleted);
     if (owner) throw conflict(input.email ? EMAIL_TAKEN : PHONE_TAKEN);
-    // Firebase has the login but GymMantra has no record (an earlier sign-up did not finish).
-    // If the password matches, finish that sign-up now.
+    // An old login with no live GymMantra account: a deleted account, or a sign-up that did not finish.
+    // Same password: use it again. Otherwise make a fresh login (email "name+gm1234@…" still reaches
+    // the same inbox for password resets), so the person is never told the email is already taken.
     try {
       fb = await identity.signIn(authEmail, input.password);
       fresh = false;
     } catch {
-      throw conflict('This email was used in a sign-up that did not finish. Tap "Forgot password?" on the login page to set a new password, then sign up again with that password');
+      authEmail = aliasEmail(authEmail);
+      fb = await identity.signUp(authEmail, input.password);
     }
   }
   const uid = fb.uid;

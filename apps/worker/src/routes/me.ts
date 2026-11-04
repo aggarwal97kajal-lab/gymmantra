@@ -1,5 +1,5 @@
 import { personDetails } from '../lib/person';
-import { accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { Deps, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -511,28 +511,86 @@ export function meRoutes(app: App) {
   /** Deletes the login account. Gym records stay with the gym but are unlinked. */
   app.delete('/api/v1/me', async (c) => {
     const u = await authenticate(c);
-    if (Object.values(u.staffOf ?? {}).some((s) => s.active)) throw forbidden('Gym staff accounts cannot be deleted here. Ask the gym owner to remove you first');
-    const { store } = c.var.deps;
-    for (const [tid, mid] of Object.entries(u.memberships ?? {})) {
-      await store.tx(async (t) => {
-        const m = await t.get<MemberDoc>(P.member(tid, mid));
-        const roster = await readRoster(t, tid);
-        if (m) t.set(P.member(tid, mid), { ...m, userId: null });
-        if (roster.members[mid]) {
-          roster.members[mid].userId = null;
-          t.set(P.roster(tid), roster);
-        }
-      });
-    }
-    await store.tx(async (t) => {
-      const cur = (await t.get<UserDoc>(P.user(u.id)))!;
-      if (cur.phone) t.delete(P.phone(cur.phone));
-      t.delete(P.photo(u.id));
-      t.delete(P.notes(u.id));
-      t.set(P.user(u.id), { ...cur, name: 'Deleted user', email: null, phone: null, authEmail: null, googleSub: null, photoV: null, deleted: true, memberships: {}, requested: {} });
-    });
+    const b = (await c.req.json().catch(() => null)) as { password?: string } | null;
+    await removeAccount(c.var.deps, u.id, { password: typeof b?.password === 'string' ? b.password : null });
     return c.json({ ok: true });
   });
+}
+
+/**
+ * Deletes a person's GymMantra account (they asked, or the super admin did it).
+ * - Their login is deleted too (when the password is known), so the same email and mobile can sign up again.
+ * - Gyms keep their records but see the person as "No longer available" and can delete them.
+ * - Gym owners and front desk staff must be removed from their gym first; trainers can go straight away.
+ */
+export async function removeAccount(deps: Deps, uid: string, opts: { password?: string | null; bySuper?: boolean }) {
+  const { store, identity } = deps;
+  const u = await store.get<UserDoc>(P.user(uid));
+  if (!u || u.deleted) throw notFound('Account not found');
+  if (Object.values(u.staffOf ?? {}).some((s) => s.active && s.role !== 'TRAINER')) {
+    throw forbidden(opts.bySuper ? 'This person runs a gym (owner or front desk). Remove them from the gym first' : 'Gym owner and front desk accounts cannot be deleted here. Ask GymMantra support');
+  }
+  // Their login: proven with the password (or the gym-made first password) so it can be deleted.
+  let idToken: string | null = null;
+  if (u.authEmail) {
+    const pw = opts.password || u.initPw || null;
+    if (!pw && !opts.bySuper) throw bad('Enter your password to delete your account');
+    if (pw) {
+      try {
+        idToken = (await identity.signIn(u.authEmail, pw)).idToken;
+      } catch {
+        if (!opts.bySuper && opts.password) throw bad('Wrong password');
+      }
+    }
+  }
+  // Gyms where they are a member: "No longer available".
+  for (const [tid, mid] of Object.entries(u.memberships ?? {})) {
+    await store.tx(async (t) => {
+      const m = await t.get<MemberDoc>(P.member(tid, mid));
+      const roster = await readRoster(t, tid);
+      if (m) t.set(P.member(tid, mid), { ...m, userId: null, gone: true });
+      if (roster.members[mid]) {
+        roster.members[mid] = { ...roster.members[mid], userId: null, photoV: null, gone: true };
+        t.set(P.roster(tid), roster);
+      }
+    });
+  }
+  // Gyms where they are a trainer: the owner still sees them, marked "No longer available".
+  for (const [tid, st] of Object.entries(u.staffOf ?? {})) {
+    if (st.role !== 'TRAINER' || !st.active) continue;
+    await store.tx(async (t) => {
+      const [tr, sd] = await t.getMany<Record<string, unknown>>([P.trainer(tid, uid), P.staff(tid, uid)]);
+      if (tr) t.set(P.trainer(tid, uid), { ...tr, gone: true, visible: false });
+      if (sd) t.set(P.staff(tid, uid), { ...sd, active: false });
+    });
+  }
+  await store.tx(async (t) => {
+    const cur = (await t.get<UserDoc>(P.user(uid)))!;
+    if (cur.phone) {
+      const ref = await t.get<{ uid: string }>(P.phone(cur.phone));
+      if (ref?.uid === uid) t.delete(P.phone(cur.phone));
+    }
+    if (cur.googleSub) t.delete(`googleSubs/${cur.googleSub}`);
+    t.delete(P.photo(uid));
+    t.delete(P.notes(uid));
+    t.set(P.user(uid), {
+      ...cur,
+      name: 'Deleted user',
+      email: null,
+      phone: null,
+      authEmail: null,
+      googleSub: null,
+      photoV: null,
+      initPw: null,
+      deleted: true,
+      deletedAt: nowIso(),
+      memberships: {},
+      requested: {},
+      trainerRequested: {},
+      staffOf: Object.fromEntries(Object.entries(cur.staffOf ?? {}).map(([k, v]) => [k, { ...v, active: false }])),
+    } as UserDoc);
+  });
+  if (idToken) await identity.deleteAccount(idToken).catch(() => {});
 }
 
 export { HttpError };

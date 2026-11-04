@@ -28,6 +28,7 @@ export interface TrainerDoc {
   visible: boolean; // shown to members
   sharePercent: number; // trainer's share of PT money (owner pays it)
   active: boolean;
+  gone?: boolean; // the trainer deleted their GymMantra account ("No longer available")
   createdAt: string;
 }
 
@@ -50,11 +51,12 @@ export function trainerView(t: TrainerDoc, u: UserDoc | null) {
     packages: [...t.packages].sort((a, b) => a.sessions - b.sessions),
     visible: t.visible,
     sharePercent: t.sharePercent,
+    gone: !!t.gone,
   };
 }
 
 export async function listTrainers(r: Reader, tenantId: string, onlyVisible: boolean) {
-  const rows = (await r.query<TrainerDoc>(P.trainers(tenantId), [['active', true]])).map((x) => x.data).filter((t) => !onlyVisible || t.visible);
+  const rows = (await r.query<TrainerDoc>(P.trainers(tenantId), [['active', true]])).map((x) => x.data).filter((t) => !t.gone && (!onlyVisible || t.visible));
   const users = await r.getMany<UserDoc>(rows.map((t) => P.user(t.userId)));
   return rows.map((t, i) => trainerView(t, users[i])).sort((a, b) => a.name.localeCompare(b.name));
 }

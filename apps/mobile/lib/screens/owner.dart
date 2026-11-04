@@ -293,6 +293,7 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
         'ending' => m['status'] == 'ENDING_SOON',
         'expired' => m['status'] == 'EXPIRED',
         'due' => (m['due'] as num? ?? 0) > 0,
+        'gone' => m['gone'] == true,
         _ => true,
       };
 
@@ -355,6 +356,7 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
                   chip('ending', context.t('Ending soon')),
                   chip('expired', context.t('Expired')),
                   chip('due', context.t('Due')),
+                  if (all.any((m) => m['gone'] == true)) chip('gone', context.t('No longer available')),
                 ]),
               ),
               const SizedBox(height: 8),
@@ -378,7 +380,7 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(color: context.c.mut, fontSize: 12),
                         ),
-                        trailing: StatusChip(m['status'] as String),
+                        trailing: StatusChip(m['gone'] == true ? 'GONE' : m['status'] as String),
                       ),
                   ]),
                 ),
@@ -458,6 +460,50 @@ class _AddMemberState extends ConsumerState<AddMemberScreen> {
   }
 }
 
+/// Yes / Cancel before deleting something.
+Future<bool> confirmGone(BuildContext context, String title, String text) async =>
+    (await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(text),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Delete'), style: const TextStyle(color: C.red))),
+        ],
+      ),
+    )) ==
+    true;
+
+/// Grey note for a person who deleted their GymMantra account, with an optional delete button.
+class _GoneBox extends StatelessWidget {
+  const _GoneBox({required this.text, this.button, required this.onTap});
+  final String text;
+  final String? button;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: const Color(0xFF6B7280).withAlpha(36), borderRadius: BorderRadius.circular(16)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.person_off_rounded, color: context.c.mut, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text(text, style: const TextStyle(fontSize: 12.5, height: 1.35))),
+          ]),
+          if (button != null) ...[
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red)),
+              onPressed: onTap,
+              icon: const Icon(Icons.delete_outline_rounded, size: 18),
+              label: Text(button!),
+            ),
+          ],
+        ]),
+      );
+}
+
 class OwnerMemberScreen extends ConsumerWidget {
   const OwnerMemberScreen({super.key, required this.id});
   final String id;
@@ -497,7 +543,29 @@ class OwnerMemberScreen extends ConsumerWidget {
               Center(child: Text(m['name'] as String, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800))),
               Center(child: Muted('${m['memberCode']} · ${m['phone']}')),
               const SizedBox(height: 8),
-              Center(child: StatusChip(status)),
+              Center(child: StatusChip(m['gone'] == true ? 'GONE' : status)),
+              if (m['gone'] == true) ...[
+                const SizedBox(height: 12),
+                _GoneBox(
+                  text: context.t('This member deleted their GymMantra account. Their payments stay in your records. Delete them to free their mobile number — if they come back, they can join again as new.'),
+                  button: ref.read(sessionProvider).myGym?['role'] == 'OWNER' ? context.t('Delete member') : null,
+                  onTap: () async {
+                    final yes = await confirmGone(context, context.t('Delete {name}?', {'name': m['name']}), context.t('They leave your members list. Money already received stays in your reports.'));
+                    if (!yes) return;
+                    try {
+                      await Api.instance.delete('/members/$id');
+                      ref.invalidate(ownerMembersProvider);
+                      ref.invalidate(dashboardProvider);
+                      if (context.mounted) {
+                        toast(context, context.t('Member deleted'));
+                        context.pop();
+                      }
+                    } catch (e) {
+                      if (context.mounted) toastError(context, e);
+                    }
+                  },
+                ),
+              ],
               const SizedBox(height: 10),
               Builder(builder: (context) {
                 final bs = branchesOf(ref.watch(gymProvider).valueOrNull as Map?);
@@ -1292,6 +1360,7 @@ class OwnerTrainersScreen extends ConsumerWidget {
                         Expanded(
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text(t['name'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                            if (t['gone'] == true) const Padding(padding: EdgeInsets.symmetric(vertical: 3), child: StatusChip('GONE')),
                             Muted([t['speciality'], if (t['experienceYears'] != null) context.t('{n} years', {'n': t['experienceYears']})].where((x) => x != null).join(' · '), size: 12),
                             Muted(context.t('Checked in {n} days this month', {'n': t['visitsThisMonth'] ?? 0}), size: 11.5),
                           ]),
@@ -1426,6 +1495,16 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
         Center(child: Avatar(name: t['name'] as String, url: t['photoUrl'] as String?, size: 84, ring: true)),
         const SizedBox(height: 8),
+        if (t['gone'] == true) ...[
+          const Center(child: StatusChip('GONE')),
+          const SizedBox(height: 10),
+          _GoneBox(
+            text: context.t('This trainer deleted their GymMantra account. Their PT records stay in your reports. Remove them to clear them from your trainers list.'),
+            button: context.t('Remove trainer'),
+            onTap: remove,
+          ),
+          const SizedBox(height: 10),
+        ],
         if (t['phone'] != null) Center(child: TextButton.icon(onPressed: () => openUrl('tel:${t['phone']}'), icon: const Icon(Icons.call_rounded, size: 18), label: Text(t['phone'] as String))),
         const SizedBox(height: 8),
         TextField(controller: speciality, decoration: InputDecoration(labelText: context.t('Speciality'))),

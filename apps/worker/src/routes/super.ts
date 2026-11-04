@@ -1,12 +1,13 @@
 import { edgeGet, edgePut } from '../lib/edge';
-import { App, audit, authenticate, P, requireSuper, Role, TenantDoc } from '../core';
+import { App, audit, authenticate, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
+import { removeAccount } from './me';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { isYmd } from '../lib/dates';
 import { body, int, oneOf, optBool, optInt, optStr, str, strList } from '../lib/validate';
 import type { Store } from '../store/store';
 import type { SaasPlan } from './gym';
 import { FEATURE_KEYS } from './billing';
-import { normalizePhone } from '../lib/phone';
+import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { addDays, todayIST } from '../lib/dates';
 import { reportRange } from './reports';
 import { ticketStatus, type Ticket } from './tickets';
@@ -275,6 +276,63 @@ export function superRoutes(app: App) {
         .sort((a, b) => b.members - a.members)
         .slice(0, 10),
     });
+  });
+
+  /** Find a person by mobile number or email (GM Admin → People). */
+  app.get('/api/v1/super/users', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const { store } = c.var.deps;
+    const q = (c.req.query('q') ?? '').trim();
+    if (q.length < 3) return c.json([]);
+    const email = normalizeEmail(q);
+    const phone = email ? null : normalizePhone(q);
+    const ids = new Set<string>();
+    if (phone) {
+      const ref = await store.get<{ uid: string }>(P.phone(phone));
+      if (ref) ids.add(ref.uid);
+      for (const r of await store.query<UserDoc>('users', [['phone', phone]])) ids.add(r.id);
+    } else if (email) {
+      for (const r of await store.query<UserDoc>('users', [['email', email]])) ids.add(r.id);
+      for (const r of await store.query<UserDoc>('users', [['authEmail', email]])) ids.add(r.id);
+    } else {
+      throw bad('Type a full mobile number or email');
+    }
+    const users = await store.getMany<UserDoc>([...ids].map(P.user));
+    const rows = [...ids].map((id, i) => ({ id, u: users[i] })).filter((x) => x.u && !x.u.deleted);
+    const tids = [...new Set(rows.flatMap((x) => [...Object.keys(x.u!.memberships ?? {}), ...Object.keys(x.u!.staffOf ?? {})]))];
+    const tenants = await store.getMany<TenantDoc>(tids.map(P.tenant));
+    const nameOf = (t: string) => tenants[tids.indexOf(t)]?.name ?? 'Gym';
+    return c.json(
+      rows.map(({ id, u }) => ({
+        id,
+        name: u!.name,
+        email: u!.email,
+        phone: u!.phone,
+        appRole: u!.appRole ?? null,
+        createdAt: u!.createdAt ?? null,
+        google: !!u!.googleSub && !u!.authEmail,
+        gyms: [
+          ...Object.keys(u!.memberships ?? {}).map((t) => ({ name: nameOf(t), role: 'MEMBER' })),
+          ...Object.entries(u!.staffOf ?? {}).filter(([, v]) => v.active).map(([t, v]) => ({ name: nameOf(t), role: v.role })),
+        ],
+        runsGym: Object.values(u!.staffOf ?? {}).some((v) => v.active && v.role !== 'TRAINER'),
+      })),
+    );
+  });
+
+  /** Super admin deletes a person's account, so the same mobile and email can sign up again. */
+  app.post('/api/v1/super/users/:id/delete', async (c) => {
+    const u = await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    if (id === u.id) throw bad('You cannot delete your own account here');
+    const before = await c.var.deps.store.get<UserDoc>(P.user(id));
+    await removeAccount(c.var.deps, id, { bySuper: true });
+    await c.var.deps.store.tx(async (t) => {
+      audit(t, null, u.id, 'user.delete', 'user', id, { name: before?.name, email: before?.email, phone: before?.phone }, null);
+    });
+    return c.json({ ok: true });
   });
 
   app.get('/api/v1/super/audit', async (c) => {

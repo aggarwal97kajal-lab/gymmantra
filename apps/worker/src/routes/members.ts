@@ -58,9 +58,10 @@ const inr = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 const prettyDate = (ymd: string) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 export const whatsappLink = (phone: string, text: string) => `https://wa.me/${phone.replace(/[^\d]/g, '')}?text=${encodeURIComponent(text)}`;
 
-const TABS = ['all', 'active', 'ending', 'expired', 'frozen', 'due', 'noplan'] as const;
+const TABS = ['all', 'active', 'ending', 'expired', 'frozen', 'due', 'noplan', 'gone'] as const;
 type Tab = (typeof TABS)[number];
-function inTab(tab: Tab, status: MembershipStatus, due: number) {
+function inTab(tab: Tab, status: MembershipStatus, due: number, gone = false) {
+  if (tab === 'gone') return gone;
   switch (tab) {
     case 'all':
       return true;
@@ -94,6 +95,7 @@ export function summaries(g: GymCtx, roster: Roster, includeArchived = false) {
         photoUrl: e.userId && e.photoV ? `/api/v1/photos/${e.userId}?v=${e.photoV}` : null,
         hasApp: !!e.userId,
         archived: e.archived,
+        gone: !!e.gone,
         status: st.status,
         planName: st.current?.planName ?? st.upcoming?.planName ?? null,
         planId: st.current?.planId ?? null,
@@ -114,7 +116,7 @@ export function summaries(g: GymCtx, roster: Roster, includeArchived = false) {
 async function memberFor(t: { get: Tx['get'] }, g: GymCtx, id: string) {
   if (!isUuid(id)) throw notFound('Member not found');
   const m = await t.get<MemberDoc>(P.member(g.tenantId, id));
-  if (!m || !canSeeBranch(g, m.branchId)) throw notFound('Member not found');
+  if (!m || m.removed || !canSeeBranch(g, m.branchId)) throw notFound('Member not found');
   return m;
 }
 
@@ -302,9 +304,9 @@ export function memberRoutes(app: App) {
     const digits = needle.replace(/[^\d]/g, '');
     const all = summaries(g, await readRoster(c.var.deps.store, g.tenantId));
     const rows = all.filter(
-      (m) => inTab(tab, m.status, m.due) && (!needle || m.name.toLowerCase().includes(needle) || m.memberCode.toLowerCase().includes(needle) || (digits.length >= 3 && m.phone.includes(digits))),
+      (m) => inTab(tab, m.status, m.due, m.gone) && (!needle || m.name.toLowerCase().includes(needle) || m.memberCode.toLowerCase().includes(needle) || (digits.length >= 3 && m.phone.includes(digits))),
     );
-    return c.json({ rows, counts: Object.fromEntries(TABS.map((t) => [t, all.filter((m) => inTab(t, m.status, m.due)).length])) });
+    return c.json({ rows, counts: Object.fromEntries(TABS.map((t) => [t, all.filter((m) => inTab(t, m.status, m.due, m.gone)).length])) });
   });
 
   const memberInput = (g: GymCtx, b: Record<string, unknown>) => {
@@ -465,7 +467,7 @@ export function memberRoutes(app: App) {
       store.query<SubDoc>(P.subs(g.tenantId), [['memberId', id]]),
       store.get<ScanLog>(P.lastScan(g.tenantId, id)),
     ]);
-    if (!m0 || !canSeeBranch(g, m0.branchId)) throw notFound('Member not found');
+    if (!m0 || m0.removed || !canSeeBranch(g, m0.branchId)) throw notFound('Member not found');
     const m = m0;
     const entry = roster.members[m.id] ?? rosterEntry(m);
     const state = stateOf(entry);
@@ -563,6 +565,28 @@ export function memberRoutes(app: App) {
     return c.json(out);
   });
 
+  /**
+   * Owner deletes a member who deleted their own GymMantra account ("No longer available").
+   * The member leaves the list, so the same mobile number can be added or join again as new.
+   * Money already received stays in the gym's records and reports.
+   */
+  app.delete('/api/v1/members/:id', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    await c.var.deps.store.tx(async (t) => {
+      const before = await memberFor(t, g, c.req.param('id'));
+      const roster = await readRoster(t, g.tenantId);
+      if (!before.gone && !roster.members[before.id]?.gone) throw conflict('Only members who deleted their GymMantra account can be deleted');
+      delete roster.members[before.id];
+      const tenant = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
+      t.set(P.tenant(g.tenantId), { ...tenant, memberCount: Object.values(roster.members).filter((e) => !e.archived).length });
+      t.set(P.member(g.tenantId, before.id), { ...before, archived: true, removed: true });
+      t.set(P.roster(g.tenantId), roster);
+      audit(t, g.tenantId, u.id, 'member.delete', 'member', before.id, before, null);
+    });
+    return c.json({ ok: true });
+  });
+
   /** WhatsApp renewal reminders from the gym's own WhatsApp: one ready-to-send link per member. */
   app.post('/api/v1/members/reminders', async (c) => {
     await authenticate(c);
@@ -645,8 +669,9 @@ export function memberRoutes(app: App) {
       if (existing) {
         const [mid, e] = existing;
         if (e.userId && e.userId !== jr.userId) throw conflict('This mobile number belongs to another member');
-        m = { ...(await t.get<MemberDoc>(P.member(g.tenantId, mid)))!, userId: jr.userId };
-        roster.members[mid] = { ...e, userId: jr.userId, photoV: ju.photoV ?? null };
+        // A member who deleted their account and came back gets their old record (and history) again.
+        m = { ...(await t.get<MemberDoc>(P.member(g.tenantId, mid)))!, userId: jr.userId, gone: false };
+        roster.members[mid] = { ...e, userId: jr.userId, photoV: ju.photoV ?? null, gone: false };
         t.set(P.member(g.tenantId, mid), m);
         t.set(P.roster(g.tenantId), roster);
       } else {

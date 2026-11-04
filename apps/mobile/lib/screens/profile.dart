@@ -170,11 +170,20 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> deleteAccount() async {
+    final s0 = ref.read(sessionProvider);
+    final needPw = s0.user?['hasPassword'] == true;
+    final pw = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(context.t('Delete account?')),
-        content: Text(context.t('This removes your login and personal details. Your gym keeps its own records of your membership.')),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(context.t('This removes your login and personal details. Your gym will see you as "No longer available". You can sign up again later with the same mobile number and email.')),
+          if (needPw) ...[
+            const SizedBox(height: 14),
+            TextField(controller: pw, obscureText: true, autofocus: true, decoration: InputDecoration(labelText: context.t('Your password'))),
+          ],
+        ]),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(context.t('Cancel'))),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: Text(context.t('Delete'), style: const TextStyle(color: C.red))),
@@ -182,9 +191,13 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
       ),
     );
     if (ok == true && mounted) {
+      if (needPw && pw.text.isEmpty) {
+        toast(context, context.t('Enter your password to delete your account'));
+        return;
+      }
       final s = ref.read(sessionProvider);
       await run(() async {
-        await Api.instance.delete('/me');
+        await Api.instance.delete('/me', needPw ? {'password': pw.text} : {});
         await s.logout();
       });
     }

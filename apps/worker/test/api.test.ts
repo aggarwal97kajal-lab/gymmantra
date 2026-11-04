@@ -93,13 +93,16 @@ describe('auth', () => {
   it('sign-up finishes a half-made login (Firebase account but no GymMantra record)', async () => {
     const email = 'half@test.in';
     await h.deps.identity.signUp(email, 'secret123'); // left behind by an earlier failed sign-up
-    const wrong = await h.api.post('/auth/signup', { name: 'Half', email, phone: h.nextPhone(), password: 'other-pass1' });
-    expect(wrong.status).toBe(409);
-    expect(wrong.body.message).toMatch(/Forgot password/);
-    expect((await h.api.post('/auth/forgot', { identifier: email })).status).toBe(200);
+    // Same password: the old login is used again.
     const r = await h.api.post('/auth/signup', { name: 'Half', email, phone: h.nextPhone(), password: 'secret123' });
     expect(r.status).toBe(201);
     expect((await h.api.post('/auth/login', { identifier: email, password: 'secret123' })).status).toBe(200);
+    // Another password on another left-behind login: a fresh login is made, never "email taken".
+    const email2 = 'half2@test.in';
+    await h.deps.identity.signUp(email2, 'secret123');
+    const r2 = await h.api.post('/auth/signup', { name: 'Half Two', email: email2, phone: h.nextPhone(), password: 'other-pass1' });
+    expect(r2.status).toBe(201);
+    expect((await h.api.post('/auth/login', { identifier: email2, password: 'other-pass1' })).status).toBe(200);
   });
 
   it('reset link page sets a new password and clears the lock', async () => {
@@ -368,7 +371,7 @@ describe('member app', () => {
     const owner = await h.ownerWithGym('Delete Gym');
     const mem = await h.signup('Leaver');
     await h.api.post('/members', { name: 'Leaver', phone: mem.phone }, owner.token);
-    expect((await h.api.del('/me', mem.token)).status).toBe(200);
+    expect((await h.api.del('/me', mem.token, { password: 'secret123' })).status).toBe(200);
     expect((await h.api.get('/auth/me', mem.token)).status).toBe(401);
     const list = await h.api.get('/members', owner.token);
     expect(list.body.rows[0].hasApp).toBe(false);
@@ -1062,5 +1065,48 @@ describe('Nov 3 night: rate limit, Google link, set password', () => {
     // Google sign-up with that email just logs in
     const gs = await h.api.post('/auth/google/signup', { idToken: 'google:sub-neha:neha@test.in' });
     expect(gs.body.user.id).toBe(g.body.user.id);
+  });
+});
+
+describe('deleted accounts', () => {
+  it('member deletes account: gym sees "No longer available", can delete them, and the same email/mobile can sign up again', async () => {
+    const owner = await h.ownerWithGym('Gone Gym');
+    const mem = await h.signup('Leaving Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    const m = await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    // Not a "gone" member yet: the owner cannot delete them.
+    expect((await h.api.del(`/members/${m.body.id}`, owner.token)).status).toBe(409);
+    expect((await h.api.del('/me', mem.token)).status).toBe(400); // password needed
+    expect((await h.api.del('/me', mem.token, { password: 'nope12345' })).body.message).toMatch(/Wrong password/);
+    expect((await h.api.del('/me', mem.token, { password: 'secret123' })).status).toBe(200);
+    const list = await h.api.get('/members', owner.token);
+    const row = list.body.rows.find((r: any) => r.id === m.body.id);
+    expect(row.gone).toBe(true);
+    expect(list.body.counts.gone).toBe(1);
+    // Signing up again with the same email and mobile works.
+    const again = await h.api.post('/auth/signup', { name: 'Back Again', email: mem.email, phone: mem.phone, password: 'another123' });
+    expect(again.status).toBe(201);
+    // The owner deletes the old record; it leaves the list.
+    expect((await h.api.del(`/members/${m.body.id}`, owner.token)).status).toBe(200);
+    expect((await h.api.get('/members', owner.token)).body.rows.find((r: any) => r.id === m.body.id)).toBeUndefined();
+    // Coming back to the gym works as a new member.
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, again.body.token);
+    const r2 = await h.api.get('/join-requests', owner.token);
+    expect((await h.api.post(`/join-requests/${r2.body[0].id}/approve`, {}, owner.token)).status).toBe(201);
+  });
+
+  it('super admin finds and deletes a person; the same email signs up again with a new password', async () => {
+    const boss = await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    const sup = boss.status === 201 ? boss.body.token : (await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' })).body.token;
+    const p = await h.signup('Someone');
+    const found = await h.api.get(`/super/users?q=${p.phone}`, sup);
+    expect(found.body[0].id).toBe(p.user.id);
+    expect((await h.api.post(`/super/users/${p.user.id}/delete`, {}, sup)).status).toBe(200);
+    expect((await h.api.get(`/super/users?q=${p.email}`, sup)).body).toEqual([]);
+    const again = await h.api.post('/auth/signup', { name: 'Someone Again', email: p.email, phone: p.phone, password: 'different99' });
+    expect(again.status).toBe(201);
+    const login = await h.api.post('/auth/login', { identifier: p.email, password: 'different99' });
+    expect(login.status).toBe(200);
   });
 });

@@ -113,6 +113,8 @@ export interface MemberDoc {
   city?: string | null;
   country?: string | null;
   pincode?: string | null;
+  gone?: boolean; // the person deleted their GymMantra account ("No longer available")
+  removed?: boolean; // the gym deleted this member (kept only for money records)
 }
 
 export interface Payment {
@@ -167,6 +169,7 @@ export interface RosterEntry {
   userId: string | null;
   archived: boolean;
   photoV?: number | null; // the linked app user's photo version, so lists can show photos
+  gone?: boolean; // the person deleted their GymMantra account
   subs: RosterSub[];
 }
 export type RosterSub = SubLike & { planId: string | null; planName: string; months: number };
@@ -516,7 +519,7 @@ export function rosterPutSub(roster: Roster, memberId: string, s: SubDoc) {
 }
 
 export function rosterEntry(m: MemberDoc): RosterEntry {
-  return { name: m.name, phone: m.phone, memberCode: m.memberCode, branchId: m.branchId, userId: m.userId, archived: m.archived, subs: [] };
+  return { name: m.name, phone: m.phone, memberCode: m.memberCode, branchId: m.branchId, userId: m.userId, archived: m.archived, ...(m.gone ? { gone: true } : {}), subs: [] };
 }
 
 export function stateOf(e: RosterEntry, today = todayIST()): MemberState<RosterSub> {
