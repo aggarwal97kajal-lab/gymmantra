@@ -15,7 +15,6 @@ void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
     await Prefs.init();
-    HttpOverrides.global = Ipv4FirstOverrides();
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       hits.add(req.uri.path);
@@ -25,6 +24,16 @@ void main() {
       req.response.write(jsonEncode(body));
       await req.response.close();
     });
+    // Plain Dart HttpClient first, before the app's connection code is switched on.
+    final plain = HttpClient();
+    final r0 = await (await plain.getUrl(Uri.parse('http://127.0.0.1:${server.port}/x'))).close().timeout(const Duration(seconds: 5));
+    // ignore: avoid_print
+    print('plain client: ${r0.statusCode}');
+    final mine = Api.ipv4First(HttpClient());
+    final r1 = await (await mine.getUrl(Uri.parse('http://127.0.0.1:${server.port}/x')).timeout(const Duration(seconds: 5))).close().timeout(const Duration(seconds: 5));
+    // ignore: avoid_print
+    print('app client: ${r1.statusCode}');
+    HttpOverrides.global = Ipv4FirstOverrides();
     Api.instance.base = 'http://127.0.0.1:${server.port}';
     Api.instance.token = 'test-token';
   });
