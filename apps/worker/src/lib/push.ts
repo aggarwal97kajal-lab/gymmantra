@@ -16,11 +16,13 @@ export interface PushItem {
   title: string;
   body: string;
   data?: Record<string, string>;
+  /** No visible notification: only tells an open app to reload (live update). */
+  silent?: boolean;
 }
 
 const queue = new Map<string, PushItem>();
 export function queuePush(p: PushItem) {
-  queue.set(`${p.uid ?? p.topicCondition}|${p.title}|${p.body}`, p); // a re-run transaction does not send twice
+  queue.set(`${p.uid ?? p.topicCondition}|${p.title}|${p.body}|${p.silent ? 's' : ''}`, p); // a re-run transaction does not send twice
 }
 export function takePush(): PushItem[] {
   const out = [...queue.values()];
@@ -64,9 +66,9 @@ export async function sendPush(store: Store, sa: ServiceAccount | null, items: P
         body: JSON.stringify({
           message: {
             ...target,
-            notification: { title: it.title, body: it.body },
-            data: it.data ?? {},
-            android: { priority: 'HIGH', notification: { sound: 'default' } },
+            ...(it.silent ? {} : { notification: { title: it.title, body: it.body } }),
+            data: { ...(it.data ?? {}), ...(it.silent ? { kind: 'refresh' } : {}) },
+            android: it.silent ? { priority: 'NORMAL' } : { priority: 'HIGH', notification: { sound: 'default' } },
           },
         }),
       }).catch(() => null);

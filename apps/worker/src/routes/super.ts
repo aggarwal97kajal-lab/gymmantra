@@ -129,6 +129,9 @@ export function superRoutes(app: App) {
       };
       t.set(P.tenant(id), after);
       audit(t, id, u.id, 'super.gym.update', 'tenant', id, before, after);
+      // The owners' open app reloads (plan, trial, status) without a visible notification.
+      const owners = (await t.query<{ role: Role; active: boolean }>(P.staffCol(id), [['role', 'OWNER']])).filter((r) => r.data.active);
+      for (const o of owners) queuePush({ uid: o.id, title: 'refresh', body: 'gym', silent: true });
       return after;
     });
     return c.json({ id, ...out });
