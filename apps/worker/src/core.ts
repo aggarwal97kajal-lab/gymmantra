@@ -274,7 +274,9 @@ export interface Deps {
   /** Firebase service account for phone notifications (null = off). */
   serviceAccount?: ServiceAccount | null;
   /** Nightly backup to GitHub (routes/backup.ts): checks the GitHub Actions login and gives the encryption key. */
-  backup?: { verify(token: string, workflow: 'backup' | 'restore'): Promise<boolean>; key(): Promise<CryptoKey> } | null;
+  backup?: { verify(token: string, workflow: 'backup' | 'restore' | 'migrate'): Promise<boolean>; key(): Promise<CryptoKey> } | null;
+  /** Moving the data from Firestore into D1 (routes/backup.ts, .github/workflows/migrate.yml). */
+  migrate?: { from: Store; to: { load(rows: { p: string; d: Record<string, unknown> }[], keepNewer: boolean): Promise<void> } } | null;
 }
 
 export interface Secrets {

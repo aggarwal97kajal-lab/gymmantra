@@ -1686,3 +1686,20 @@ describe('big gyms (Nov 6 load test fixes)', () => {
     }
   });
 });
+
+describe('moving to D1 (Nov 6)', () => {
+  it('only the migrate workflow can copy, and copied rows never overwrite newer ones', async () => {
+    const { MemoryStore } = await import('../src/store/store');
+    const from = new MemoryStore();
+    await from.set('users/x', { name: 'From Firestore' });
+    await from.set('users/y', { name: 'Old copy' });
+    const to = new MemoryStore();
+    await to.set('users/y', { name: 'Newer in D1' });
+    h.deps.migrate = { from, to: { load: async (rows, keepNewer) => { for (const r of rows) if (!keepNewer || !(await to.get(r.p))) await to.set(r.p, r.d); } } };
+    expect((await h.api.call('POST', '/backup/migrate', { body: {}, headers: { authorization: 'Bearer gh-backup' } })).status).toBe(401);
+    const r = await h.api.call('POST', '/backup/migrate', { body: {}, headers: { authorization: 'Bearer gh-migrate' } });
+    expect([r.status, r.body.n, r.body.next]).toEqual([200, 2, null]);
+    expect(await to.get('users/x')).toEqual({ name: 'From Firestore' });
+    expect(await to.get('users/y')).toEqual({ name: 'Newer in D1' });
+  });
+});

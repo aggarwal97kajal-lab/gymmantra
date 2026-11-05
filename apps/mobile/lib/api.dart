@@ -354,7 +354,10 @@ class Api {
   /// When each path was last loaded. Going back and forth between screens within a few
   /// seconds uses what is in memory instead of asking the server again.
   final Map<String, DateTime> _fetchedAt = {};
-  static const _freshFor = Duration(seconds: 10);
+  // A screen opened again within a minute uses what it has (fewer server requests, so more people
+  // fit in the free plan). Any change made from this phone clears it, and pull-down / a phone
+  // notification / coming back to the app still loads fresh.
+  static const _freshFor = Duration(seconds: 60);
   bool _isFresh(String key) {
     final t = _fetchedAt[key];
     return t != null && _mem.containsKey(key) && DateTime.now().difference(t) < _freshFor;
@@ -375,6 +378,7 @@ class Api {
       try {
         final text = await _encodeOffThread(data);
         await Prefs.setString('c:$key', text);
+        await Prefs.setString('t:$key', DateTime.now().toIso8601String());
       } catch (_) {}
     });
   }
@@ -396,7 +400,8 @@ class Api {
 
   /// Loads screens' data in the background so they open instantly later.
   /// Three at a time, so the screen in front of the person is never stuck behind them.
-  Future<void> prefetch(List<String> paths) async {
+  Future<void> prefetch(List<String> paths, {bool always = true}) async {
+    if (!always) paths = paths.where((p) => !_savedRecently(p)).toList();
     for (var i = 0; i < paths.length; i += 3) {
       await Future.wait(paths.skip(i).take(3).map((p) async {
         try {
@@ -405,6 +410,12 @@ class Api {
         } catch (_) {}
       }));
     }
+  }
+
+  /// The phone copy is less than 10 minutes old (the app was opened a moment ago): no need to load it at start.
+  bool _savedRecently(String path) {
+    final t = DateTime.tryParse(Prefs.getString('t:${_k(path)}') ?? '');
+    return t != null && cached(path) != null && DateTime.now().difference(t) < const Duration(minutes: 10);
   }
 
   /// Background loading a few at a time (e.g. the details of members in a list),

@@ -50,6 +50,17 @@ def backup(folder):
     print(f'Backup done: {docs} documents in {pages} pages')
 
 
+def migrate(_folder):
+    after, docs = None, 0
+    while True:
+        r = post('/backup/migrate', {'after': after})
+        docs += r['n']
+        after = r['next']
+        if not after:
+            break
+    print(f'Moved: {docs} documents from Firestore into D1')
+
+
 def restore(folder):
     files = sorted(n for n in os.listdir(folder) if n.startswith('page-'))
     if not files:
@@ -62,4 +73,4 @@ def restore(folder):
 
 
 if __name__ == '__main__':
-    {'backup': backup, 'restore': restore}[sys.argv[1]](sys.argv[2])
+    {'backup': backup, 'restore': restore, 'migrate': migrate}[sys.argv[1]](sys.argv[2])

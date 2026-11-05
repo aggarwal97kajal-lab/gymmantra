@@ -1,0 +1,16 @@
+name: migrate
+# One time: copies every document from Firestore into Cloudflare D1. Documents already in D1 are
+# newer (written after the switch) and are kept. Safe to run again.
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write # GitHub's signed login token; the server accepts only this workflow on main
+  contents: read
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - run: python3 -I .github/scripts/backup.py migrate -

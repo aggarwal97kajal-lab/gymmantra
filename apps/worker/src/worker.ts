@@ -5,6 +5,7 @@ import { cronReminders } from './lib/superpush';
 import { setEdgeKv } from './lib/edge';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createApp } from './app';
+import { D1Like, D1Store } from './store/d1';
 import { loadSecrets, type Deps } from './core';
 import { ensureBaseData } from './routes/super';
 import { FirebaseIdentity, serverToken } from './identity';
@@ -20,6 +21,8 @@ export interface WorkerEnv {
   GOOGLE_CLIENT_IDS?: string;
   GM_KV?: unknown; // Cloudflare KV: shares the database sign-in between Worker instances
   FIREBASE_SERVICE_ACCOUNT?: string; // secret: service account JSON, for phone notifications
+  GM_DB?: D1Like; // Cloudflare D1: the database (when DB_BACKEND is "d1")
+  DB_BACKEND?: string; // "d1" = data in D1; anything else = Firestore
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -64,9 +67,12 @@ function depsFor(env: WorkerEnv, url: URL): Deps {
   }
   const googleIds = (env.GOOGLE_CLIENT_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const identity = new FirebaseIdentity(env.FIREBASE_API_KEY, googleIds);
-  const store = new FirestoreStore(env.FIREBASE_PROJECT_ID, serverToken(identity, env.SERVER_EMAIL || 'server@gymmantra.internal', env.SERVER_PASSWORD));
+  const firestore = new FirestoreStore(env.FIREBASE_PROJECT_ID, serverToken(identity, env.SERVER_EMAIL || 'server@gymmantra.internal', env.SERVER_PASSWORD));
+  const d1 = env.GM_DB ? new D1Store(env.GM_DB) : null;
+  const store = d1 && env.DB_BACKEND === 'd1' ? d1 : firestore;
   deps = {
     store,
+    migrate: d1 ? { from: firestore, to: d1 } : null,
     identity,
     superAdminEmail: (env.SUPER_ADMIN_EMAIL ?? '').trim().toLowerCase(),
     googleClientId: googleIds[0] ?? null,

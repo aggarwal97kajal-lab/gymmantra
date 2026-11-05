@@ -5,6 +5,8 @@ import { FakeIdentity, FirebaseIdentity, serverToken } from '../src/identity';
 import { FirestoreStore } from '../src/store/firestore';
 import { resetBaseCheck } from '../src/routes/super';
 import { MemoryStore, Store } from '../src/store/store';
+import { D1Store } from '../src/store/d1';
+import { memoryD1 } from './d1shim';
 
 /**
  * With FIREBASE_EMULATOR=1 the tests use the real Firebase adapters against the
@@ -50,6 +52,9 @@ export function setup() {
     };
     identity = new EmulatorIdentity('fake-key', [], AUTH_HOST);
     store = new FirestoreStore(PROJECT, serverToken(identity, SERVER_EMAIL, SERVER_PASSWORD), FS_HOST);
+  } else if (process.env.TEST_STORE === 'd1') {
+    store = new D1Store(memoryD1());
+    identity = new FakeIdentity();
   } else {
     store = new MemoryStore();
     identity = new FakeIdentity();

@@ -23,7 +23,7 @@ function unb64(s: string) {
 }
 
 export function backupRoutes(app: App) {
-  async function caller(c: C, workflow: 'backup' | 'restore') {
+  async function caller(c: C, workflow: 'backup' | 'restore' | 'migrate') {
     const b = c.var.deps.backup;
     if (!b) throw new HttpError(503, 'Backup is not set up on this server');
     const tok = (c.req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
@@ -43,6 +43,18 @@ export function backupRoutes(app: App) {
     out.set(iv);
     out.set(ct, 12);
     return c.json({ n: rows.length, data: b64(out), next: rows.length === PAGE ? rows[rows.length - 1].p : null });
+  });
+
+  /** Copies one page from Firestore into D1 (rows already in D1 are newer and stay). */
+  app.post('/api/v1/backup/migrate', async (c) => {
+    await caller(c, 'migrate');
+    const m = c.var.deps.migrate;
+    if (!m) throw new HttpError(503, 'Nothing to move: D1 is not set up');
+    const body = await c.req.json().catch(() => ({}));
+    const after = typeof body?.after === 'string' && body.after ? body.after : null;
+    const rows = await m.from.dump(after, PAGE);
+    await m.to.load(rows, true);
+    return c.json({ n: rows.length, next: rows.length === PAGE ? rows[rows.length - 1].p : null });
   });
 
   /** Writes one backup page back into the database (documents in it are overwritten). */

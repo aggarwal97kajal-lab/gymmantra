@@ -14,6 +14,8 @@ jobs:
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm --filter @gymmantra/worker typecheck
       - run: pnpm --filter @gymmantra/worker test
+      - name: Same API tests on the D1 database (SQLite)
+        run: cd apps/worker && TEST_STORE=d1 npx jest --runInBand test/api.test.ts test/security.test.ts test/d1.test.ts
       - name: Build admin panel and static assets
         run: pnpm run build:cf
       - run: test -f apps/worker/public/index.html && test -f apps/worker/public/members/view/index.html && test -f apps/worker/public/media/exercises/exercises.json

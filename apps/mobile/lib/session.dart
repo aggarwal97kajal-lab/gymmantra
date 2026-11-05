@@ -205,7 +205,8 @@ class Session extends ChangeNotifier {
       'member' => ['/me/gyms', '/me/pt', '/me/program', '/me/notifications', '/me/tickets', '/exercises', '/ads?role=MEMBER'],
       _ => const <String>[],
     };
-    if (paths.isNotEmpty) api.prefetch(paths);
+    // Opening the app again within 10 minutes does not load every tab again (the open screen still refreshes).
+    if (paths.isNotEmpty) api.prefetch(paths, always: false);
   }
 
   /// Which part of the app this person sees.
