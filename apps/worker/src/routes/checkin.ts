@@ -188,6 +188,14 @@ export function checkinRoutes(app: App) {
       const out = await store.tx(async (t) => {
         const mem = await t.get<MemberDoc>(P.member(tenantId, memberId));
         if (!mem || mem.archived) throw notFound('Your membership at this gym was removed');
+        // A member checks in only at their own branch: the QR of another branch is refused.
+        const mine = branchOf(tenant, mem.branchId);
+        if (mine !== branchOf(tenant, hit.branchId)) {
+          const b = tenant.branches.find((x) => x.id === mine);
+          const myName = !b || b.id === tenant.branches[0]?.id ? tenant.name : b.name;
+          const here = hit.branchId && hit.branchId !== tenant.branches[0]?.id ? branchName ?? tenant.name : tenant.name;
+          throw new HttpError(403, `This is the check-in QR of ${here}. Your membership is at ${myName}, so check in there. To move branches, ask your gym.`, { code: 'OTHER_BRANCH' });
+        }
         // The visit counts for the branch whose QR was scanned.
         return recordMemberCheckIn(t, tenantId, mem, { method: 'SELF', byId: u.id, branchId: hit.branchId, oncePerDay: true });
       });

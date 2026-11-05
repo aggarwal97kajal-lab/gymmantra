@@ -1481,3 +1481,20 @@ describe('notifications open the right page, check-in switch, branch moves right
     expect((await h.api.get('/me/notifications', owner.token)).body.some((n: any) => n.title === 'Mark your attendance')).toBe(false);
   });
 });
+
+describe('check-in only at your own branch', () => {
+  it("a member cannot check in with another branch's QR", async () => {
+    const owner = await h.ownerWithGym('Branch QR Gym');
+    const second = (await h.api.post('/gym/branches', { name: 'Second' }, owner.token)).body;
+    const mem = await h.signup('Main Branch Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    const otherQr = (await h.api.call('GET', '/gym/checkin-qr', { token: owner.token, headers: { 'x-branch-id': second.id } })).body;
+    const r = await h.api.post('/me/checkin', { code: otherQr.text }, mem.token);
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('OTHER_BRANCH');
+    const ownQr = (await h.api.get('/gym/checkin-qr', owner.token)).body;
+    expect((await h.api.post('/me/checkin', { code: ownQr.text }, mem.token)).status).toBe(201);
+  });
+});
