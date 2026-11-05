@@ -1,0 +1,50 @@
+name: security-probe
+# Checks the LIVE system from outside, like an attacker would (owner request, Nov 5):
+#  - nobody can read or write the database directly (only the GymMantra server can),
+#  - a brand-new Firebase account (anyone can make one) still cannot read anything,
+#  - file storage and realtime database are closed,
+#  - the server refuses data requests without login.
+# Runs every Monday and by hand. A red run = something is open.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * 1"
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          set -u
+          KEY="AIzaSyBlDQq21YwTODUlsVhVz2qo1_HF1fvVBvI"   # public app key (it is inside every APK)
+          PROJECT="gymmantra"
+          API="https://gymmantra.aggarwal97kajal.workers.dev/api/v1"
+          FS="https://firestore.googleapis.com/v1/projects/$PROJECT/databases/(default)/documents"
+          fail=0
+          check() { # name, http-code, allowed-codes...
+            name="$1"; code="$2"; shift 2
+            for ok in "$@"; do [ "$code" = "$ok" ] && { echo "OK    $name ($code)"; return; }; done
+            echo "OPEN! $name ($code)"; fail=1
+          }
+          # 1. Database without any login
+          check "database: read without login"  "$(curl -s -o /dev/null -w '%{http_code}' "$FS/settings/platform?key=$KEY")" 403 401
+          check "database: list users without login" "$(curl -s -o /dev/null -w '%{http_code}' "$FS/users?key=$KEY")" 403 401
+          check "database: write without login" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H 'content-type: application/json' -d '{"fields":{"x":{"stringValue":"hack"}}}' "$FS/settings/hack?key=$KEY")" 403 401
+          # 2. A brand-new Firebase account
+          EMAIL="probe$(date +%s)$RANDOM@example.com"
+          TOKEN=$(curl -s -H 'content-type: application/json' -d "{\"email\":\"$EMAIL\",\"password\":\"Probe#$RANDOM$RANDOM\",\"returnSecureToken\":true}" "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('idToken',''))")
+          if [ -n "$TOKEN" ]; then
+            check "database: read with a new account" "$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $TOKEN" "$FS/settings/secrets")" 403
+            check "database: list users with a new account" "$(curl -s -o /dev/null -w '%{http_code}' -H "authorization: Bearer $TOKEN" "$FS/users")" 403
+            check "database: write with a new account" "$(curl -s -o /dev/null -w '%{http_code}' -X PATCH -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' -d '{"fields":{"x":{"stringValue":"hack"}}}' "$FS/settings/hack")" 403
+            curl -s -o /dev/null -H 'content-type: application/json' -d "{\"idToken\":\"$TOKEN\"}" "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$KEY"
+          else
+            echo "OK    new Firebase accounts cannot be made from outside"
+          fi
+          # 3. Storage and Realtime Database
+          check "file storage: list files" "$(curl -s -o /dev/null -w '%{http_code}' "https://firebasestorage.googleapis.com/v0/b/$PROJECT.firebasestorage.app/o")" 403 401 404 412
+          check "realtime database: read" "$(curl -s -o /dev/null -w '%{http_code}' "https://$PROJECT-default-rtdb.firebaseio.com/.json")" 401 403 404 423
+          # 4. Server without login
+          for p in /members /dashboard /me/gyms /super/overview /super/users?q=9999999999 /gym/staff /reports?days=7; do
+            check "server: $p without login" "$(curl -s -o /dev/null -w '%{http_code}' -H 'x-gm-client: mobile' "$API$p")" 401 403
+          done
+          exit $fail

@@ -75,6 +75,7 @@ export function setup() {
     patch: (p: string, body: unknown, token?: string) => call('PATCH', p, { body, token }),
     put: (p: string, body: unknown, token?: string) => call('PUT', p, { body, token }),
     del: (p: string, token?: string, body?: unknown) => call('DELETE', p, { token, body }),
+    call: (method: string, p: string, opts: { token?: string; body?: unknown; headers?: Record<string, string> } = {}) => call(method, p, opts),
   };
 
   async function signup(name = 'Test User') {

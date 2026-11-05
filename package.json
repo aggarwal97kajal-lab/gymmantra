@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.12.3",
   "scripts": {
-    "build:cf": "pnpm --filter @gymmantra/admin build && pnpm --filter @gymmantra/worker build",
+    "build:cf": "pnpm --filter @gymmantra/worker test && pnpm --filter @gymmantra/admin build && pnpm --filter @gymmantra/worker build",
     "test": "pnpm -r test",
     "dev": "pnpm --filter @gymmantra/worker dev"
   },
