@@ -351,9 +351,43 @@ final trainersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(
 final gymProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym'));
 final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/home'));
 
+/// Same list as the server (core.ts GO_RULES): notifications saved before "go" existed still open
+/// the right page, worked out from their title.
+final _goRules = <(RegExp, String)>[
+  (RegExp(r'^Payment due'), 'due'),
+  (RegExp(r'^(Payment received|Membership (added|updated|frozen)|Branch changed|Transfer not approved)'), 'membership'),
+  (RegExp(r'^(Plan activated|Payment not received)$'), 'subscription'),
+  (RegExp(r'(ends in \d+ days$|ends tomorrow$|^Last day of your|has ended$)'), 'subscription'),
+  (RegExp(r'^Branch transfer request'), 'requests:move'),
+  (RegExp(r'^PT request to approve'), 'requests:pt'),
+  (RegExp(r'^New (join|trainer) request'), 'requests'),
+  (RegExp(r'^New member added'), 'members'),
+  (RegExp(r'^PT payment received'), 'pt-pay'),
+  (RegExp(r'^(New PT request|New PT client|PT approved|PT planned|PT sessions ending|PT request declined)'), 'pt'),
+  (RegExp(r'^Staff attendance'), 'staffdays'),
+  (RegExp(r'^(Mark your attendance|Still not marked)'), 'attendance'),
+  (RegExp(r'^(Your plan is updated|New diet chart|New workout plan)'), 'program'),
+  (RegExp(r'^(New support ticket|Ticket reply|Reply on ticket|Ticket GM-)'), 'tickets'),
+  (RegExp(r'^Plan payment'), 'payments'),
+  (RegExp(r'^New gym registered|gym plans? ended', caseSensitive: false), 'gyms'),
+  (RegExp(r'^(Welcome!|Request declined|Removed from gym|You are gym staff now|Gym transferred|You own a gym now|Gym closed|Gym reopened)'), 'home'),
+];
+
+String? goFromTitle(String? title) {
+  if (title == null) return null;
+  for (final (re, go) in _goRules) {
+    if (re.hasMatch(title)) return go;
+  }
+  return null;
+}
+
+/// What a notification is about: its "go", else worked out from the title (old notifications), else a gym notice.
+String? goOfNote(Map n) => (n['go'] as String?) ?? (n['kind'] == 'DUE' ? 'due' : null) ?? goFromTitle(n['title'] as String?) ?? (n['kind'] == 'NOTICE' ? 'home' : null);
+
 /// Where a notification takes the person (by what it is about and who they are). Null: nowhere special.
-/// Tab pages are opened with go(), other pages with push() so Back returns.
-({String path, bool tab})? noteRoute(String mode, String? go) {
+/// Tab pages are opened with go(), other pages with push() so Back returns. "@membership" is worked out
+/// when tapped (the member's own membership page in that gym).
+({String path, bool tab})? noteRoute(String mode, String? go, {bool staffDesk = false}) {
   if (go == null || go.isEmpty) return null;
   final ticket = go.startsWith('ticket:') ? go.substring(7) : null;
   if (adminApp) {
@@ -366,30 +400,47 @@ final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.ins
     };
   }
   if (ticket != null) return (path: '/help/ticket/$ticket', tab: false);
+  final member = go.startsWith('member:') ? go.substring(7) : null;
   switch (mode) {
     case 'owner':
+      if (member != null) return (path: '/o/member/$member', tab: false);
       return switch (go) {
         'due' || 'membership' || 'members' => (path: '/o/members', tab: true),
         'requests' || 'requests:move' || 'requests:pt' => (path: '/o/requests', tab: true),
-        'subscription' => (path: '/o/subscription', tab: false),
+        'subscription' => staffDesk ? (path: '/o/home', tab: true) : (path: '/o/subscription', tab: false),
         'staffdays' => (path: '/o/staff-attendance', tab: false),
         'attendance' => (path: '/o/my-attendance', tab: false),
         'pt' || 'pt-pay' => (path: '/o/pt', tab: false),
+        'tickets' => (path: '/help/new', tab: false),
         _ => (path: '/o/home', tab: true),
       };
     case 'trainer' || 'waiting' || 'trainerJoin':
       return switch (go) {
-        'pt' => (path: '/t/clients', tab: true),
+        'pt' || 'program' => (path: '/t/clients', tab: true),
         'attendance' => (path: '/t/my-attendance', tab: false),
         _ => (path: '/t/home', tab: true),
       };
     case 'member':
       return switch (go) {
-        'due' || 'membership' => (path: '/my-plan', tab: true),
+        'due' || 'membership' => (path: '@membership', tab: false),
+        'program' => (path: '/my-plan', tab: true),
+        'pt' => (path: '/trainers', tab: true),
+        'tickets' => (path: '/help', tab: true),
         _ => (path: '/home', tab: true),
       };
   }
   return null;
+}
+
+/// The member's membership page in a gym (the gym the notification came from, else their first gym).
+Future<String> membershipPath(String? tenantId) async {
+  try {
+    final d = await Api.instance.get('/me/gyms');
+    final ms = ((d is Map ? d['memberships'] : null) as List?)?.whereType<Map>().toList() ?? const <Map>[];
+    final m = ms.firstWhere((x) => (x['gym'] as Map?)?['id'] == tenantId, orElse: () => ms.isEmpty ? const {} : ms.first);
+    if (m['memberId'] != null) return '/membership/${m['memberId']}';
+  } catch (_) {}
+  return '/home';
 }
 
 /// Unread notifications (for the bell's red number).

@@ -72,14 +72,20 @@ class _AppState extends ConsumerState<GymMantraApp> {
       if (tries < 20) Future.delayed(const Duration(milliseconds: 500), () => _openGo(go, tries + 1));
       return;
     }
-    final r = noteRoute(session.mode, go);
+    final r = noteRoute(session.mode, go, staffDesk: session.isStaffDesk);
     if (r == null) return;
+    if (r.path == '@membership') {
+      membershipPath(_pushTenant).then((p) => p == '/home' ? router.go(p) : router.push(p));
+      return;
+    }
     if (r.tab) {
       router.go(r.path);
     } else {
       router.push(r.path);
     }
   }
+
+  String? _pushTenant; // the gym a tapped phone notification came from
 
   @override
   void dispose() {
@@ -106,8 +112,12 @@ class _AppState extends ConsumerState<GymMantraApp> {
       Future.delayed(const Duration(seconds: 9), _liveRefresh);
     };
     // Tapping a phone notification opens the page it is about (after the app has started).
-    Push.onOpen = (go) => _openGo(go, 0);
+    Push.onOpen = (go, tenantId) {
+      _pushTenant = tenantId;
+      _openGo(go, 0);
+    };
     final waiting = Push.pendingGo;
+    _pushTenant = Push.pendingTenant;
     Push.pendingGo = null;
     if (waiting != null) Future.delayed(const Duration(milliseconds: 600), () => _openGo(waiting, 0));
     if (adminApp) {
@@ -205,6 +215,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/staff/new', builder: (_, __) => const AddStaffScreen()),
         GoRoute(path: '/o/staff/edit', builder: (_, s) => StaffEditScreen(staff: s.extra as Map)),
         GoRoute(path: '/o/attendance', builder: (_, __) => const DeskAttendanceScreen()),
+        GoRoute(path: '/o/attendance-hub', builder: (_, __) => const AttendanceHubScreen()),
         GoRoute(path: '/o/attendance/scan', builder: (_, __) => const DeskScanScreen()),
         GoRoute(path: '/o/attendance/manual', builder: (_, __) => const ManualCheckinScreen()),
         GoRoute(path: '/o/my-attendance', builder: (_, __) => const MyAttendanceScreen()),
@@ -239,7 +250,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
             GoRoute(path: '/o/requests', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerRequestsScreen())),
             GoRoute(path: '/o/offers', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerOffersScreen())),
             GoRoute(path: '/o/more', pageBuilder: (_, __) => const NoTransitionPage(child: OwnerMoreScreen())),
-            GoRoute(path: '/o/desk', pageBuilder: (_, __) => const NoTransitionPage(child: DeskAttendanceScreen(tab: true))),
+            GoRoute(path: '/o/desk', pageBuilder: (_, __) => const NoTransitionPage(child: AttendanceHubScreen(tab: true))),
           ],
         ),
         GoRoute(path: '/o/members/new', builder: (_, __) => const AddMemberScreen()),

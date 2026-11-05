@@ -76,3 +76,63 @@ describe('freeze moves the renewals after it', () => {
     expect(computeState([y1, y2] as SubLike[], '2028-11-05').status).toBe('ENDING_SOON');
   });
 });
+
+describe('every notification opens a page', () => {
+  it('each title the server sends has a place to open', async () => {
+    const { goOf } = await import('../src/core');
+    const { reminderFor } = await import('../src/lib/superpush');
+    const titles: Record<string, string> = {
+      'Payment due: ₹1,500': 'due',
+      'Payment received': 'membership',
+      'Membership frozen': 'membership',
+      'Membership added': 'membership',
+      'Membership updated': 'membership',
+      'Branch changed': 'membership',
+      'Transfer not approved': 'membership',
+      'Plan activated': 'subscription',
+      'Payment not received': 'subscription',
+      'Branch transfer request': 'requests:move',
+      'PT request to approve': 'requests:pt',
+      'New join request': 'requests',
+      'New trainer request': 'requests',
+      'New member added': 'members',
+      'PT payment received': 'pt-pay',
+      'New PT request': 'pt',
+      'New PT client': 'pt',
+      'PT approved': 'pt',
+      'PT planned': 'pt',
+      'PT sessions ending': 'pt',
+      'PT request declined': 'pt',
+      'Staff attendance': 'staffdays',
+      'Mark your attendance': 'attendance',
+      'Still not marked': 'attendance',
+      'Your plan is updated': 'program',
+      'New diet chart': 'program',
+      'New workout plan': 'program',
+      'New support ticket': 'tickets',
+      'Ticket reply': 'tickets',
+      'Reply on ticket GM-1001': 'tickets',
+      'Ticket GM-1001 is resolved': 'tickets',
+      'Plan payment ₹799 · Iron Gym': 'payments',
+      'Plan payment failed': 'payments',
+      'New gym registered': 'gyms',
+      '3 gym plans ended': 'gyms',
+      'Welcome!': 'home',
+      'Request declined': 'home',
+      'Removed from gym': 'home',
+      'Removed from gym staff': 'home',
+      'You are gym staff now': 'home',
+      'Gym transferred': 'home',
+      'You own a gym now': 'home',
+      'Gym closed': 'home',
+      'Gym reopened': 'home',
+    };
+    for (const [title, go] of Object.entries(titles)) expect([title, goOf(title)]).toEqual([title, go]);
+    // plan reminders (trial and paid plan, before and after the end)
+    const gym = { name: 'G', status: 'TRIAL', trialEndsAt: '2026-11-10T18:29:59.000Z', planEndsAt: null } as never;
+    for (const day of ['2026-11-05', '2026-11-09', '2026-11-10', '2026-11-15']) {
+      const r = reminderFor(gym, null, day);
+      expect([r?.title, goOf(r!.title)]).toEqual([r?.title, 'subscription']);
+    }
+  });
+});

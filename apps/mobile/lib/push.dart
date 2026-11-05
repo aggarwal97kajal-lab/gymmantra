@@ -4,6 +4,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'api.dart';
 import 'drip.dart';
 import 'prefs.dart';
+import 'session.dart' show goFromTitle;
 import 'theme.dart' show adminApp;
 
 /// Phone notifications (Firebase Cloud Messaging). The server sends every in-app notification to the
@@ -27,10 +28,11 @@ class Push {
   static void Function()? onChange;
 
   /// A notification was tapped: open the page it is about ("go" from the server).
-  static void Function(String? go)? onOpen;
+  static void Function(String? go, String? tenantId)? onOpen;
 
   /// Tapped while the app was closed: waits here until the app is ready to open it.
   static String? pendingGo;
+  static String? pendingTenant;
 
   /// At app start. Never stops the app from opening.
   static Future<void> init() async {
@@ -49,23 +51,27 @@ class Push {
       FirebaseMessaging.onMessageOpenedApp.listen((m) {
         Api.instance.refreshOpenScreens();
         onChange?.call();
-        _open(m.data['go'] as String?);
+        _open(m);
       });
       // The app was opened by tapping a notification.
       FirebaseMessaging.instance.getInitialMessage().then((m) {
-        if (m != null) _open(m.data['go'] as String?);
+        if (m != null) _open(m);
       }).catchError((_) {});
     } catch (_) {
       _ready = false;
     }
   }
 
-  static void _open(String? go) {
+  static void _open(RemoteMessage m) {
+    // "go" from the server; older notifications: worked out from the title.
+    final go = (m.data['go'] as String?) ?? goFromTitle(m.notification?.title);
+    final tenant = m.data['tenantId'] as String?;
     if (go == null || go.isEmpty) return;
     if (onOpen != null) {
-      onOpen!(go);
+      onOpen!(go, tenant);
     } else {
       pendingGo = go;
+      pendingTenant = tenant;
     }
   }
 

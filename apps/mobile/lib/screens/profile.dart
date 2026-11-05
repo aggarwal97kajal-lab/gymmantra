@@ -398,36 +398,32 @@ class NotificationBell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final n = ref.watch(unreadCountProvider);
-    return Material(
-      color: context.c.surf,
-      shape: CircleBorder(side: BorderSide(color: context.c.line)),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () => context.push('/notifications'),
-        child: SizedBox(
-          width: size,
-          height: size,
-          child: Badge(
-            isLabelVisible: n > 0,
-            label: Text(n > 99 ? '99+' : '$n', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)),
-            backgroundColor: C.red,
-            offset: const Offset(6, -6),
-            child: Icon(n > 0 ? Icons.notifications_rounded : Icons.notifications_none_rounded, size: 22),
-          ),
-        ),
+    // Just the bell (no circle behind it), with a small red number on its corner.
+    return IconButton(
+      tooltip: context.t('Notifications'),
+      onPressed: () => context.push('/notifications'),
+      icon: Badge(
+        isLabelVisible: n > 0,
+        label: Text(n > 99 ? '99+' : '$n', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+        backgroundColor: C.red,
+        textColor: Colors.white,
+        child: Icon(n > 0 ? Icons.notifications_rounded : Icons.notifications_none_rounded, size: size * 0.62),
       ),
     );
   }
 }
 
 /// Opens the page a notification is about (also used when a phone notification is tapped).
-void openNote(BuildContext context, WidgetRef ref, Map n) {
-  final r = noteRoute(ref.read(sessionProvider).mode, n['go'] as String? ?? ((n['kind'] == 'DUE') ? 'due' : null));
+Future<void> openNote(BuildContext context, WidgetRef ref, Map n) async {
+  final s = ref.read(sessionProvider);
+  final r = noteRoute(s.mode, goOfNote(n), staffDesk: s.isStaffDesk);
   if (r == null) return;
-  if (r.tab) {
-    context.go(r.path);
+  final path = r.path == '@membership' ? await membershipPath(n['tenantId'] as String?) : r.path;
+  if (!context.mounted) return;
+  if (r.tab || path == '/home') {
+    context.go(path);
   } else {
-    context.push(r.path);
+    context.push(path);
   }
 }
 
@@ -450,7 +446,7 @@ class _NoteCard extends ConsumerWidget {
     };
     final t = DateTime.tryParse(n['createdAt'] as String? ?? '')?.toLocal();
     final time = t == null ? '' : TimeOfDay.fromDateTime(t).format(context);
-    final target = noteRoute(ref.read(sessionProvider).mode, n['go'] as String? ?? (kind == 'DUE' ? 'due' : null));
+    final target = noteRoute(ref.read(sessionProvider).mode, goOfNote(n), staffDesk: ref.read(sessionProvider).isStaffDesk);
     return InkWell(
       borderRadius: BorderRadius.circular(18),
       onTap: target == null ? null : () => openNote(context, ref, n),

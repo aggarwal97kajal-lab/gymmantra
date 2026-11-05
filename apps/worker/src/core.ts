@@ -514,26 +514,32 @@ export interface NoteItem {
   go?: string | null; // what the app opens on tap ("due", "requests", "ticket:<id>", …)
 }
 
-/** What a notification opens in the app, from its title (the app turns it into a page for the person's role). */
+/**
+ * What a notification opens in the app, from its title (the app turns it into the page for the person's
+ * role). Every title the server sends must match a rule here — test/api.test.ts checks the full list.
+ * The app has the same list (session.dart goFromTitle) for notifications saved before "go" existed.
+ */
+export const GO_RULES: [RegExp, string][] = [
+  [/^Payment due/, 'due'],
+  [/^(Payment received|Membership (added|updated|frozen)|Branch changed|Transfer not approved)/, 'membership'],
+  [/^(Plan activated|Payment not received)$/, 'subscription'],
+  [/(ends in \d+ days$|ends tomorrow$|^Last day of your|has ended$)/, 'subscription'],
+  [/^Branch transfer request/, 'requests:move'],
+  [/^PT request to approve/, 'requests:pt'],
+  [/^New (join|trainer) request/, 'requests'],
+  [/^New member added/, 'members'],
+  [/^PT payment received/, 'pt-pay'],
+  [/^(New PT request|New PT client|PT approved|PT planned|PT sessions ending|PT request declined)/, 'pt'],
+  [/^Staff attendance/, 'staffdays'],
+  [/^(Mark your attendance|Still not marked)/, 'attendance'],
+  [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
+  [/^(New support ticket|Ticket reply|Reply on ticket|Ticket GM-)/, 'tickets'],
+  [/^Plan payment/, 'payments'],
+  [/^New gym registered|gym plans? ended/i, 'gyms'],
+  [/^(Welcome!|Request declined|Removed from gym|You are gym staff now|Gym transferred|You own a gym now|Gym closed|Gym reopened)/, 'home'],
+];
 export function goOf(title: string): string | null {
-  const rules: [RegExp, string][] = [
-    [/^Payment due/, 'due'],
-    [/^(Payment received|Membership (added|updated|frozen))/, 'membership'],
-    [/^(Plan activated|Payment not received)/, 'subscription'],
-    [/^Branch transfer request/, 'requests:move'],
-    [/^PT request to approve/, 'requests:pt'],
-    [/^New (join|trainer) request/, 'requests'],
-    [/^New member added/, 'members'],
-    [/^PT payment received/, 'pt-pay'],
-    [/PT/, 'pt'],
-    [/^Staff attendance/, 'staffdays'],
-    [/^(Mark your attendance|Still not marked)/, 'attendance'],
-    [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
-    [/^(New support ticket|Ticket reply)/, 'tickets'],
-    [/^Plan payment/, 'payments'],
-    [/^New gym registered|gym plans? ended/i, 'gyms'],
-  ];
-  return rules.find(([re]) => re.test(title))?.[1] ?? null;
+  return GO_RULES.find(([re]) => re.test(title))?.[1] ?? null;
 }
 
 /** A super admin message to everyone or to some roles (read live, not copied per person). */
@@ -583,7 +589,7 @@ export async function notify(t: Tx, userId: string | null | undefined, tenantId:
  * Tells the gym's owners (and front desk of that branch who have [right]) about something that happened,
  * except the person who did it. Used for payments, new members, join requests, staff attendance…
  */
-export async function notifyDesk(t: Tx, g: Pick<GymCtx, 'tenantId'> & { tenant: TenantDoc }, actorId: string | null, title: string, body: string, branchId: string | null, right?: Right) {
+export async function notifyDesk(t: Tx, g: Pick<GymCtx, 'tenantId'> & { tenant: TenantDoc }, actorId: string | null, title: string, body: string, branchId: string | null, right?: Right, go?: string) {
   const staff = await t.query<{ role: Role; active: boolean; branchIds: string[]; rights?: string[] }>(P.staffCol(g.tenantId), [['active', true]]);
   const first = g.tenant.branches[0]?.id ?? null;
   for (const s of staff) {
@@ -591,7 +597,7 @@ export async function notifyDesk(t: Tx, g: Pick<GymCtx, 'tenantId'> & { tenant: 
     const d = s.data;
     const owner = d.role === 'OWNER';
     const desk = d.role === 'FRONT_DESK' && !!right && cleanRights(d.rights).includes(right) && (!branchId || (d.branchIds[0] ?? first) === branchId);
-    if (owner || desk) await notify(t, s.id, g.tenantId, title, body, branchId);
+    if (owner || desk) await notify(t, s.id, g.tenantId, title, body, branchId, go);
   }
 }
 

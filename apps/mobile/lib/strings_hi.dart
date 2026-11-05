@@ -1403,4 +1403,10 @@ const hindi = <String, String>{
   "{n} check-ins": "{n} चेक-इन",
   "{n} times": "{n} बार",
   "{n} times today": "आज {n} बार",
+  "Every check-in, by day · Excel": "हर चेक-इन, दिन के हिसाब से · Excel",
+  "In gym now": "अभी जिम में",
+  "Members and staff · Excel": "मेंबर और स्टाफ़ · Excel",
+  "Members attendance": "मेंबर की हाज़िरी",
+  "Present days, month by month · Excel": "हाज़िर दिन, महीने के हिसाब से · Excel",
+  "Today {n} check-ins · {b} stopped": "आज {n} चेक-इन · {b} रोके गए",
 };

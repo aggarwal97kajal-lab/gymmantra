@@ -164,6 +164,7 @@ class GymQrScreen extends ConsumerStatefulWidget {
 
 class _GymQrState extends ConsumerState<GymQrScreen> {
   int tab = 0;
+  bool? appOn; // the switch flips at once; the server is told in the background
   final joinKey = GlobalKey();
   final checkinKey = GlobalKey();
   bool busy = false;
@@ -333,20 +334,22 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 child: SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  value: d['appCheckin'] != false,
-                  onChanged: !owner || busy
+                  value: appOn ?? d['appCheckin'] != false,
+                  onChanged: !owner
                       ? null
                       : (on) async {
+                          final before = appOn ?? d['appCheckin'] != false;
+                          setState(() => appOn = on); // instant
                           try {
                             await Api.instance.put('/gym/checkin-mode', {'on': on});
-                            ref.invalidate(gymQrProvider);
                           } catch (e) {
+                            if (mounted) setState(() => appOn = before); // put it back
                             if (context.mounted) toastError(context, e);
                           }
                         },
                   title: Text(context.t('Check-in from the app'), style: const TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: Text(
-                    d['appCheckin'] != false
+                    (appOn ?? d['appCheckin'] != false)
                         ? context.t('ON: members scan this QR in the gym to check in.')
                         : context.t('OFF: this branch uses its own entry system (punch-in, biometric, register). Members see "check in at the front desk".'),
                     style: TextStyle(color: context.c.mut, fontSize: 12),
@@ -354,7 +357,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              if (d['appCheckin'] != false) ...[
+              if (appOn ?? d['appCheckin'] != false) ...[
               poster(CheckinPoster(gym: name, qr: d['text'] as String), checkinKey),
               const SizedBox(height: 14),
               actions([
@@ -396,11 +399,11 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                   if (owner) TextButton(onPressed: busy ? null : setLocation, child: Text(context.t(d['locationSet'] == true ? 'Update' : 'Set'))),
                 ]),
               ),
-              if (owner && d['appCheckin'] != false) ...[
+              if (owner && (appOn ?? d['appCheckin'] != false)) ...[
                 const SizedBox(height: 6),
                 TextButton.icon(onPressed: rotate, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(context.t('Make a new check-in QR'))),
               ],
-              if (d['appCheckin'] == false) Padding(padding: const EdgeInsets.only(top: 8), child: Muted(context.t('The gym location is still used for staff and trainer attendance.'), size: 12)),
+              if (!(appOn ?? d['appCheckin'] != false)) Padding(padding: const EdgeInsets.only(top: 8), child: Muted(context.t('The gym location is still used for staff and trainer attendance.'), size: 12)),
             ]),
           ),
       ]),

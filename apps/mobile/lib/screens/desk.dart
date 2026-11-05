@@ -446,6 +446,51 @@ class _StaffEditState extends ConsumerState<StaffEditScreen> {
 
 // ============================================================ attendance (owner / front desk)
 
+/// One "Attendance" page (board 77): Members, Staff & trainers (owner), My attendance (staff).
+class AttendanceHubScreen extends ConsumerWidget {
+  const AttendanceHubScreen({super.key, this.tab = false});
+  final bool tab;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final s = ref.watch(sessionProvider);
+    final owner = s.myGym?['role'] == 'OWNER';
+    final today = ref.watch(attendanceDayProvider('')).valueOrNull;
+    Widget card(IconData icon, Color tint, String title, String sub, VoidCallback onTap) => Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Panel(
+            onTap: onTap,
+            padding: const EdgeInsets.all(16),
+            child: Row(children: [
+              Container(width: 48, height: 48, decoration: BoxDecoration(color: tint.withAlpha(36), borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: tint)),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                  if (sub.isNotEmpty) Muted(sub, size: 12.5),
+                ]),
+              ),
+              Icon(Icons.chevron_right_rounded, color: context.c.mut),
+            ]),
+          ),
+        );
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Attendance')), automaticallyImplyLeading: !tab),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 24), children: [
+        if (s.can('checkin'))
+          card(
+            Icons.groups_rounded,
+            C.orange,
+            context.t('Members'),
+            today is Map ? context.t('Today {n} check-ins · {b} stopped', {'n': today['checkins'] ?? 0, 'b': today['blocked'] ?? 0}) : context.t('Every check-in, by day · Excel'),
+            () => context.push('/o/attendance'),
+          ),
+        if (owner) card(Icons.badge_rounded, C.blue, context.t('Staff & trainers'), context.t('Present days, month by month · Excel'), () => context.push('/o/staff-attendance')),
+        if (s.isStaffDesk) card(Icons.event_available_rounded, C.ok, context.t('My attendance'), context.t('Mark Present at the gym every day'), () => context.push('/o/my-attendance')),
+      ]),
+    );
+  }
+}
+
 /// Check-ins of one day at the branch being looked at (every check-in, newest first).
 final attendanceDayProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, day) => branchGet(ref, day.isEmpty ? '/attendance/today' : '/attendance/today?day=$day'));
 
@@ -483,9 +528,9 @@ class _DeskAttendanceState extends ConsumerState<DeskAttendanceScreen> {
     final isToday = day.isEmpty || day == today;
     return Scaffold(
       appBar: AppBar(
-        title: Text(context.t('Attendance')),
+        title: Text(context.t('Members attendance')),
         automaticallyImplyLeading: !widget.tab,
-        actions: [IconButton(tooltip: context.t('Download Excel'), icon: const Icon(Icons.download_rounded), onPressed: () => attendanceExcelSheet(context, ref))],
+        actions: [IconButton(tooltip: context.t('Download Excel'), icon: const Icon(Icons.download_rounded), onPressed: () => attendanceExcelSheet(context, ref, kind: 'members'))],
       ),
       body: RefreshIndicator(
         color: context.c.primary,
@@ -503,9 +548,9 @@ class _DeskAttendanceState extends ConsumerState<DeskAttendanceScreen> {
             }
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
               Row(children: [
-                stat('${d['checkins'] ?? 0}', isToday ? context.t('Check-ins today') : context.t('Check-ins'), C.ok),
+                stat('${d['checkins'] ?? 0}', context.t('Check-ins'), C.ok),
                 const SizedBox(width: 8),
-                stat('${isToday ? d['inGymNow'] ?? 0 : times.length}', isToday ? context.t('In the gym now') : context.t('Members came'), context.c.primary),
+                stat('${isToday ? d['inGymNow'] ?? 0 : times.length}', isToday ? context.t('In gym now') : context.t('Members came'), context.c.primary),
                 const SizedBox(width: 8),
                 stat('${d['blocked'] ?? 0}', context.t('Stopped'), C.red),
               ]),
@@ -520,19 +565,6 @@ class _DeskAttendanceState extends ConsumerState<DeskAttendanceScreen> {
                   icon: const Icon(Icons.edit_note_rounded),
                   label: Text(context.t('Manual entry')),
                 ),
-              if (s.isStaffDesk) ...[
-                const SizedBox(height: 10),
-                Panel(
-                  onTap: () => context.push('/o/my-attendance'),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  child: Row(children: [
-                    const IconTile(Icons.event_available_rounded, size: 36),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(context.t('My attendance'), style: const TextStyle(fontWeight: FontWeight.w700))),
-                    Icon(Icons.chevron_right_rounded, color: context.c.mut),
-                  ]),
-                ),
-              ],
               const SizedBox(height: 12),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -588,11 +620,11 @@ class _DeskAttendanceState extends ConsumerState<DeskAttendanceScreen> {
 }
 
 /// Excel (CSV, opens in Excel / Google Sheets) of check-ins: staff get members; the owner members or staff.
-Future<void> attendanceExcelSheet(BuildContext context, WidgetRef ref) async {
-  final owner = ref.read(sessionProvider).myGym?['role'] == 'OWNER';
+Future<void> attendanceExcelSheet(BuildContext context, WidgetRef ref, {String? kind}) async {
+  final owner = kind == null && ref.read(sessionProvider).myGym?['role'] == 'OWNER'; // choose only when not fixed
   String ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   final now = DateTime.now();
-  var kind = 'members';
+  var kindNow = kind ?? 'members';
   var range = 7;
   DateTimeRange? custom;
   var busy = false;
@@ -609,8 +641,8 @@ Future<void> attendanceExcelSheet(BuildContext context, WidgetRef ref) async {
             const SizedBox(height: 12),
             if (owner)
               Wrap(spacing: 8, children: [
-                ChoiceChip(label: Text(ctx.t('Members')), selected: kind == 'members', onSelected: (_) => setState(() => kind = 'members')),
-                ChoiceChip(label: Text(ctx.t('Staff & trainers')), selected: kind == 'staff', onSelected: (_) => setState(() => kind = 'staff')),
+                ChoiceChip(label: Text(ctx.t('Members')), selected: kindNow == 'members', onSelected: (_) => setState(() => kindNow = 'members')),
+                ChoiceChip(label: Text(ctx.t('Staff & trainers')), selected: kindNow == 'staff', onSelected: (_) => setState(() => kindNow = 'staff')),
               ]),
             const SizedBox(height: 8),
             Wrap(spacing: 8, runSpacing: 6, children: [
@@ -639,10 +671,10 @@ Future<void> attendanceExcelSheet(BuildContext context, WidgetRef ref) async {
                       final from = custom?.start ?? (range == 30 ? DateTime(now.year, now.month, 1) : now.subtract(Duration(days: range - 1)));
                       final to = custom?.end ?? now;
                       try {
-                        final b = await Api.instance.bytes('/api/v1/attendance/export?kind=$kind&from=${ymd(from)}&to=${ymd(to)}');
+                        final b = await Api.instance.bytes('/api/v1/attendance/export?kind=$kindNow&from=${ymd(from)}&to=${ymd(to)}');
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
-                        if (context.mounted) await saveAndOffer(context, '${kind == 'staff' ? 'staff' : 'members'}-attendance-${ymd(from)}-to-${ymd(to)}.csv', b, 'text/csv');
+                        if (context.mounted) await saveAndOffer(context, '${kindNow == 'staff' ? 'staff' : 'members'}-attendance-${ymd(from)}-to-${ymd(to)}.csv', b, 'text/csv');
                       } catch (e) {
                         if (ctx.mounted) toastError(ctx, e);
                         setState(() => busy = false);
@@ -1036,7 +1068,10 @@ class _StaffAttendanceState extends ConsumerState<StaffAttendanceScreen> {
     final rows = ((data?['rows'] as List?) ?? const []).cast<Map>();
     final soFar = (data?['daysSoFar'] as int?) ?? 0;
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Staff attendance')), actions: [IconButton(onPressed: data == null ? null : share, icon: const Icon(Icons.share_rounded))]),
+      appBar: AppBar(title: Text(context.t('Staff attendance')), actions: [
+        IconButton(tooltip: context.t('Download Excel'), onPressed: () => attendanceExcelSheet(context, ref, kind: 'staff'), icon: const Icon(Icons.download_rounded)),
+        IconButton(onPressed: data == null ? null : share, icon: const Icon(Icons.share_rounded)),
+      ]),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
         Row(children: [
           IconButton(onPressed: () => setState(() {

@@ -393,7 +393,7 @@ export function memberRoutes(app: App) {
         return r.m;
       });
       if (g.role !== 'OWNER') {
-        await c.var.deps.store.tx(async (t) => notifyDesk(t, g, u.id, 'New member added', `${m.name} (${m.memberCode}) was added by ${u.name}`, branchOf(g.tenant, m.branchId)));
+        await c.var.deps.store.tx(async (t) => notifyDesk(t, g, u.id, 'New member added', `${m.name} (${m.memberCode}) was added by ${u.name}`, branchOf(g.tenant, m.branchId), undefined, `member:${m.id}`));
       }
       return c.json({ ...m, accountMade: !!made }, 201);
     } catch (e) {
@@ -800,7 +800,7 @@ export function memberRoutes(app: App) {
       const who = roster.members[s.memberId];
       const bid = branchOf(g.tenant, who?.branchId);
       if (who?.userId) await notify(t, who.userId, g.tenantId, 'Payment received', `${g.tenant.name} received ${inr(amount)} for your ${s.planName} membership. Thank you!${due - amount > 0 ? ` ${inr(due - amount)} is still due.` : ''}`);
-      await notifyDesk(t, g, u.id, 'Payment received', `${who?.name ?? 'A member'} paid ${inr(amount)} (${mode}) · entered by ${u.name}`, bid);
+      await notifyDesk(t, g, u.id, 'Payment received', `${who?.name ?? 'A member'} paid ${inr(amount)} (${mode}) · entered by ${u.name}`, bid, undefined, `member:${s.memberId}`);
       return { payment: p, due: due - amount };
     });
     return c.json(out, 201);
