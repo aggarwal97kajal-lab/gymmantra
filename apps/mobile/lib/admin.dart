@@ -649,7 +649,7 @@ class AdminBill extends ConsumerWidget {
     final v = ref.watch(_bill('$gym/bills/$id'));
     return Scaffold(
       backgroundColor: const Color(0xFFE9ECF1),
-      appBar: AppBar(backgroundColor: const Color(0xFFE9ECF1), foregroundColor: const Color(0xFF0F172A), title: Text(context.t('Receipt'))),
+      appBar: AppBar(backgroundColor: const Color(0xFFE9ECF1), foregroundColor: const Color(0xFF0F172A), iconTheme: const IconThemeData(color: Color(0xFF0F172A)), title: Text(context.t('Receipt'), style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.w800, fontSize: 20))),
       body: AsyncBody(value: v, builder: (b) => ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 24), children: [ReceiptPaper(bill: b as Map)])),
     );
   }

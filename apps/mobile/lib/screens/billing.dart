@@ -921,7 +921,10 @@ class _BillScreenState extends ConsumerState<BillScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFFE9ECF1),
         foregroundColor: const Color(0xFF0F172A),
-        title: Text(context.t('Receipt')),
+        // The receipt page is always light (paper), so the title stays dark in dark mode too.
+        title: Text(context.t('Receipt'), style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.w800, fontSize: 20)),
+        iconTheme: const IconThemeData(color: Color(0xFF0F172A)),
+        actionsIconTheme: const IconThemeData(color: Color(0xFF0F172A)),
         actions: [
           IconButton(
             tooltip: context.t('Copy details'),
