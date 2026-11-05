@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,8 @@ import '../ui.dart';
 import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
 import 'branch.dart';
+import 'banner.dart' show LogoPickerRow, pickLogo, uploadLogo;
+import 'billing.dart' show Address, AddressFields;
 import 'reports_kit.dart';
 
 // Owner tools that used to be on the website only: reports, membership plans and gym settings.
@@ -753,7 +756,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
   }
 
   Future<void> addBranch(Map g) async {
-    final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => const _BranchSheet());
+    final ok = await openBranchForm(context, gym: g);
     if (ok == true) ref.invalidate(gymProvider);
   }
 
@@ -802,7 +805,7 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                     IconButton(
                       icon: const Icon(Icons.edit_rounded),
                       onPressed: () async {
-                        final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => _BranchSheet(edit: cur));
+                        final ok = await openBranchForm(context, gym: g, edit: cur);
                         if (ok == true) ref.invalidate(gymProvider);
                       },
                     ),
@@ -813,6 +816,34 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
             SectionTitle(context.t('Gym profile')),
             Panel(
               child: Column(children: [
+                LogoPickerRow(
+                  name: (g['name'] as String?) ?? 'G',
+                  title: context.t('Gym logo'),
+                  hint: context.t('Shown to everyone in your gym'),
+                  url: g['logoUrl'] as String?,
+                  onPick: () async {
+                    if (!owner) return;
+                    final b = await pickLogo(context);
+                    if (b == null) return;
+                    try {
+                      await uploadLogo(b);
+                      ref.invalidate(gymProvider);
+                      ref.read(sessionProvider).refreshUser().catchError((_) {});
+                    } catch (e) {
+                      if (context.mounted) toastError(context, e);
+                    }
+                  },
+                  onRemove: owner
+                      ? () async {
+                          try {
+                            await Api.instance.delete('/gym/logo');
+                            ref.invalidate(gymProvider);
+                          } catch (e) {
+                            if (context.mounted) toastError(context, e);
+                          }
+                        }
+                      : null,
+                ),
                 LabeledField(label: context.t('Gym name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
                 PhoneField(label: context.t('Gym phone'), controller: phone),
                 PhoneField(label: context.t('Gym WhatsApp number'), controller: wa),
@@ -953,61 +984,120 @@ extension on String {
   String ifEmpty(String other) => isEmpty ? other : this;
 }
 
-class _BranchSheet extends StatefulWidget {
-  const _BranchSheet({this.edit});
+/// Add or edit a branch: logo, name, full address (state, city, PIN), GST number, timings.
+/// The main (first) branch shows the gym's name and saves its address / logo as the gym's.
+Future<bool?> openBranchForm(BuildContext context, {required Map gym, Map? edit}) =>
+    Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => _BranchForm(gym: gym, edit: edit)));
+
+class _BranchForm extends StatefulWidget {
+  const _BranchForm({required this.gym, this.edit});
+  final Map gym;
   /// A branch to change (null = add a new one).
   final Map? edit;
   @override
-  State<_BranchSheet> createState() => _BranchSheetState();
+  State<_BranchForm> createState() => _BranchFormState();
 }
 
-class _BranchSheetState extends State<_BranchSheet> {
+class _BranchFormState extends State<_BranchForm> {
+  late final List<Map> branches = ((widget.gym['branches'] as List?) ?? const []).cast<Map>();
+  late final bool isMain = widget.edit != null && branches.isNotEmpty && branches.first['id'] == widget.edit!['id'];
   late final name = TextEditingController(text: widget.edit?['name'] as String? ?? '');
-  late final address = TextEditingController(text: widget.edit?['address'] as String? ?? '');
   late final hours = TextEditingController(text: widget.edit?['hours'] as String? ?? '');
+  late final Address place = () {
+    final src = isMain ? widget.gym : (widget.edit ?? const {});
+    return Address()
+      ..line = (src['addressLine'] as String?) ?? (widget.edit?['addressLine'] == null && !isMain ? ((widget.edit?['address'] as String?) ?? '') : '')
+      ..state = src['state'] as String?
+      ..city = src['city'] as String?
+      ..pin = (src['pincode'] as String?) ?? ''
+      ..gstin = (src['gstin'] as String?) ?? '';
+  }();
+  late String? logoUrl = isMain ? widget.gym['logoUrl'] as String? : widget.edit?['logoUrl'] as String?;
+  Uint8List? logo; // picked, not uploaded yet
+  bool removeLogo = false;
   bool busy = false;
   String? error;
+
+  Future<void> save() async {
+    final need = context.t('Fill the address, state, city and PIN code');
+    final p = place.toJson();
+    if (place.line.trim().length < 3 || place.state == null || place.city == null || place.pin.trim().length != 6) {
+      setState(() => error = need);
+      return;
+    }
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      String? id = widget.edit?['id'] as String?;
+      final body = {
+        'name': isMain ? (widget.edit!['name'] as String) : name.text.trim(),
+        'hours': hours.text.trim().isEmpty ? null : hours.text.trim(),
+        if (!isMain) ...p,
+      };
+      if (id == null) {
+        final r = await Api.instance.post('/gym/branches', body);
+        id = (r as Map)['id'] as String;
+      } else {
+        await Api.instance.patch('/gym/branches/$id', body);
+      }
+      if (isMain) await Api.instance.patch('/gym', p);
+      final branchId = isMain ? null : id;
+      if (logo != null) {
+        await uploadLogo(logo!, branchId: branchId);
+      } else if (removeLogo) {
+        await Api.instance.delete(branchId == null ? '/gym/logo' : '/gym/logo?branchId=$branchId');
+      }
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: ListView(shrinkWrap: true, padding: const EdgeInsets.fromLTRB(20, 8, 20, 24), children: [
-          Text(context.t(widget.edit == null ? 'Add branch' : 'Edit branch'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 14),
-          LabeledField(label: context.t('Branch name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
-          LabeledField(label: context.t('Address'), controller: address, icon: Icons.place_rounded),
-          LabeledField(label: context.t('Timings'), controller: hours, icon: Icons.schedule_rounded, hint: '6 AM – 10 PM'),
-          ErrorText(error),
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: busy
-                ? null
-                : () async {
-                    setState(() {
-                      busy = true;
-                      error = null;
-                    });
-                    try {
-                      final body = {
-                        'name': name.text.trim(),
-                        'address': address.text.trim().isEmpty ? null : address.text.trim(),
-                        'hours': hours.text.trim().isEmpty ? null : hours.text.trim(),
-                      };
-                      if (widget.edit == null) {
-                        await Api.instance.post('/gym/branches', body);
-                      } else {
-                        await Api.instance.patch('/gym/branches/${widget.edit!['id']}', body);
-                      }
-                      if (context.mounted) Navigator.pop(context, true);
-                    } catch (e) {
-                      if (mounted) setState(() => error = e.toString());
-                    } finally {
-                      if (mounted) setState(() => busy = false);
-                    }
-                  },
-            child: Text(context.t(widget.edit == null ? 'Add branch' : 'Save changes')),
-          ),
-        ]),
-      );
+  Widget build(BuildContext context) {
+    final shownName = isMain ? (widget.gym['name'] as String? ?? '') : (name.text.isEmpty ? '?' : name.text);
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t(widget.edit == null ? 'Add branch' : 'Edit branch'))),
+      body: ListView(padding: const EdgeInsets.fromLTRB(18, 8, 18, 32), children: [
+        LogoPickerRow(
+          name: shownName,
+          title: context.t(isMain ? 'Gym logo' : 'Branch logo'),
+          hint: context.t(isMain ? 'Shown to everyone in your gym' : 'Without one, the gym logo is shown'),
+          url: removeLogo ? null : logoUrl,
+          local: logo,
+          onPick: () async {
+            final b = await pickLogo(context);
+            if (b != null) setState(() {
+              logo = b;
+              removeLogo = false;
+            });
+          },
+          onRemove: () => setState(() {
+            logo = null;
+            removeLogo = true;
+          }),
+        ),
+        if (isMain)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Text(shownName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          )
+        else
+          LabeledField(label: '${context.t('Branch name')} *', controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
+        AddressFields(value: place),
+        const SizedBox(height: 12),
+        LabeledField(label: context.t('Timings'), controller: hours, icon: Icons.schedule_rounded, hint: '6 AM – 10 PM'),
+        Muted(context.t('GST number is optional. Each branch can have its own; it must start with the state code (Delhi = 07).'), size: 12),
+        ErrorText(error),
+        const SizedBox(height: 14),
+        FilledButton(onPressed: busy ? null : save, child: Text(busy ? context.t('Saving…') : context.t(widget.edit == null ? 'Add branch' : 'Save changes'))),
+      ]),
+    );
+  }
 }
 
 // ============================================================ notices
@@ -1411,7 +1501,9 @@ class BranchesScreen extends ConsumerWidget {
       floatingActionButton: owner
           ? FloatingActionButton.extended(
               onPressed: () async {
-                final ok = await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => const _BranchSheet());
+                final g = ref.read(gymProvider).valueOrNull as Map?;
+                if (g == null) return;
+                final ok = await openBranchForm(context, gym: g);
                 if (ok == true) ref.invalidate(gymProvider);
               },
               icon: const Icon(Icons.add_rounded),
@@ -1436,49 +1528,53 @@ class BranchesScreen extends ConsumerWidget {
                   child: Panel(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       Row(children: [
+                        // The main branch shows the gym's name and logo; other branches their own (or the gym logo).
+                        GymLogo(name: i == 0 ? '${g['name']}' : '${b['name']}', url: (i == 0 ? g['logoUrl'] : b['logoUrl'] ?? g['logoUrl']) as String?, size: 46),
+                        const SizedBox(width: 12),
                         Expanded(
-                          child: Text.rich(TextSpan(children: [
-                            TextSpan(text: b['name'] as String, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                            if (i == 0) TextSpan(text: '  ${context.t('Main')}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w800, fontSize: 12)),
-                          ])),
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text.rich(
+                              TextSpan(children: [
+                                TextSpan(text: i == 0 ? '${g['name']}' : '${b['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                                if (i == 0 && branches.length > 1) TextSpan(text: '  ${context.t('Main')}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w700, fontSize: 11.5)),
+                              ]),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (i == 0 && (b['address'] as String?)?.isNotEmpty != true && (g['address'] as String?)?.isNotEmpty == true)
+                              Muted(g['address'] as String, size: 12.5)
+                            else if ((b['address'] as String?)?.isNotEmpty == true)
+                              Muted(b['address'] as String, size: 12.5),
+                            if ((b['hours'] as String?)?.isNotEmpty == true) Muted(b['hours'] as String, size: 12.5),
+                            if (((i == 0 ? g['gstin'] : b['gstin']) as String?)?.isNotEmpty == true) Muted('GSTIN ${i == 0 ? g['gstin'] : b['gstin']}', size: 12),
+                          ]),
                         ),
-                        Text('${b['code'] ?? '—'}', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, letterSpacing: 1.4)),
+                        const SizedBox(width: 8),
+                        Text('${b['code'] ?? '—'}', style: TextStyle(color: p.primary, fontWeight: FontWeight.w800, letterSpacing: 1.2, fontSize: 13)),
                       ]),
-                      const SizedBox(height: 4),
-                      if (i == 0 && (g['address'] as String?)?.isNotEmpty == true && (b['address'] as String?)?.isNotEmpty != true)
-                        Muted(g['address'] as String, size: 12.5)
-                      else if ((b['address'] as String?)?.isNotEmpty == true)
-                        Muted(b['address'] as String, size: 12.5),
-                      if ((b['hours'] as String?)?.isNotEmpty == true) Muted(b['hours'] as String, size: 12.5),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 12),
                       Row(children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => showBranchQr(context, ref, b),
-                            icon: const Icon(Icons.qr_code_2_rounded, size: 18),
-                            label: Text(context.t('QR')),
-                          ),
-                        ),
+                        Expanded(child: _SmallBtn(icon: Icons.qr_code_2_rounded, label: context.t('QR'), onTap: () => showBranchQr(context, ref, b))),
                         if (owner) ...[
                           const SizedBox(width: 8),
                           Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final ok = i == 0
-                                    ? await context.push<bool>('/o/address')
-                                    : await showModalBottomSheet<bool>(context: context, isScrollControlled: true, useSafeArea: true, builder: (_) => _BranchSheet(edit: b));
-                                if (ok == true || i == 0) ref.invalidate(gymProvider);
+                            child: _SmallBtn(
+                              icon: Icons.edit_rounded,
+                              label: context.t('Edit'),
+                              onTap: () async {
+                                final ok = await openBranchForm(context, gym: g, edit: b);
+                                if (ok == true) ref.invalidate(gymProvider);
                               },
-                              icon: const Icon(Icons.edit_rounded, size: 18),
-                              label: Text(context.t('Edit')),
                             ),
                           ),
                           if (branches.length > 1 && i > 0) ...[
                             const SizedBox(width: 8),
                             Expanded(
-                              child: OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(foregroundColor: C.red),
-                                onPressed: () async {
+                              child: _SmallBtn(
+                                icon: Icons.delete_outline_rounded,
+                                label: context.t('Delete'),
+                                color: C.red,
+                                onTap: () async {
                                   final yes = await confirmDelete(context, context.t('Delete {b}?', {'b': b['name']}));
                                   if (!yes) return;
                                   try {
@@ -1489,8 +1585,6 @@ class BranchesScreen extends ConsumerWidget {
                                     if (context.mounted) toastError(context, e);
                                   }
                                 },
-                                icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                                label: Text(context.t('Delete')),
                               ),
                             ),
                           ],
@@ -1505,4 +1599,33 @@ class BranchesScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+
+/// Small outlined button whose label always stays on one line (shrinks instead of wrapping).
+class _SmallBtn extends StatelessWidget {
+  const _SmallBtn({required this.icon, required this.label, required this.onTap, this.color});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color? color;
+  @override
+  Widget build(BuildContext context) => OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color ?? context.c.fg,
+          side: color == null ? null : BorderSide(color: color!.withAlpha(110)),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          minimumSize: const Size(0, 42),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
+        onPressed: onTap,
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 17),
+            const SizedBox(width: 5),
+            Text(label, maxLines: 1, softWrap: false, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+          ]),
+        ),
+      );
 }

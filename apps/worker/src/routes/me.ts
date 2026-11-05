@@ -1,7 +1,7 @@
 import { superLater } from '../lib/superpush';
 import { gymTopic, pushTokensPath, topicName, type PushTokensDoc } from '../lib/push';
 import { personDetails } from '../lib/person';
-import { Broadcast, broadcastRolesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { Broadcast, broadcastRolesOf, pushStatesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -69,7 +69,7 @@ export function meRoutes(app: App) {
           memberCode: e.memberCode,
           gym: (() => {
             const f = gymFace(tn, e.branchId);
-            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: tn.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED' };
+            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: f.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED' };
           })(),
           ...(() => {
             const bid = branchOf(tn, e.branchId);
@@ -195,7 +195,7 @@ export function meRoutes(app: App) {
     return c.json({
       gym: (() => {
         const f = gymFace(tenant, m.branchId);
-        return { id: tenantId, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, phone: tenant.phone, whatsappNumber: tenant.whatsappNumber, address: f.address };
+        return { id: tenantId, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, phone: tenant.phone, whatsappNumber: tenant.whatsappNumber, address: f.address, logoUrl: f.logoUrl };
       })(),
       memberCode: m.memberCode,
       status: st.status,
@@ -484,9 +484,10 @@ export function meRoutes(app: App) {
     const bc = await store.get<{ items: Broadcast[] }>(P.broadcasts);
     const mine = broadcastRolesOf(u);
     const since = u.createdAt ?? '';
+    const states = (bc?.items ?? []).some((x) => x.state) ? await pushStatesOf(store, u) : [];
     const readAt = doc?.noticesReadAt ?? null;
     const fromGm = (bc?.items ?? [])
-      .filter((x) => x.createdAt >= since && (x.roles.includes('ALL') || x.roles.some((r) => mine.includes(r))) && (!x.state || x.state === u.state))
+      .filter((x) => x.createdAt >= since && (x.roles.includes('ALL') || x.roles.some((r) => mine.includes(r))) && (!x.state || states.includes(x.state)))
       .map((x) => ({ id: `bc_${x.id}`, tenantId: null, title: x.title, body: x.body, createdAt: x.createdAt, readAt: readAt && readAt >= x.createdAt ? readAt : null, fromGymMantra: true }));
     // Gym owners and staff see the notes of the branch they picked in the app (x-branch-id).
     const branch = c.req.header('x-branch-id');
@@ -522,7 +523,7 @@ export function meRoutes(app: App) {
     const { store } = c.var.deps;
     const topics = new Set<string>(['all']);
     for (const r of broadcastRolesOf(u)) topics.add(`role_${r}`);
-    if (u.state) topics.add(topicName(`state_${u.state}`));
+    for (const st of await pushStatesOf(store, u)) topics.add(topicName(`state_${st}`));
     const memberGyms = Object.entries(u.memberships ?? {});
     const trainerGyms = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active && s.role === 'TRAINER').map(([t]) => t);
     const tenants = await store.getMany<TenantDoc>([...memberGyms.map(([t]) => P.tenant(t)), ...trainerGyms.map((t) => P.tenant(t))]);

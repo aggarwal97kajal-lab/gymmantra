@@ -13,7 +13,7 @@ import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
-import 'auth.dart' show PhoneField;
+import 'auth.dart' show LabeledField, PhoneField;
 import 'billing.dart' show IndiaState, loadIndia, SearchList;
 
 class _Ratio4x5 implements CropAspectRatioPresetData {
@@ -667,63 +667,67 @@ class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
     final u0 = ref.watch(sessionProvider).user ?? {};
     // Everyone with a password types the old one first. Only a Google-only account (no password yet) skips it.
     final hasPw = u0['hasPassword'] != false || u0['hasGoogle'] != true;
-    Widget box(TextEditingController c, String label) => Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: TextField(
-            controller: c,
-            obscureText: hide,
-            decoration: InputDecoration(
-              labelText: label,
-              prefixIcon: const Icon(Icons.lock_outline_rounded),
-              suffixIcon: IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined), onPressed: () => setState(() => hide = !hide)),
-            ),
-          ),
-        );
+    final eye = IconButton(icon: Icon(hide ? Icons.visibility_outlined : Icons.visibility_off_outlined, size: 20), onPressed: () => setState(() => hide = !hide));
+    Future<void> forgot() async {
+      final id = (u0['email'] ?? u0['phone'] ?? '').toString();
+      try {
+        final r = await Api.instance.post('/auth/forgot', {'identifier': id});
+        if (context.mounted) toast(context, context.t('Reset link sent to {to}', {'to': '${r['to'] ?? id}'}), kind: DripKind.ok);
+      } catch (e) {
+        if (context.mounted) toastError(context, e);
+      }
+    }
+
+    Future<void> save() async {
+      final mismatch = context.t('Passwords do not match');
+      final short = context.t('Password (at least 8 characters)');
+      final needCur = context.t('Enter your current password');
+      final done = context.t('Password updated');
+      if (hasPw && cur.text.isEmpty) return setState(() => error = needCur);
+      if (next.text.length < 8) return setState(() => error = short);
+      if (next.text != again.text) return setState(() => error = mismatch);
+      setState(() {
+        busy = true;
+        error = null;
+      });
+      try {
+        await Api.instance.post('/auth/change-password', {if (hasPw) 'current': cur.text, 'next': next.text});
+        await ref.read(sessionProvider).refreshUser().catchError((_) {});
+        if (context.mounted) {
+          toast(context, done, kind: DripKind.ok);
+          context.pop();
+        }
+      } catch (e) {
+        setState(() => error = e.toString());
+      } finally {
+        if (mounted) setState(() => busy = false);
+      }
+    }
+
     return Scaffold(
       appBar: AppBar(title: Text(hasPw ? context.t('Change password') : context.t('Set a password'))),
-      body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-        if (hasPw) box(cur, context.t('Current password')),
-        box(next, context.t('New password (8+ characters)')),
-        box(again, context.t('New password again')),
+      body: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 28), children: [
+        if (!hasPw)
+          Card(
+            margin: const EdgeInsets.only(bottom: 14),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(context.t('Your account was made with Google and has no password yet. Set one to also log in with email or mobile and password.'), style: const TextStyle(fontSize: 13, height: 1.4)),
+            ),
+          ),
+        if (hasPw) ...[
+          LabeledField(label: '${context.t('Current password')} *', controller: cur, icon: Icons.lock_outline_rounded, obscure: hide, suffix: eye, action: TextInputAction.next),
+          Align(alignment: Alignment.centerRight, child: TextButton(onPressed: forgot, child: Text(context.t('Forgot current password?')))),
+        ],
+        LabeledField(label: '${context.t('New password (8+ characters)')} *', controller: next, icon: Icons.lock_reset_rounded, obscure: hide, suffix: eye, action: TextInputAction.next),
+        LabeledField(label: '${context.t('Re-enter new password')} *', controller: again, icon: Icons.lock_reset_rounded, obscure: hide, onSubmitted: (_) => busy ? null : save()),
         ErrorText(error),
         const SizedBox(height: 12),
-        FilledButton(
-          onPressed: busy
-              ? null
-              : () async {
-                  final mismatch = context.t('Passwords do not match');
-                  final short = context.t('Password (at least 8 characters)');
-                  final done = context.t('Password updated');
-                  if (next.text.length < 8) {
-                    setState(() => error = short);
-                    return;
-                  }
-                  if (next.text != again.text) {
-                    setState(() => error = mismatch);
-                    return;
-                  }
-                  setState(() {
-                    busy = true;
-                    error = null;
-                  });
-                  try {
-                    await Api.instance.post('/auth/change-password', {if (hasPw) 'current': cur.text, 'next': next.text});
-                    await ref.read(sessionProvider).refreshUser().catchError((_) {});
-                    if (context.mounted) {
-                      toast(context, done);
-                      context.pop();
-                    }
-                  } catch (e) {
-                    setState(() => error = e.toString());
-                  } finally {
-                    if (mounted) setState(() => busy = false);
-                  }
-                },
-          child: Text(context.t('Save')),
-        ),
+        FilledButton(onPressed: busy ? null : save, child: Text(hasPw ? context.t('Change password') : context.t('Set password'))),
       ]),
     );
   }
+}
 }
 
 

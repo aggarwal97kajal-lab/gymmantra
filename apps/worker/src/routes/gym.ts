@@ -1,4 +1,5 @@
 import { superLater } from '../lib/superpush';
+import { readLogo, logoUrlFor } from './logos';
 import { App, audit, authenticate, Branch, branchCode, cleanRights, gymOf, isTrainer, notify, P, RIGHT_PRESETS, RIGHTS, Role, Roster, TenantDoc, UserDoc } from '../core';
 import { personDetails } from '../lib/person';
 import { addMonths, todayIST } from '../lib/dates';
@@ -87,7 +88,7 @@ function prefixFrom(name: string) {
 /** Gym address: line, state (from the list), city, PIN that fits the state, optional GSTIN. */
 function readAddress(b: Record<string, unknown>, required: boolean) {
   if (!required && b.state === undefined && b.city === undefined && b.pincode === undefined && b.addressLine === undefined) return null;
-  const addressLine = str(b, 'addressLine', { min: 3, max: 200, label: 'the gym address' });
+  const addressLine = str(b, 'addressLine', { min: 3, max: 200, label: 'the address' });
   const state = str(b, 'state', { label: 'the state' });
   const st = stateByName(state);
   if (!st) throw bad('Choose the state from the list');
@@ -121,6 +122,7 @@ export function gymRoutes(app: App) {
     const address = [place.addressLine, place.city, place.state, place.pincode].join(', ');
     const phone = phoneOrNull(optStr(b, 'phone'), 'gym phone number') ?? null;
     const wa = phoneOrNull(optStr(b, 'whatsappNumber'), 'WhatsApp number') ?? phone;
+    const logo = b.logo && typeof b.logo === 'object' ? readLogo(b.logo as Record<string, unknown>) : null;
     const settings = await store.get<{ trialMonths: number }>(P.platform);
     const code = await uniqueGymCode(store, name);
     const id = uuid();
@@ -128,7 +130,7 @@ export function gymRoutes(app: App) {
     const tenant: TenantDoc = {
       name,
       gymCode: code,
-      logoUrl: null,
+      logoUrl: logo ? logoUrlFor(id, 'gym') : null,
       phone,
       address,
       whatsappNumber: wa,
@@ -151,6 +153,7 @@ export function gymRoutes(app: App) {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       t.create(P.gymCode(code), { tenantId: id });
       t.create(P.tenant(id), tenant);
+      if (logo) t.set(P.logo(id, 'gym'), { ...logo, at: nowIso() });
       t.set(P.roster(id), { members: {} });
       t.set(P.staff(id, u.id), { userId: u.id, role: 'OWNER', branchIds: [branch.id], active: true, createdAt: nowIso() });
       t.set(P.user(u.id), { ...cur, appRole: 'OWNER', staffOf: { ...cur.staffOf, [id]: { role: 'OWNER', branchIds: [branch.id], active: true } } });
@@ -208,7 +211,17 @@ export function gymRoutes(app: App) {
     const name = str(b, 'name', { min: 2, max: 60, label: 'the branch name' });
     // Every branch has its own join code (the first branch keeps the gym's old code).
     const code = await uniqueGymCode(c.var.deps.store, name);
-    const branch: Branch = { id: uuid(), name, address: optStr(b, 'address', { max: 300 }) ?? null, hours: optStr(b, 'hours', { max: 120 }) ?? null, code, createdAt: nowIso() };
+    const place = readAddress(b, false);
+    const branch: Branch = {
+      id: uuid(),
+      name,
+      address: place ? [place.addressLine, place.city, place.state, place.pincode].join(', ') : optStr(b, 'address', { max: 300 }) ?? null,
+      hours: optStr(b, 'hours', { max: 120 }) ?? null,
+      code,
+      createdAt: nowIso(),
+      ...(place ?? {}),
+      logoUrl: null,
+    };
     const limits = await gymLimits(c.var.deps.store, g.tenant);
     await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
@@ -247,7 +260,14 @@ export function gymRoutes(app: App) {
       const cur = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
       const before = cur.branches.find((x) => x.id === id);
       if (!before) throw notFound('Branch not found');
-      const after = { ...before, name: str(b, 'name', { min: 2, max: 60 }), address: optStr(b, 'address', { max: 300 }) ?? null, hours: optStr(b, 'hours', { max: 120 }) ?? null };
+      const place = readAddress(b, false);
+      const after: Branch = {
+        ...before,
+        name: str(b, 'name', { min: 2, max: 60 }),
+        address: place ? [place.addressLine, place.city, place.state, place.pincode].join(', ') : optStr(b, 'address', { max: 300 }) ?? null,
+        hours: optStr(b, 'hours', { max: 120 }) ?? null,
+        ...(place ?? {}),
+      };
       t.set(P.tenant(g.tenantId), { ...cur, branches: cur.branches.map((x) => (x.id === id ? after : x)) });
       audit(t, g.tenantId, u.id, 'branch.update', 'branch', id, before, after);
       return after;

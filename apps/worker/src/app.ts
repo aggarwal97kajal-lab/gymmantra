@@ -1,5 +1,6 @@
 import { sendPush, takePush } from './lib/push';
 import { gateRoutes } from './routes/gate';
+import { logoRoutes } from './routes/logos';
 import { ownershipRoutes } from './routes/ownership';
 import { staffDayRoutes } from './routes/staffdays';
 import { tokenSrc } from './identity';
@@ -146,6 +147,7 @@ export function createApp(getDeps: () => Deps) {
   staffDayRoutes(app);
   ownershipRoutes(app);
   gateRoutes(app);
+  logoRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

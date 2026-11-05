@@ -10,6 +10,8 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'api.dart';
 import 'screens/billing.dart' show loadIndia;
+import 'screens/home.dart' show openUrl;
+import 'photo.dart';
 import 'i18n.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -798,23 +800,40 @@ class _SigPainter extends CustomPainter {
 
 // ============================================================ people
 
-/// GM Admin → People: find anyone by mobile number or email and delete their account,
-/// so the same mobile and email can sign up again.
-class AdminPeople extends StatefulWidget {
+/// GM Admin → People, gym wise (board 68): gyms → Members / Trainers / Staff → list → one person.
+/// Typing a full mobile number or email still finds anyone directly.
+final _peopleGyms = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/super/gyms'));
+final _gymPeople = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/super/gyms/$id/people'));
+final _gymPeopleList = StreamProvider.autoDispose.family<dynamic, String>((ref, key) => Api.instance.cachedGet('/super/gyms/$key'));
+
+String _roleName(BuildContext context, String? r) => switch (r) {
+      'OWNER' => context.t('Gym owner'),
+      'FRONT_DESK' => context.t('Front desk'),
+      'TRAINER' => context.t('Trainer'),
+      'STAFF' => context.t('Gym staff'),
+      _ => context.t('Member'),
+    };
+
+class AdminPeople extends ConsumerStatefulWidget {
   const AdminPeople({super.key});
   @override
-  State<AdminPeople> createState() => _AdminPeopleState();
+  ConsumerState<AdminPeople> createState() => _AdminPeopleState();
 }
 
-class _AdminPeopleState extends State<AdminPeople> {
+class _AdminPeopleState extends ConsumerState<AdminPeople> {
   final q = TextEditingController();
-  List<Map>? rows;
+  List<Map>? rows; // results of a mobile / email search
   bool busy = false;
   String? error;
 
+  bool get _looksLikeContact {
+    final t = q.text.trim();
+    return t.contains('@') || RegExp(r'^\+?\d[\d\s]{8,}$').hasMatch(t);
+  }
+
   Future<void> search() async {
     final text = q.text.trim();
-    if (text.length < 3) return;
+    if (!_looksLikeContact) return;
     setState(() {
       busy = true;
       error = null;
@@ -829,11 +848,273 @@ class _AdminPeopleState extends State<AdminPeople> {
     }
   }
 
-  Future<void> delete(Map p) async {
+  @override
+  Widget build(BuildContext context) {
+    final gyms = ref.watch(_peopleGyms);
+    final text = q.text.trim().toLowerCase();
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('People'))),
+      body: RefreshIndicator(
+        onRefresh: () async => ref.invalidate(_peopleGyms),
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+          TextField(
+            controller: q,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (_) => search(),
+            onChanged: (_) => setState(() => rows = null),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: context.t('Gym name, mobile or email'),
+              suffixIcon: _looksLikeContact ? IconButton(icon: const Icon(Icons.arrow_forward_rounded), onPressed: search) : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (busy) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator(color: C.indigo))),
+          if (error != null) ErrorText(error),
+          if (rows != null) ...[
+            if (rows!.isEmpty) Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('No account with this mobile number or email.'), align: TextAlign.center)),
+            for (final p in rows!)
+              _PersonTile(
+                name: '${p['name'] ?? ''}',
+                sub: [p['phone'], p['email'], _roleName(context, p['appRole'] as String?)].where((x) => x != null).join(' · '),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AdminPerson(userId: p['id'] as String))).then((_) => search()),
+              ),
+          ] else
+            AsyncBody(
+              value: gyms,
+              onRetry: () => ref.invalidate(_peopleGyms),
+              loading: const ListSkeleton(rows: 6),
+              builder: (d) {
+                final list = (d as List).cast<Map>().where((g) => text.isEmpty || _looksLikeContact || '${g['name']} ${g['city'] ?? ''} ${g['gymCode'] ?? ''}'.toLowerCase().contains(text)).toList();
+                if (list.isEmpty) return Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('No gyms yet.'), align: TextAlign.center));
+                return Panel(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(children: [
+                    for (final g in list)
+                      ListTile(
+                        leading: GymLogo(name: '${g['name']}', url: g['logoUrl'] as String?, size: 40),
+                        title: Text('${g['name']}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                        subtitle: Text(
+                          [g['city'], context.t('{n} branches', {'n': (g['_count'] as Map?)?['branches'] ?? 1}), context.t('{n} members', {'n': (g['_count'] as Map?)?['members'] ?? 0})].where((x) => x != null).join(' · '),
+                        ),
+                        trailing: const Icon(Icons.chevron_right_rounded),
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AdminGymPeople(id: g['id'] as String, name: '${g['name']}'))),
+                      ),
+                  ]),
+                );
+              },
+            ),
+          const SizedBox(height: 10),
+          Muted(context.t('Type a full mobile number or email to find anyone directly.'), size: 12),
+        ]),
+      ),
+    );
+  }
+}
+
+/// One gym: 3 cards — Members, Trainers, Staff.
+class AdminGymPeople extends ConsumerWidget {
+  const AdminGymPeople({super.key, required this.id, required this.name});
+  final String id;
+  final String name;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(_gymPeople(id));
+    Widget card(IconData icon, Color tint, String title, String sub, int n, String kind, List<Map> branches) => Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Material(
+            color: context.c.surf,
+            borderRadius: BorderRadius.circular(18),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => AdminPeopleList(gymId: id, gymName: name, kind: kind, title: title, branches: branches))),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(children: [
+                  Container(width: 44, height: 44, decoration: BoxDecoration(color: tint.withAlpha(40), borderRadius: BorderRadius.circular(13)), child: Icon(icon, color: tint)),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      Muted(sub, size: 12.5),
+                    ]),
+                  ),
+                  Text('$n', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right_rounded),
+                ]),
+              ),
+            ),
+          ),
+        );
+    return Scaffold(
+      appBar: AppBar(title: Text(name)),
+      body: AsyncBody(
+        value: v,
+        onRetry: () => ref.invalidate(_gymPeople(id)),
+        loading: const ListSkeleton(rows: 3),
+        builder: (d) {
+          final m = d as Map;
+          final g = (m['gym'] as Map?) ?? {};
+          final branches = ((g['branches'] as List?) ?? const []).cast<Map>();
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(_gymPeople(id)),
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 28), children: [
+              Row(children: [
+                GymLogo(name: name, url: g['logoUrl'] as String?, size: 52),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                    Muted([g['city'], g['state'], context.t('{n} branches', {'n': branches.length})].where((x) => x != null).join(' · '), size: 12.5),
+                  ]),
+                ),
+              ]),
+              const SizedBox(height: 16),
+              card(Icons.groups_rounded, C.orange, context.t('Members'), context.t('Active {a} · Expired {e}', {'a': m['active'] ?? 0, 'e': m['expired'] ?? 0}), (m['members'] as int?) ?? 0, 'members', branches),
+              card(Icons.sports_rounded, C.ok, context.t('Trainers'), context.t('All branches'), (m['trainers'] as int?) ?? 0, 'trainers', branches),
+              card(Icons.badge_rounded, C.indigo, context.t('Staff'), context.t('Owners and front desk'), (m['staff'] as int?) ?? 0, 'staff', branches),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Members / trainers / staff of one gym, with a branch filter and search.
+class AdminPeopleList extends ConsumerStatefulWidget {
+  const AdminPeopleList({super.key, required this.gymId, required this.gymName, required this.kind, required this.title, required this.branches});
+  final String gymId;
+  final String gymName;
+  final String kind;
+  final String title;
+  final List<Map> branches;
+  @override
+  ConsumerState<AdminPeopleList> createState() => _AdminPeopleListState();
+}
+
+class _AdminPeopleListState extends ConsumerState<AdminPeopleList> {
+  String? branch;
+  String q = '';
+
+  String statusText(BuildContext context, String? s) => switch (s) {
+        'ACTIVE' => context.t('Active'),
+        'ENDING_SOON' => context.t('Ending soon'),
+        'EXPIRED' => context.t('Expired'),
+        'FROZEN' => context.t('Frozen'),
+        'GONE' => context.t('No longer available'),
+        _ => context.t('No plan'),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final key = '${widget.gymId}/people?kind=${widget.kind}';
+    final v = ref.watch(_gymPeopleList(key));
+    return Scaffold(
+      appBar: AppBar(title: Text('${widget.title} · ${widget.gymName}')),
+      body: AsyncBody(
+        value: v,
+        onRetry: () => ref.invalidate(_gymPeopleList(key)),
+        loading: const ListSkeleton(rows: 8),
+        builder: (d) {
+          final all = (d as List).cast<Map>();
+          final t = q.trim().toLowerCase();
+          final list = all.where((p) => (branch == null || p['branchId'] == branch) && (t.isEmpty || '${p['name']} ${p['phone'] ?? ''} ${p['memberCode'] ?? ''}'.toLowerCase().contains(t))).toList();
+          return RefreshIndicator(
+            onRefresh: () async => ref.invalidate(_gymPeopleList(key)),
+            child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+              if (widget.branches.length > 1)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(children: [
+                    Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text(context.t('All')), selected: branch == null, onSelected: (_) => setState(() => branch = null))),
+                    for (final b in widget.branches)
+                      Padding(padding: const EdgeInsets.only(right: 6), child: ChoiceChip(label: Text('${b['name']}'), selected: branch == b['id'], onSelected: (_) => setState(() => branch = b['id'] as String))),
+                  ]),
+                ),
+              const SizedBox(height: 8),
+              TextField(onChanged: (x) => setState(() => q = x), decoration: InputDecoration(prefixIcon: const Icon(Icons.search_rounded), hintText: context.t('Name or mobile'))),
+              const SizedBox(height: 10),
+              if (list.isEmpty) Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('Nobody here.'), align: TextAlign.center)),
+              for (final p in list)
+                _PersonTile(
+                  name: '${p['name'] ?? ''}',
+                  sub: [
+                    if (widget.kind == 'members') p['memberCode'] else _roleName(context, p['role'] as String?),
+                    p['branchName'],
+                    if (widget.kind == 'members') statusText(context, p['status'] as String?),
+                    if (widget.kind != 'members' && p['status'] == 'GONE') statusText(context, 'GONE'),
+                  ].where((x) => x != null && '$x'.isNotEmpty).join(' · '),
+                  onTap: () {
+                    final uid = p['userId'] as String?;
+                    if (uid != null && p['status'] != 'GONE') {
+                      Navigator.of(context).push(MaterialPageRoute(builder: (_) => AdminPerson(userId: uid))).then((_) => ref.invalidate(_gymPeopleList(key)));
+                    } else if (p['phone'] != null) {
+                      openTel('${p['phone']}');
+                    }
+                  },
+                ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _PersonTile extends StatelessWidget {
+  const _PersonTile({required this.name, required this.sub, required this.onTap});
+  final String name;
+  final String sub;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Material(
+          color: context.c.surf,
+          borderRadius: BorderRadius.circular(16),
+          child: ListTile(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            leading: CircleAvatar(backgroundColor: C.indigo.withAlpha(40), child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: const TextStyle(color: C.indigo, fontWeight: FontWeight.w800))),
+            title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
+            subtitle: Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: onTap,
+          ),
+        ),
+      );
+}
+
+void openTel(String phone) => openUrl('tel:$phone');
+
+/// One account: details, call, delete.
+class AdminPerson extends StatefulWidget {
+  const AdminPerson({super.key, required this.userId});
+  final String userId;
+  @override
+  State<AdminPerson> createState() => _AdminPersonState();
+}
+
+class _AdminPersonState extends State<AdminPerson> {
+  Map? p;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instance.get('/super/users/${widget.userId}').then((r) {
+      if (mounted) setState(() => p = r as Map);
+    }).catchError((Object e) {
+      if (mounted) setState(() => error = e.toString());
+    });
+  }
+
+  Future<void> delete() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(ctx.t('Delete {name}?', {'name': p['name']})),
+        title: Text(ctx.t('Delete {name}?', {'name': p!['name']})),
         content: Text(ctx.t('Their login and personal details are deleted. Gyms see them as "No longer available". The same mobile number and email can sign up again.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
@@ -843,69 +1124,54 @@ class _AdminPeopleState extends State<AdminPeople> {
     );
     if (ok != true) return;
     try {
-      await Api.instance.post('/super/users/${p['id']}/delete', {});
+      await Api.instance.post('/super/users/${widget.userId}/delete', {});
       if (!mounted) return;
       toast(context, context.t('Account deleted'));
-      setState(() => rows = rows?.where((x) => x['id'] != p['id']).toList());
+      Navigator.pop(context, true);
     } catch (e) {
       if (mounted) toastError(context, e);
     }
   }
 
-  String roleName(BuildContext context, String? r) => switch (r) {
-        'OWNER' => context.t('Gym owner'),
-        'FRONT_DESK' => context.t('Front desk'),
-        'TRAINER' => context.t('Trainer'),
-        'MEMBER' => context.t('Member'),
-        _ => context.t('Member'),
-      };
-
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: Text(context.t('People'))),
-        body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-          TextField(
-            controller: q,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => search(),
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search_rounded),
-              hintText: context.t('Full mobile number or email'),
-              suffixIcon: IconButton(icon: const Icon(Icons.arrow_forward_rounded), onPressed: search),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Muted(context.t('Delete an account when someone asks, so they can sign up again with the same mobile number and email.'), size: 12),
-          const SizedBox(height: 12),
-          if (busy) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator(color: C.indigo))),
-          if (error != null) ErrorText(error),
-          if (!busy && rows != null && rows!.isEmpty) Padding(padding: const EdgeInsets.all(24), child: Muted(context.t('No account with this mobile number or email.'), align: TextAlign.center)),
-          if (!busy)
-            for (final p in rows ?? const <Map>[])
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Panel(
-                  padding: const EdgeInsets.all(14),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(p['name'] as String? ?? '', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
-                    const SizedBox(height: 2),
-                    Muted([p['phone'], p['email'], roleName(context, p['appRole'] as String?), if (p['google'] == true) 'Google'].where((x) => x != null).join(' · '), size: 12.5),
-                    for (final g in ((p['gyms'] as List?) ?? const []).cast<Map>()) Muted('${g['name']} · ${roleName(context, g['role'] as String?)}', size: 12),
-                    const SizedBox(height: 10),
-                    if (p['runsGym'] == true)
-                      Muted(context.t('Runs a gym — remove them from the gym first.'), size: 12)
-                    else
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red)),
-                        onPressed: () => delete(p),
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18),
-                        label: Text(context.t('Delete account')),
-                      ),
-                  ]),
-                ),
+  Widget build(BuildContext context) {
+    final x = p;
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Person'))),
+      body: x == null
+          ? (error != null ? Center(child: Padding(padding: const EdgeInsets.all(24), child: ErrorText(error))) : const Center(child: CircularProgressIndicator(color: C.indigo)))
+          : ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 28), children: [
+              Center(child: Avatar(name: '${x['name']}', url: x['photoUrl'] as String?, size: 76)),
+              const SizedBox(height: 10),
+              Center(child: Text('${x['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 19))),
+              Center(child: Muted([x['phone'], x['email']].where((y) => y != null).join(' · '), size: 12.5, align: TextAlign.center)),
+              const SizedBox(height: 14),
+              Panel(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  for (final g in ((x['gyms'] as List?) ?? const []).cast<Map>()) Text('${g['name']} · ${_roleName(context, g['role'] as String?)}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  if (((x['gyms'] as List?) ?? const []).isEmpty) Muted(context.t('Not in any gym'), size: 13),
+                  const SizedBox(height: 6),
+                  Muted([x['city'], x['state']].where((y) => y != null).join(', '), size: 12.5),
+                  Muted('${context.t('Login')}: ${[if (x['google'] == true) 'Google', if (x['password'] == true) context.t('Password')].join(' + ')}', size: 12.5),
+                  if (x['createdAt'] != null) Muted('${context.t('Account made')}: ${'${x['createdAt']}'.substring(0, 10)}', size: 12.5),
+                ]),
               ),
-        ]),
-      );
+              const SizedBox(height: 14),
+              if (x['phone'] != null)
+                OutlinedButton.icon(onPressed: () => openTel('${x['phone']}'), icon: const Icon(Icons.call_rounded, size: 18), label: Text(context.t('Call'))),
+              const SizedBox(height: 8),
+              if (x['runsGym'] == true)
+                Muted(context.t('Runs a gym — remove them from the gym first.'), size: 12, align: TextAlign.center)
+              else
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red)),
+                  onPressed: delete,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: Text(context.t('Delete account')),
+                ),
+            ]),
+    );
+  }
 }
 
 // ============================================================ gym transfer / close (board 54)
@@ -1025,6 +1291,7 @@ class AdminBroadcast extends ConsumerStatefulWidget {
 }
 
 class _AdminBroadcastState extends ConsumerState<AdminBroadcast> {
+  Map? reach; // gyms and app members in the chosen state
   final title = TextEditingController();
   final message = TextEditingController();
   Set<String> roles = {'ALL'};
@@ -1099,11 +1366,32 @@ class _AdminBroadcastState extends ConsumerState<AdminBroadcast> {
                 ),
               ),
             );
-            if (s != null) setState(() => state = s.isEmpty ? null : s);
+            if (s != null) {
+              setState(() {
+                state = s.isEmpty ? null : s;
+                reach = null;
+              });
+              if (s.isNotEmpty) {
+                try {
+                  final r = await Api.instance.get('/super/broadcasts/reach?state=${Uri.encodeQueryComponent(s)}');
+                  if (mounted && state == s) setState(() => reach = r as Map);
+                } catch (_) {}
+              }
+            }
           },
           icon: const Icon(Icons.place_rounded),
           label: Text(state ?? context.t('All states')),
         ),
+        if (state != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Muted(
+              reach == null
+                  ? context.t('Goes to people whose state is {s}; people without a state count in their gym’s state.', {'s': state!})
+                  : context.t('{s}: {g} gyms · about {m} members with the app. People without a state count in their gym’s state.', {'s': state!, 'g': reach!['gyms'], 'm': reach!['members']}),
+              size: 12,
+            ),
+          ),
         const SizedBox(height: 12),
         TextField(controller: title, decoration: InputDecoration(labelText: context.t('Title'))),
         const SizedBox(height: 10),

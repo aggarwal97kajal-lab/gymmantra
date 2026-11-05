@@ -1,6 +1,6 @@
 import { ADMIN_PUSH, SUPER_KINDS } from '../lib/superpush';
 import { edgeGet, edgePut } from '../lib/edge';
-import { App, audit, authenticate, Broadcast, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Broadcast, branchOf, P, readRoster, requireSuper, Role, stateOf, TenantDoc, UserDoc } from '../core';
 import { removeAccount } from './me';
 import { queuePush, topicName } from '../lib/push';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -306,6 +306,20 @@ export function superRoutes(app: App) {
     const d = await c.var.deps.store.get<{ items: Broadcast[] }>(P.broadcasts);
     return c.json(d?.items ?? []);
   });
+  /** About how many people a state-wise notification reaches (gyms in that state and their app members). */
+  app.get('/api/v1/super/broadcasts/reach', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const { store } = c.var.deps;
+    const state = (c.req.query('state') ?? '').trim();
+    if (!state) return c.json({ gyms: null, members: null });
+    const gyms = (await store.query<TenantDoc>('tenants', [['state', state]])).filter((g) => g.data.status !== 'CLOSED');
+    const rosters = await store.getMany<{ members: Record<string, { userId: string | null; archived: boolean; gone?: boolean }> }>(gyms.slice(0, 200).map((g) => P.roster(g.id)));
+    let members = 0;
+    for (const r of rosters) for (const e of Object.values(r?.members ?? {})) if (e.userId && !e.archived && !e.gone) members++;
+    return c.json({ gyms: gyms.length, members });
+  });
+
   app.post('/api/v1/super/broadcasts', async (c) => {
     const u = await authenticate(c);
     requireSuper(c);
@@ -377,6 +391,96 @@ export function superRoutes(app: App) {
         runsGym: Object.values(u!.staffOf ?? {}).some((v) => v.active && v.role !== 'TRAINER'),
       })),
     );
+  });
+
+  /**
+   * GM Admin → People, gym wise: counts for the 3 cards (no kind), or the list of members / trainers / staff.
+   * Each person row has the account id (when they use the app) so GM Admin can open and delete it.
+   */
+  app.get('/api/v1/super/gyms/:id/people', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const { store } = c.var.deps;
+    const tid = c.req.param('id');
+    if (!isUuid(tid)) throw notFound('Gym not found');
+    const kind = c.req.query('kind') ?? '';
+    const [tenant, roster] = await Promise.all([store.get<TenantDoc>(P.tenant(tid)), readRoster(store, tid)]);
+    if (!tenant) throw notFound('Gym not found');
+    const branchName = (id: string | null | undefined) => {
+      const b = tenant.branches.find((x) => x.id === branchOf(tenant, id));
+      return b ? (b.id === tenant.branches[0]?.id ? tenant.name : b.name) : null;
+    };
+    const staff = kind === 'members' ? [] : await store.query<{ userId: string; role: Role; active: boolean; branchIds: string[] }>(P.staffCol(tid), [['active', true]]);
+    const today = todayIST();
+    const members = Object.entries(roster.members).filter(([, e]) => !e.archived);
+    if (!kind) {
+      let active = 0;
+      let expired = 0;
+      for (const [, e] of members) {
+        const st = stateOf(e, today).status;
+        if (st === 'ACTIVE' || st === 'ENDING_SOON' || st === 'FROZEN') active++;
+        else if (st === 'EXPIRED') expired++;
+      }
+      return c.json({
+        gym: { id: tid, name: tenant.name, city: tenant.city ?? null, state: tenant.state ?? null, logoUrl: tenant.logoUrl, branches: tenant.branches.map((b, i) => ({ id: b.id, name: i === 0 ? tenant.name : b.name })) },
+        members: members.length,
+        active,
+        expired,
+        trainers: staff.filter((x) => x.data.role === 'TRAINER').length,
+        staff: staff.filter((x) => x.data.role !== 'TRAINER').length,
+      });
+    }
+    if (kind === 'members') {
+      return c.json(
+        members
+          .map(([id, e]) => ({ id, userId: e.userId, name: e.name, phone: e.phone, memberCode: e.memberCode, branchId: branchOf(tenant, e.branchId), branchName: branchName(e.branchId), status: e.gone ? 'GONE' : stateOf(e, today).status, role: 'MEMBER' }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    }
+    const rows = staff.filter((x) => (kind === 'trainers' ? x.data.role === 'TRAINER' : kind === 'staff' ? x.data.role !== 'TRAINER' : false));
+    if (kind !== 'trainers' && kind !== 'staff') throw bad('Unknown list');
+    const users = await store.getMany<UserDoc>(rows.map((r) => P.user(r.data.userId ?? r.id)));
+    const profiles = kind === 'trainers' ? await store.getMany<{ branchId?: string | null }>(rows.map((r) => P.trainer(tid, r.data.userId ?? r.id))) : [];
+    return c.json(
+      rows
+        .map((r, i) => {
+          const u = users[i];
+          const bid = kind === 'trainers' ? profiles[i]?.branchId ?? null : r.data.branchIds?.[0] ?? null;
+          return { id: r.id, userId: r.data.userId ?? r.id, name: u?.name ?? 'User', phone: u?.phone ?? null, email: u?.email ?? null, role: r.data.role, branchId: r.data.role === 'OWNER' ? null : branchOf(tenant, bid), branchName: r.data.role === 'OWNER' ? null : branchName(bid), status: u?.deleted ? 'GONE' : 'ACTIVE' };
+        })
+        .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'OWNER' ? -1 : 1)),
+    );
+  });
+
+  /** One account for GM Admin (opened from a gym's list). */
+  app.get('/api/v1/super/users/:id', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const { store } = c.var.deps;
+    const id = c.req.param('id');
+    const u = isUuid(id) || /^[A-Za-z0-9_-]{6,64}$/.test(id) ? await store.get<UserDoc>(P.user(id)) : null;
+    if (!u || u.deleted) throw notFound('Account not found');
+    const tids = [...new Set([...Object.keys(u.memberships ?? {}), ...Object.keys(u.staffOf ?? {})])];
+    const tenants = await store.getMany<TenantDoc>(tids.map(P.tenant));
+    const nameOf = (t: string) => tenants[tids.indexOf(t)]?.name ?? 'Gym';
+    return c.json({
+      id,
+      name: u.name,
+      email: u.email,
+      phone: u.phone,
+      appRole: u.appRole ?? null,
+      state: u.state ?? null,
+      city: u.city ?? null,
+      createdAt: u.createdAt ?? null,
+      google: !!u.googleSub,
+      password: !!u.authEmail,
+      photoUrl: u.photoV ? `/api/v1/photos/${id}?v=${u.photoV}` : null,
+      gyms: [
+        ...Object.keys(u.memberships ?? {}).map((t) => ({ name: nameOf(t), role: 'MEMBER' })),
+        ...Object.entries(u.staffOf ?? {}).filter(([, v]) => v.active).map(([t, v]) => ({ name: nameOf(t), role: v.role })),
+      ],
+      runsGym: Object.values(u.staffOf ?? {}).some((v) => v.active && v.role !== 'TRAINER'),
+    });
   });
 
   /** Super admin deletes a person's account, so the same mobile and email can sign up again. */

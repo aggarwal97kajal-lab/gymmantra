@@ -1322,3 +1322,90 @@ describe('plan reminders and GM Admin notifications', () => {
     await h.api.put('/super/push-settings', { gyms: true }, sup);
   });
 });
+
+describe('branch address, GST and logos; state broadcasts; GM Admin people by gym', () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6]).toString('base64');
+  const boss = async () => {
+    const r = await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' });
+    if (r.status === 200) return r.body.token as string;
+    return (await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' })).body.token as string;
+  };
+  const join = async (owner: { token: string }, code: string, name: string, branchId?: string) => {
+    const m = await h.signup(name);
+    await h.api.post('/me/join', { gymCode: code }, m.token);
+    const headers: Record<string, string> = branchId ? { 'x-branch-id': branchId } : {};
+    const reqs = await h.api.call('GET', '/join-requests', { token: owner.token, headers });
+    await h.api.call('POST', `/join-requests/${reqs.body[0].id}/approve`, { token: owner.token, body: {}, headers });
+    return m;
+  };
+
+  it('branch keeps state, city, PIN and its own GSTIN; bad PIN or GSTIN is refused', async () => {
+    const owner = await h.ownerWithGym('Addr Gym');
+    await h.store.set(`tenants/${owner.gym.id}`, { ...(await h.store.get<any>(`tenants/${owner.gym.id}`)), saasPlanId: null, status: 'TRIAL' });
+    const ok = await h.api.post('/gym/branches', { name: 'Viva', addressLine: 'Plot 4, Sector 21', state: 'Delhi', city: 'New Delhi', pincode: '110077', gstin: '07ABCDE1234F1Z5', hours: '6 AM - 10 PM' }, owner.token);
+    expect(ok.status).toBe(201);
+    expect(ok.body).toMatchObject({ state: 'Delhi', city: 'New Delhi', pincode: '110077', gstin: '07ABCDE1234F1Z5' });
+    expect(ok.body.address).toContain('110077');
+    expect((await h.api.post('/gym/branches', { name: 'Bad Pin', addressLine: 'Plot 4', state: 'Delhi', city: 'New Delhi', pincode: '400001' }, owner.token)).status).toBe(400);
+    const edit = await h.api.patch(`/gym/branches/${ok.body.id}`, { name: 'Viva', addressLine: 'Plot 9', state: 'Delhi', city: 'New Delhi', pincode: '110075', gstin: '27ABCDE1234F1Z5' }, owner.token);
+    expect(edit.status).toBe(400); // GSTIN of another state
+  });
+
+  it('gym logo at registration, branch logo for that branch; only people of the gym can load it', async () => {
+    const o = await h.signup('Logo Owner');
+    const g = await h.api.post('/gyms', { name: 'Logo Gym', phone: o.phone, ...GYM_ADDRESS, logo: { mime: 'image/jpeg', base64: JPEG } }, o.token);
+    expect(g.status).toBe(201);
+    expect(g.body.logoUrl).toMatch(/^\/api\/v1\/logos\//);
+    const owner = { ...o, gym: g.body };
+    const br = (await h.api.post('/gym/branches', { name: 'Second' }, owner.token)).body;
+    const mem = await join(owner, br.code, 'Logo Member', br.id);
+    // member of the second branch sees the gym logo until the branch has its own
+    let mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
+    expect(mg.logoUrl).toBe(g.body.logoUrl);
+    const up = await h.api.put('/gym/logo', { mime: 'image/jpeg', base64: JPEG, branchId: br.id }, owner.token);
+    expect(up.status).toBe(201);
+    mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
+    expect(mg.logoUrl).toBe(up.body.logoUrl);
+    const path = String(up.body.logoUrl).replace('/api/v1', '').split('?')[0];
+    expect((await h.api.get(path, mem.token)).status).toBe(200);
+    const stranger = await h.signup('Stranger');
+    expect((await h.api.get(path, stranger.token)).status).toBe(403);
+    expect((await h.api.put('/gym/logo', { mime: 'image/png', base64: JPEG }, owner.token)).status).toBe(400); // not a PNG
+    expect((await h.api.put('/gym/logo', { mime: 'image/jpeg', base64: JPEG }, mem.token)).status).toBe(403);
+    expect((await h.api.del(`/gym/logo?branchId=${br.id}`, owner.token)).status).toBe(200);
+    mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
+    expect(mg.logoUrl).toBe(g.body.logoUrl);
+  });
+
+  it('a state notification reaches members of gyms in that state even without their own state', async () => {
+    const delhi = await h.ownerWithGym('Delhi Gym');
+    const mem = await join(delhi, delhi.gym.gymCode, 'No State Member');
+    const o2 = await h.signup('Bihar Owner');
+    const bihar = { ...o2, gym: (await h.api.post('/gyms', { name: 'Bihar Gym', phone: o2.phone, addressLine: 'Boring Road', state: 'Bihar', city: 'Patna', pincode: '800001' }, o2.token)).body };
+    const memB = await join(bihar, bihar.gym.gymCode, 'Bihar Member');
+    const sup = await boss();
+    expect((await h.api.post('/super/broadcasts', { title: 'Delhi offer', message: 'Only Delhi', roles: ['MEMBER'], state: 'Delhi' }, sup)).status).toBe(201);
+    expect((await h.api.get('/me/notifications', mem.token)).body.some((n: any) => n.title === 'Delhi offer')).toBe(true);
+    expect((await h.api.get('/me/notifications', memB.token)).body.some((n: any) => n.title === 'Delhi offer')).toBe(false);
+    expect((await h.api.get('/me/push-topics', mem.token)).body.topics.some((t: string) => t.includes('Delhi'))).toBe(true);
+    const reach = (await h.api.get('/super/broadcasts/reach?state=Delhi', sup)).body;
+    expect(reach.gyms).toBeGreaterThanOrEqual(1);
+    expect(reach.members).toBeGreaterThanOrEqual(1);
+  });
+
+  it('GM Admin sees people gym wise: counts, members, trainers/staff, one person', async () => {
+    const owner = await h.ownerWithGym('People Gym');
+    const mem = await join(owner, owner.gym.gymCode, 'People Member');
+    const sup = await boss();
+    const sum = (await h.api.get(`/super/gyms/${owner.gym.id}/people`, sup)).body;
+    expect(sum).toMatchObject({ members: 1, staff: 1, trainers: 0 });
+    const list = (await h.api.get(`/super/gyms/${owner.gym.id}/people?kind=members`, sup)).body;
+    expect(list[0]).toMatchObject({ name: 'People Member', userId: mem.user.id });
+    const st = (await h.api.get(`/super/gyms/${owner.gym.id}/people?kind=staff`, sup)).body;
+    expect(st[0]).toMatchObject({ role: 'OWNER', userId: owner.user.id });
+    expect((await h.api.get(`/super/users/${mem.user.id}`, sup)).body.gyms[0]).toMatchObject({ name: 'People Gym', role: 'MEMBER' });
+    // nobody else
+    expect((await h.api.get(`/super/gyms/${owner.gym.id}/people`, owner.token)).status).toBe(403);
+    expect((await h.api.get(`/super/users/${mem.user.id}`, mem.token)).status).toBe(403);
+  });
+});

@@ -382,9 +382,15 @@ class _MembershipCard extends StatelessWidget {
               padding: const EdgeInsets.all(18),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
+                  // The logo of the member's own branch (a new branch's logo after a transfer).
+                  GymLogo(name: '${m['gym']['name']}', url: m['gym']['logoUrl'] as String?, size: 40, onColor: true),
+                  const SizedBox(width: 10),
                   Expanded(
-                    child: Text('${m['gym']['name']} · ${context.t('My membership')}',
-                        maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('${m['gym']['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15)),
+                      Text([m['gym']['code'], context.t('My membership')].where((x) => x != null && '$x'.isNotEmpty).join(' · '),
+                          maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Color(0xDDFFFFFF), fontWeight: FontWeight.w600, fontSize: 12)),
+                    ]),
                   ),
                   StatusChip(status, onColor: true),
                 ]),

@@ -262,11 +262,11 @@ class _GymCard extends StatelessWidget {
           gradient: const LinearGradient(colors: [C.orangeSoft, C.orange, C.orangeDeep], begin: Alignment.topLeft, end: Alignment.bottomRight),
         ),
         child: Row(children: [
-          const Logo(size: 44, body: Colors.white, mark: C.orange),
+          GymLogo(name: g['name'] as String, url: g['logoUrl'] as String?, size: 46, onColor: true),
           const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(context.t('My gym'), style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 12, fontWeight: FontWeight.w600)),
+              Text([context.t('My gym'), g['code']].where((x) => x != null).join(' · '), style: const TextStyle(color: Color(0xDDFFFFFF), fontSize: 12, fontWeight: FontWeight.w600)),
               Text(g['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
             ]),
           ),

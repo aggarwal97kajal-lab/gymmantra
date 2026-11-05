@@ -223,6 +223,13 @@ class Api {
     return f;
   }
   Future<dynamic> post(String path, [Object? body]) => _send('POST', path, body ?? {});
+
+  /// A POST made with a given login (used after log-out, when this phone has already forgotten it).
+  Future<void> postAs(String bearer, String path, [Object? body]) async {
+    try {
+      await _dio.post('$base/api/v1$path', data: body ?? {}, options: Options(headers: {'Authorization': 'Bearer $bearer', 'x-gm-client': adminApp ? 'admin-app' : 'mobile'}, contentType: 'application/json', receiveTimeout: const Duration(seconds: 15)));
+    } catch (_) {}
+  }
   Future<dynamic> patch(String path, Object body) => _send('PATCH', path, body);
   Future<dynamic> put(String path, Object body, {void Function(int sent, int total)? onSendProgress}) => _send('PUT', path, body, onSendProgress);
   Future<dynamic> delete(String path, [Object? body]) => _send('DELETE', path, body);

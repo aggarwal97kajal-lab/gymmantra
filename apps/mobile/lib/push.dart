@@ -69,9 +69,8 @@ class Push {
       final r = await Api.instance.get('/me/push-topics');
       final want = ((r as Map)['topics'] as List).cast<String>().toSet();
       final had = (Prefs.getString('push:topics') ?? '').split(',').where((x) => x.isNotEmpty).toSet();
-      for (final x in want.difference(had)) {
-        await fm.subscribeToTopic(x);
-      }
+      // Subscribe to every wanted topic each start (cheap, and heals a subscription that failed before).
+      await Future.wait(want.map((x) => fm.subscribeToTopic(x).catchError((_) {})));
       for (final x in had.difference(want)) {
         await fm.unsubscribeFromTopic(x);
       }
@@ -79,17 +78,18 @@ class Push {
     } catch (_) {}
   }
 
-  /// Before log-out: this phone stops getting this person's notifications.
-  static Future<void> unregister() async {
+  /// At log-out: this phone stops getting this person's notifications. Runs in the background with
+  /// the old login, so log-out itself is instant.
+  static void unregisterLater(String? bearer) {
     if (!_ready) return;
-    try {
-      final t = Prefs.getString('push:token');
-      if (t != null) await Api.instance.post('/me/push-token/remove', {'token': t});
-      final had = (Prefs.getString('push:topics') ?? '').split(',').where((x) => x.isNotEmpty);
-      for (final x in had) {
-        await FirebaseMessaging.instance.unsubscribeFromTopic(x);
-      }
-      await Prefs.remove('push:topics');
-    } catch (_) {}
+    final t = Prefs.getString('push:token');
+    final had = (Prefs.getString('push:topics') ?? '').split(',').where((x) => x.isNotEmpty).toList();
+    Prefs.remove('push:topics');
+    () async {
+      try {
+        if (t != null && bearer != null) await Api.instance.postAs(bearer, '/me/push-token/remove', {'token': t});
+        await Future.wait(had.map((x) => FirebaseMessaging.instance.unsubscribeFromTopic(x).catchError((_) {})));
+      } catch (_) {}
+    }();
   }
 }

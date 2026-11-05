@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -10,6 +12,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show LabeledField, LangSwitch, PhoneField;
+import 'banner.dart' show LogoPickerRow, pickLogo;
 import 'billing.dart' show Address, AddressFields;
 
 /// "Aap kaun ho?" — Member, Gym owner or Trainer.
@@ -140,6 +143,7 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
   final name = TextEditingController();
   final phone = TextEditingController();
   final place = Address();
+  Uint8List? logo;
   bool busy = false;
   String? error;
 
@@ -155,7 +159,12 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
       error = null;
     });
     try {
-      await Api.instance.post('/gyms', {'name': name.text.trim(), 'phone': phone.text.trim(), ...place.toJson()});
+      await Api.instance.post('/gyms', {
+        'name': name.text.trim(),
+        'phone': phone.text.trim(),
+        ...place.toJson(),
+        if (logo != null) 'logo': {'mime': 'image/jpeg', 'base64': base64Encode(logo!)},
+      });
       await ref.read(sessionProvider).refreshUser();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
@@ -177,6 +186,17 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
           const SizedBox(height: 4),
           Muted(context.t('First 3 months free. No card needed.'), size: 14.5),
           const SizedBox(height: 22),
+          LogoPickerRow(
+            name: name.text.isEmpty ? 'G' : name.text,
+            title: context.t('Gym logo'),
+            hint: context.t('Optional · shown to your members, trainers and staff'),
+            local: logo,
+            onPick: () async {
+              final b = await pickLogo(context);
+              if (b != null) setState(() => logo = b);
+            },
+            onRemove: () => setState(() => logo = null),
+          ),
           LabeledField(label: context.t('Gym name'), controller: name, icon: Icons.storefront_rounded, caps: TextCapitalization.words),
           PhoneField(label: context.t('Gym phone number'), controller: phone),
           AddressFields(value: place),

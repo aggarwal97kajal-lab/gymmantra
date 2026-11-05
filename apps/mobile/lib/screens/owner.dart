@@ -100,6 +100,7 @@ class OwnerHomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final s = ref.watch(sessionProvider);
+    ref.watch(branchProvider);
     final gym = withBranch({...?s.myGym, ...?ref.watch(gymProvider).valueOrNull as Map?, 'role': s.myGym?['role']});
     final d = ref.watch(dashboardProvider);
     return Scaffold(
@@ -114,10 +115,13 @@ class OwnerHomeScreen extends ConsumerWidget {
           child: ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
             Row(children: [
               GestureDetector(onTap: () => context.push('/o/subscription'), child: const OwnerAvatar(size: 46)),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
+              // The logo, name and code of the branch being looked at (they all change with Switch branch).
+              GymLogo(name: (gym['name'] as String?) ?? 'GymMantra', url: gym['logoUrl'] as String?, size: 40),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text((s.myGym?['name'] as String?) ?? 'GymMantra', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  Text((gym['name'] as String?) ?? (s.myGym?['name'] as String?) ?? 'GymMantra', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
                   Muted('${context.t(gym['role'] == 'FRONT_DESK' ? 'Front desk' : 'Owner')} · ${gym['gymCode'] ?? ''}', size: 12.5),
                 ]),
               ),

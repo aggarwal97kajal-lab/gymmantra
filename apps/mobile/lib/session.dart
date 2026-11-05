@@ -275,17 +275,20 @@ class Session extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Instant: the phone forgets the login at once; the server is told in the background.
   Future<void> logout() async {
-    await Push.unregister();
-    try {
-      await api.post('/auth/logout');
-    } catch (_) {}
-    await api.setToken(null);
+    final old = api.token;
+    Push.unregisterLater(old);
+    if (old != null) api.postAs(old, '/auth/logout');
+    // Screen changes first; the saved login and the phone copies are wiped right after (secure
+    // storage can take a second on some phones, which made log-out feel slow).
+    api.token = null;
     api.branchId = null;
-    await Prefs.clearUserData();
     api.forget();
     user = null;
     notifyListeners();
+    final wipe = Future.wait([api.setToken(null), Prefs.clearUserData()]);
+    await wipe.timeout(const Duration(milliseconds: 300), onTimeout: () => const []);
   }
 }
 
@@ -308,6 +311,8 @@ Map<String, dynamic> withBranch(Map g) {
   out['branchName'] = cur['name'];
   // Main (first) branch uses the gym's name; any other branch shows only its own name.
   out['name'] = cur['id'] == branches.first['id'] ? g['name'] : cur['name'];
+  // Each branch may have its own logo; without one it shows the gym's.
+  out['logoUrl'] = cur['logoUrl'] ?? g['logoUrl'];
   if (cur['address'] != null && '${cur['address']}'.isNotEmpty) {
     out['addressLine'] = cur['address'];
     out['city'] = null;

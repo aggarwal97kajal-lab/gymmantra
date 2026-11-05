@@ -58,6 +58,14 @@ export interface Branch {
   address: string | null;
   hours: string | null;
   createdAt: string;
+  // Full address and GST of this branch (each branch may have its own GSTIN)
+  addressLine?: string | null;
+  city?: string | null;
+  state?: string | null;
+  stateCode?: string | null;
+  pincode?: string | null;
+  gstin?: string | null;
+  logoUrl?: string | null; // own logo; null → the gym's logo
 }
 
 export interface TenantDoc {
@@ -227,6 +235,7 @@ export const P = {
   ticket: (id: string) => `tickets/${id}`,
   ticketSeq: 'settings/ticketSeq',
   offerImage: (t: string, id: string) => `tenants/${t}/offerImages/${id}`,
+  logo: (t: string, key: string) => `tenants/${t}/logos/${key}`, // key = 'gym' or a branch id
   notes: (uid: string) => `notifications/${uid}`,
   photo: (uid: string) => `photos/${uid}`,
   saasPlans: 'saasPlans',
@@ -447,6 +456,8 @@ export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
     branchName: b?.name ?? null,
     code: (b && branchCode(t, b)) ?? t.gymCode,
     address: (multi && b?.address) || t.address,
+    logoUrl: b?.logoUrl || t.logoUrl || null, // the branch's own logo, else the gym's
+    state: b?.state || t.state || null,
   };
 }
 export const inBranch = (g: GymCtx, id: string | null | undefined) => branchOf(g.tenant, id) === g.branchId;
@@ -519,6 +530,18 @@ export function broadcastRolesOf(u: UserDoc): string[] {
   if (live.some((s) => s.role === 'TRAINER') || u.appRole === 'TRAINER') out.add('TRAINER');
   if (Object.keys(u.memberships ?? {}).length || u.appRole === 'MEMBER') out.add('MEMBER');
   return [...out];
+}
+
+/**
+ * States a person counts in for GymMantra notifications: their own (from their address), else the
+ * state of the gyms they belong to (old and gym-made members often have no state of their own).
+ */
+export async function pushStatesOf(r: Reader, u: UserDoc): Promise<string[]> {
+  if (u.state) return [u.state];
+  const ids = [...new Set([...Object.keys(u.memberships ?? {}), ...Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active).map(([t]) => t)])];
+  if (!ids.length) return [];
+  const ts = await r.getMany<TenantDoc>(ids.map(P.tenant));
+  return [...new Set(ts.map((t) => t?.state ?? null).filter((x): x is string => !!x))];
 }
 
 /** In-app notification (kept as the last 50 per user in one document). */

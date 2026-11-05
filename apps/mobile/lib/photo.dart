@@ -148,3 +148,70 @@ class _AvatarState extends State<Avatar> {
     );
   }
 }
+
+/// A gym's or branch's logo (rounded square). Without a logo: the first letters of the name.
+class GymLogo extends StatefulWidget {
+  const GymLogo({super.key, required this.name, this.url, this.size = 44, this.local, this.onColor = false});
+  final String name;
+  final String? url;
+  final double size;
+
+  /// A logo just picked on this phone, shown before it uploads.
+  final Uint8List? local;
+
+  /// On an orange card: white tile with orange letters.
+  final bool onColor;
+  @override
+  State<GymLogo> createState() => _GymLogoState();
+}
+
+class _GymLogoState extends State<GymLogo> {
+  Uint8List? bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(GymLogo old) {
+    super.didUpdateWidget(old);
+    if (old.url != widget.url) _load();
+  }
+
+  void _load() {
+    final url = widget.url;
+    if (url == null || url.isEmpty) {
+      bytes = null;
+      return;
+    }
+    bytes = PhotoCache.get(url);
+    if (bytes == null) {
+      PhotoCache.load(url).then((b) {
+        if (mounted && widget.url == url) setState(() => bytes = b);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final img = widget.local ?? ((widget.url ?? '').isEmpty ? null : bytes);
+    final s = widget.size;
+    final px = (s * MediaQuery.devicePixelRatioOf(context) * 1.5).round();
+    final words = widget.name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final letters = words.isEmpty ? 'G' : (words.length == 1 ? (words.first.length >= 2 ? words.first.substring(0, 2) : words.first) : '${words[0][0]}${words[1][0]}').toUpperCase();
+    return Container(
+      width: s,
+      height: s,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(s * 0.28),
+        color: img != null ? Colors.white : (widget.onColor ? Colors.white : C.night),
+        border: img != null ? Border.all(color: const Color(0x22000000)) : null,
+        image: img == null ? null : DecorationImage(image: ResizeImage(MemoryImage(img), width: px, policy: ResizeImagePolicy.fit), fit: BoxFit.cover),
+      ),
+      alignment: Alignment.center,
+      child: img == null ? Text(letters, style: TextStyle(fontSize: s * 0.36, fontWeight: FontWeight.w800, color: widget.onColor ? C.orangeDeep : C.orange, letterSpacing: -0.5)) : null,
+    );
+  }
+}
