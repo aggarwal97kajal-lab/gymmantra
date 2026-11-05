@@ -108,7 +108,7 @@ class _HelpState extends ConsumerState<HelpScreen> {
           Panel(
             padding: EdgeInsets.zero,
             child: Column(children: [
-              if (shown.isEmpty) Padding(padding: const EdgeInsets.all(18), child: Muted(context.t('No answer found. Mail us below.'))),
+              if (shown.isEmpty) Padding(padding: const EdgeInsets.all(18), child: Muted(context.t('No answer found. Raise a ticket below.'))),
               for (final (i, f) in shown.indexed)
                 _FaqTile(
                   question: context.t(f.$2),
@@ -142,7 +142,7 @@ class _HelpState extends ConsumerState<HelpScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(context.t('Still need help? Mail us'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                      Text(context.t('Still need help? Raise a ticket'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
                       Muted(context.t('We typically respond within 1 day'), size: 12.5),
                     ]),
                   ),
@@ -339,7 +339,7 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
     final d = done;
     if (d != null) {
       return Scaffold(
-        appBar: AppBar(title: Text(context.t('Mail us'))),
+        appBar: AppBar(title: Text(context.t('Raise a ticket'))),
         body: ListView(padding: const EdgeInsets.fromLTRB(22, 40, 22, 24), children: [
           Center(
             child: Container(
@@ -378,7 +378,7 @@ class _NewTicketState extends ConsumerState<NewTicketScreen> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Mail us'))),
+      appBar: AppBar(title: Text(context.t('Raise a ticket'))),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
         Container(
           padding: const EdgeInsets.all(12),

@@ -1409,4 +1409,7 @@ const hindi = <String, String>{
   "Members attendance": "मेंबर की हाज़िरी",
   "Present days, month by month · Excel": "हाज़िर दिन, महीने के हिसाब से · Excel",
   "Today {n} check-ins · {b} stopped": "आज {n} चेक-इन · {b} रोके गए",
+  "Raise a ticket": "टिकट बनाएं",
+  "No answer found. Raise a ticket below.": "जवाब नहीं मिला। नीचे टिकट बनाएं।",
+  "Still need help? Raise a ticket": "अभी भी मदद चाहिए? टिकट बनाएं",
 };
