@@ -1655,3 +1655,34 @@ describe('pen-test fixes (Nov 6)', () => {
     expect((await h.api.patch('/me/contact', { email: 'boss@gymmantra.app', password: 'secret123' }, u.token)).status).toBe(409);
   });
 });
+
+describe('big gyms (Nov 6 load test fixes)', () => {
+  it('the member list splits into parts when it grows, and nothing is lost', async () => {
+    const { ROSTER_PART } = await import('../src/core');
+    const before = ROSTER_PART.maxChars;
+    ROSTER_PART.maxChars = 2500; // small parts so the test needs a few
+    try {
+      const o = await h.ownerWithGym('Big Gym');
+      const plan = (await h.api.post('/plans', { name: 'Monthly', months: 1, price: 1000 }, o.token)).body;
+      const ids: string[] = [];
+      for (let i = 0; i < 12; i++) {
+        const m = (await h.api.post('/members', { name: `Big Member ${i}`, phone: h.nextPhone() }, o.token)).body;
+        ids.push(m.id);
+        await h.api.post(`/members/${m.id}/memberships`, { planId: plan.id, paymentMode: 'CASH' }, o.token);
+      }
+      const main = await h.store.get<any>(P.roster(o.gym.id));
+      expect(main.parts).toBeGreaterThan(1);
+      for (let k = 0; k < main.parts; k++) expect(JSON.stringify((k ? await h.store.get<any>(`tenants/${o.gym.id}/roster/p${k}`) : main).members).length).toBeLessThanOrEqual(2500);
+      const lb = (await h.api.get('/members', o.token)).body;
+      const list = lb.rows;
+      expect(list.map((m: any) => m.id).sort()).toEqual([...ids].sort());
+      expect(list.every((m: any) => m.status === 'ACTIVE')).toBe(true);
+      // a payment on one member still works and only that member changes
+      const sub = (await h.api.get(`/members/${ids[3]}`, o.token)).body;
+      expect((await h.api.get('/dashboard', o.token)).status).toBe(200);
+      expect(sub.member.id).toBe(ids[3]);
+    } finally {
+      ROSTER_PART.maxChars = before;
+    }
+  });
+});

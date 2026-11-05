@@ -67,8 +67,23 @@ export async function recordMemberCheckIn(
     visits: visitsNow + (newVisit ? 1 : 0),
     recent: [{ id, at, result: decision.result, reason: decision.reason }, ...log.recent].slice(0, 30),
   });
-  await bumpDaily(t, tenantId, allowed ? { checkins: 1 } : { blocked: 1 }, branchId);
-  return { ...view, result: decision.result, reason: decision.reason, duplicate: false, eventId: id, visitsThisMonth: visitsNow + (newVisit ? 1 : 0), at };
+  // The day's counter is updated after this (countCheckIn): every check-in at a gym writes that one
+  // document, and doing it here would make check-ins at the same moment fail each other.
+  return { count: { tenantId, patch: allowed ? { checkins: 1 } : { blocked: 1 }, branchId }, ...view, result: decision.result, reason: decision.reason, duplicate: false, eventId: id, visitsThisMonth: visitsNow + (newVisit ? 1 : 0), at };
+}
+
+/** Adds a check-in to the day's counter, after the check-in itself (never makes the check-in fail). */
+export async function countCheckIn<T extends object>(c: C, out: T): Promise<Omit<T, 'count'>> {
+  const { count, ...rest } = out as T & { count?: { tenantId: string; patch: Parameters<typeof bumpDaily>[2]; branchId: string | null | undefined } };
+  if (count) {
+    const job = c.var.deps.store.tx((t) => bumpDaily(t, count.tenantId, count.patch, count.branchId)).catch((e) => console.error('daily counter', e));
+    try {
+      c.executionCtx.waitUntil(job);
+    } catch {
+      await job; // tests
+    }
+  }
+  return rest;
 }
 
 async function checkIn(c: C, memberId: string, method: 'QR' | 'MANUAL', branchIdIn?: string) {
@@ -81,7 +96,7 @@ async function checkIn(c: C, memberId: string, method: 'QR' | 'MANUAL', branchId
     // A QR from another gym (or another branch for front desk) is not accepted here.
     if (!m || m.removed || (g.role === 'FRONT_DESK' && g.branchIds.length && m.branchId && !g.branchIds.includes(m.branchId))) throw notFound('This member is not part of your gym');
     return recordMemberCheckIn(t, g.tenantId, m, { method, byId: u.id, branchId: branchIdIn ?? g.branchId });
-  });
+  }).then((o) => countCheckIn(c, o));
   // Allowed at the desk: open this branch's gate too.
   const gate = out.result === 'ALLOWED' ? await openGate(c.var.deps, g.tenantId, branchIdIn ?? g.branchId) : null;
   return { ...out, gate };

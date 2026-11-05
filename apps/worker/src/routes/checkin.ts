@@ -3,7 +3,7 @@ import { App, audit, authenticate, branchCode, branchOf, gymOf, MemberDoc, P, Te
 import { todayIST } from '../lib/dates';
 import { bad, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { body, str } from '../lib/validate';
-import { recordMemberCheckIn } from './attendance';
+import { countCheckIn, recordMemberCheckIn } from './attendance';
 import { ensureBranchCodes } from './gym';
 
 // ---------- Gym check-in QR: members and trainers scan it at the gym ----------
@@ -200,7 +200,7 @@ export function checkinRoutes(app: App) {
         }
         // The visit counts for the branch whose QR was scanned.
         return recordMemberCheckIn(t, tenantId, mem, { method: 'SELF', byId: u.id, branchId: hit.branchId, oncePerDay: true });
-      });
+      }).then((o) => countCheckIn(c, o));
       // The door opens from the app only where the gym's location was checked (no location set = no remote opening).
       const gate = out.result === 'ALLOWED' && spot.lat != null && spot.lng != null ? await openGate(c.var.deps, tenantId, hit.branchId) : null;
       return c.json({ kind: 'MEMBER', gym, ...out, gate }, 201);

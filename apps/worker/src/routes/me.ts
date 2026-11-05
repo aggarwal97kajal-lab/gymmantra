@@ -2,7 +2,7 @@ import { rateLimit } from '../lib/ratelimit';
 import { superLater } from '../lib/superpush';
 import { gymTopic, pushTokensPath, topicName, type PushTokensDoc } from '../lib/push';
 import { personDetails } from '../lib/person';
-import { Broadcast, broadcastRolesOf, pushStatesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
+import { Broadcast, broadcastRolesOf, pushStatesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, writeRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { makeQrToken } from '../lib/qr';
 import { entryDecision, freezeDaysLeft, validSubs } from '../lib/status';
@@ -626,7 +626,7 @@ export async function removeAccount(deps: Deps, uid: string, opts: { password?: 
       if (m) t.set(P.member(tid, mid), { ...m, userId: null, gone: true });
       if (roster.members[mid]) {
         roster.members[mid] = { ...roster.members[mid], userId: null, photoV: null, gone: true };
-        t.set(P.roster(tid), roster);
+        writeRoster(t, tid, roster);
       }
     });
   }

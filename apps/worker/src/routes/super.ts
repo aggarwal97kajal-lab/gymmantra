@@ -1,6 +1,6 @@
 import { ADMIN_PUSH, SUPER_KINDS } from '../lib/superpush';
 import { edgeGet, edgePut } from '../lib/edge';
-import { App, audit, authenticate, Broadcast, branchOf, P, readRoster, requireSuper, Role, stateOf, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Broadcast, branchOf, P, readRoster, readRosters, requireSuper, Role, stateOf, TenantDoc, UserDoc } from '../core';
 import { removeAccount } from './me';
 import { queuePush, topicName } from '../lib/push';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -314,7 +314,7 @@ export function superRoutes(app: App) {
     const state = (c.req.query('state') ?? '').trim();
     if (!state) return c.json({ gyms: null, members: null });
     const gyms = (await store.query<TenantDoc>('tenants', [['state', state]])).filter((g) => g.data.status !== 'CLOSED');
-    const rosters = await store.getMany<{ members: Record<string, { userId: string | null; archived: boolean; gone?: boolean }> }>(gyms.slice(0, 200).map((g) => P.roster(g.id)));
+    const rosters = await readRosters(store, gyms.slice(0, 200).map((g) => g.id));
     let members = 0;
     for (const r of rosters) for (const e of Object.values(r?.members ?? {})) if (e.userId && !e.archived && !e.gone) members++;
     return c.json({ gyms: gyms.length, members });

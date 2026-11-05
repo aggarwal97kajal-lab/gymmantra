@@ -1,6 +1,6 @@
 import { superLater } from '../lib/superpush';
 import { readLogo, logoUrlFor } from './logos';
-import { App, audit, authenticate, Branch, branchCode, cleanRights, gymOf, isTrainer, notify, P, RIGHT_PRESETS, RIGHTS, Role, Roster, TenantDoc, UserDoc } from '../core';
+import { App, audit, authenticate, Branch, branchCode, cleanRights, gymOf, isTrainer, notify, P, readRoster, RIGHT_PRESETS, RIGHTS, Role, TenantDoc, UserDoc } from '../core';
 import { personDetails } from '../lib/person';
 import { addMonths, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
@@ -239,7 +239,8 @@ export function gymRoutes(app: App) {
     const g = await gymOf(c, 'OWNER');
     const id = c.req.param('id');
     await c.var.deps.store.tx(async (t) => {
-      const [cur, roster] = (await t.getMany<any>([P.tenant(g.tenantId), P.roster(g.tenantId)])) as [TenantDoc, Roster | null];
+      const [cur] = (await t.getMany<any>([P.tenant(g.tenantId), P.roster(g.tenantId)])) as [TenantDoc];
+      const roster = await readRoster(t, g.tenantId);
       const br = cur.branches.find((b) => b.id === id);
       if (!br) throw notFound('Branch not found');
       if (cur.branches.length <= 1) throw bad('A gym needs at least one branch');

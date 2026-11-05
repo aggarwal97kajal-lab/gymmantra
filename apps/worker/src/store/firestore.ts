@@ -46,7 +46,7 @@ export class FirestoreStore implements Store {
    */
   private cache = new Map<string, { v: unknown; until: number }>();
   static CACHE_MS = 8000;
-  private static cacheable = /^(users\/[^/]+|tenants\/[^/]+|tenants\/[^/]+\/roster\/main|settings\/platform)$/;
+  private static cacheable = /^(users\/[^/]+|tenants\/[^/]+|tenants\/[^/]+\/roster\/[^/]+|settings\/platform)$/;
   private cached(path: string): { hit: boolean; v: unknown } {
     const e = this.cache.get(path);
     if (e && e.until > Date.now()) return { hit: true, v: structuredClone(e.v) };
@@ -272,7 +272,9 @@ export class FirestoreStore implements Store {
           const now = await this.getManyIn<any>([...creates].map((n) => n.split('/documents/')[1]));
           if (now.some((d) => d !== null)) throw new AlreadyExists('');
         }
-        if (attempt >= 5) throw new Error('The database was busy. Please try again.');
+        if (attempt >= 7) throw new Error('The database was busy. Please try again.');
+        // Wait a little (random, growing) before trying again, so requests that clashed do not clash again.
+        await new Promise((r) => setTimeout(r, Math.random() * 30 * 2 ** attempt));
       }
     }
   }

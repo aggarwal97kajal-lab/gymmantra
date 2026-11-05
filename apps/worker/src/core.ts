@@ -633,17 +633,72 @@ export function toRosterSub(s: SubDoc): RosterSub {
   };
 }
 
+/**
+ * The roster is split into parts once it grows big: Firestore allows at most 1 MB per document.
+ * roster/main holds part 0 and `parts` (how many there are); part k > 0 is roster/p<k>. A member is
+ * in part (hash of id) % parts. Only the parts that changed are written. When a part gets too big,
+ * the parts are doubled and everything is written once.
+ */
+export const ROSTER_PART = { maxChars: 600_000 }; // well under 1 MB (Hindi names take more bytes)
+const rosterPartPath = (t: string, k: number) => (k === 0 ? P.roster(t) : `tenants/${t}/roster/p${k}`);
+function partOf(memberId: string, parts: number) {
+  let h = 0;
+  for (let i = 0; i < memberId.length; i++) h = (h * 31 + memberId.charCodeAt(i)) >>> 0;
+  return h % parts;
+}
+type RosterPart = { members: Record<string, RosterEntry>; parts?: number };
+const rosterMeta = new WeakMap<Roster, { tenantId: string; parts: number; json: string[] }>();
+
 export async function readRoster(r: Reader, tenantId: string): Promise<Roster> {
-  return (await r.get<Roster>(P.roster(tenantId))) ?? { members: {} };
+  const main = await r.get<RosterPart>(P.roster(tenantId));
+  const parts = main?.parts ?? 1;
+  const rest = parts > 1 ? await r.getMany<RosterPart>(Array.from({ length: parts - 1 }, (_, i) => rosterPartPath(tenantId, i + 1))) : [];
+  const all = [main, ...rest];
+  const roster: Roster = { members: {} };
+  for (const p of all) Object.assign(roster.members, p?.members ?? {});
+  rosterMeta.set(roster, { tenantId, parts, json: all.map((p) => JSON.stringify(p?.members ?? {})) });
+  return roster;
+}
+
+/** Several gyms' rosters with few round trips (main parts together, then any extra parts together). */
+export async function readRosters(r: Reader, tenantIds: string[]): Promise<Roster[]> {
+  const mains = await r.getMany<RosterPart>(tenantIds.map((t) => P.roster(t)));
+  const extra = tenantIds.flatMap((t, i) => Array.from({ length: (mains[i]?.parts ?? 1) - 1 }, (_, k) => rosterPartPath(t, k + 1)));
+  const got = extra.length ? await r.getMany<RosterPart>(extra) : [];
+  const byPath = new Map(extra.map((p, i) => [p, got[i]]));
+  return tenantIds.map((t, i) => {
+    const roster: Roster = { members: { ...(mains[i]?.members ?? {}) } };
+    for (let k = 1; k < (mains[i]?.parts ?? 1); k++) Object.assign(roster.members, byPath.get(rosterPartPath(t, k))?.members ?? {});
+    return roster;
+  });
+}
+
+/** Saves a roster read with readRoster (only the parts that changed). */
+export function writeRoster(t: Pick<Tx, 'set'>, tenantId: string, roster: Roster) {
+  const meta = rosterMeta.get(roster);
+  let parts = meta && meta.tenantId === tenantId ? meta.parts : 1;
+  const split = (n: number) => {
+    const out: Record<string, RosterEntry>[] = Array.from({ length: n }, () => ({}));
+    for (const [id, e] of Object.entries(roster.members)) out[partOf(id, n)][id] = e;
+    return out.map((m) => JSON.stringify(m));
+  };
+  let json = split(parts);
+  while (json.some((j) => j.length > ROSTER_PART.maxChars)) json = split((parts *= 2));
+  const grew = !meta || parts !== meta.parts;
+  json.forEach((j, k) => {
+    if (!grew && meta && meta.json[k] === j) return;
+    t.set(rosterPartPath(tenantId, k), k === 0 ? { members: JSON.parse(j), ...(parts > 1 ? { parts } : {}) } : { members: JSON.parse(j) });
+  });
+  rosterMeta.set(roster, { tenantId, parts, json });
 }
 
 /** Copies a user's photo version into every gym roster where they are a member. */
 export async function syncRosterPhoto(t: Tx, u: Pick<UserDoc, 'memberships'>, photoV: number | null) {
   for (const [tid, mid] of Object.entries(u.memberships ?? {})) {
-    const r = await t.get<Roster>(P.roster(tid));
-    if (!r?.members[mid]) continue;
+    const r = await readRoster(t, tid);
+    if (!r.members[mid]) continue;
     r.members[mid] = { ...r.members[mid], photoV };
-    t.set(P.roster(tid), r);
+    writeRoster(t, tid, r);
   }
 }
 

@@ -19,6 +19,7 @@ import {
   P,
   paidOf,
   readRoster,
+  writeRoster,
   Roster,
   RosterEntry,
   rosterEntry,
@@ -157,7 +158,7 @@ export async function addMember(
   roster.members[id] = { ...rosterEntry(m), photoV: input.photoV ?? null };
   t.set(P.tenant(g.tenantId), { ...tenant, nextMemberNumber: tenant.nextMemberNumber + 1, memberCount: activeCount + 1 });
   t.set(P.member(g.tenantId, id), m);
-  t.set(P.roster(g.tenantId), roster);
+  writeRoster(t, g.tenantId, roster);
   audit(t, g.tenantId, actorId, 'member.create', 'member', id, null, m);
   return { m, roster, tenant };
 }
@@ -249,7 +250,8 @@ export function memberRoutes(app: App) {
     const id = c.req.param('id');
     const { store } = c.var.deps;
     await store.tx(async (t) => {
-      const [plan, roster] = (await t.getMany<any>([P.plan(g.tenantId, isUuid(id) ? id : 'x'), P.roster(g.tenantId)])) as [PlanDoc | null, Roster | null];
+      const [plan] = (await t.getMany<any>([P.plan(g.tenantId, isUuid(id) ? id : 'x'), P.roster(g.tenantId)])) as [PlanDoc | null];
+      const roster = await readRoster(t, g.tenantId);
       if (!plan) throw notFound('Plan not found');
       const used = Object.values(roster?.members ?? {}).some((e) => e.subs.some((s) => s.planId === id));
       if (used) throw bad('Members have this plan, so it cannot be deleted. Switch it off (Active) instead');
@@ -451,7 +453,7 @@ export function memberRoutes(app: App) {
           res.push({ row: chunkRows[k], ok: true, memberCode: m.memberCode });
         });
         t.set(P.tenant(g.tenantId), { ...tenant, nextMemberNumber: next, memberCount: active });
-        t.set(P.roster(g.tenantId), roster);
+        writeRoster(t, g.tenantId, roster);
         audit(t, g.tenantId, u.id, 'member.import', 'member', 'bulk', null, { added: res.filter((r) => r.ok).length });
         return res;
       });
@@ -573,7 +575,7 @@ export function memberRoutes(app: App) {
       const e = roster.members[before.id] ?? rosterEntry(before);
       roster.members[before.id] = { ...e, name: after.name, phone: after.phone, memberCode: after.memberCode, branchId: after.branchId, archived: after.archived };
       t.set(P.member(g.tenantId, before.id), after);
-      t.set(P.roster(g.tenantId), roster);
+      writeRoster(t, g.tenantId, roster);
       audit(t, g.tenantId, u.id, 'member.update', 'member', before.id, before, after);
       return after;
     });
@@ -596,7 +598,7 @@ export function memberRoutes(app: App) {
       const tenant = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
       t.set(P.tenant(g.tenantId), { ...tenant, memberCount: Object.values(roster.members).filter((e) => !e.archived).length });
       t.set(P.member(g.tenantId, before.id), { ...before, userId: null, archived: true, removed: true });
-      t.set(P.roster(g.tenantId), roster);
+      writeRoster(t, g.tenantId, roster);
       if (mu && before.userId && mu.memberships?.[g.tenantId] === before.id) {
         const ms = { ...mu.memberships };
         delete ms[g.tenantId];
@@ -697,7 +699,7 @@ export function memberRoutes(app: App) {
         m = { ...(await t.get<MemberDoc>(P.member(g.tenantId, mid)))!, userId: jr.userId, gone: false };
         roster.members[mid] = { ...e, userId: jr.userId, photoV: ju.photoV ?? null, gone: false };
         t.set(P.member(g.tenantId, mid), m);
-        t.set(P.roster(g.tenantId), roster);
+        writeRoster(t, g.tenantId, roster);
       } else {
         m = (await addMember(t, g, u.id, { name: ju.name, phone: ju.phone, email: ju.email, branchId, userId: jr.userId, photoV: ju.photoV ?? null })).m;
       }
@@ -796,7 +798,7 @@ export function memberRoutes(app: App) {
       const next = { ...s, payments: [...s.payments, p] };
       rosterPutSub(roster, s.memberId, next);
       t.set(P.sub(g.tenantId, id), next);
-      t.set(P.roster(g.tenantId), roster);
+      writeRoster(t, g.tenantId, roster);
       await bumpDaily(t, g.tenantId, { collected: amount, payments: 1 }, branchOf(g.tenant, roster.members[s.memberId]?.branchId));
       audit(t, g.tenantId, u.id, 'payment.create', 'payment', p.id, null, p);
       const who = roster.members[s.memberId];
@@ -837,7 +839,7 @@ export function memberRoutes(app: App) {
       const next = { ...s, freezes: [...s.freezes, f] };
       rosterPutSub(roster, m.id, next);
       t.set(P.sub(g.tenantId, id), next);
-      t.set(P.roster(g.tenantId), roster);
+      writeRoster(t, g.tenantId, roster);
       audit(t, g.tenantId, u.id, 'membership.freeze', 'freeze', f.id, null, f);
       await notify(t, m.userId, g.tenantId, 'Membership frozen', `Your membership is frozen for ${days} day${days === 1 ? '' : 's'} from ${prettyDate(start)}. Your end date moves ahead by the same days.`);
       return { freeze: f, newEndDate: addDays(effectiveEnd(cur), days) };
@@ -864,7 +866,7 @@ export function memberRoutes(app: App) {
       const roster = await readRoster(t, g.tenantId);
       rosterPutSub(roster, s.memberId, next);
       t.set(P.sub(g.tenantId, subId), next);
-      t.set(P.roster(g.tenantId), roster);
+      writeRoster(t, g.tenantId, roster);
       audit(t, g.tenantId, u.id, 'membership.unfreeze', 'freeze', fid, f, after);
       return after;
     });
@@ -955,7 +957,7 @@ async function saveMembership(c: C, g: GymCtx, actorId: string, memberId: string
     };
     rosterPutSub(roster, m.id, s);
     t.create(P.sub(g.tenantId, id), s);
-    t.set(P.roster(g.tenantId), roster);
+    writeRoster(t, g.tenantId, roster);
     if (received > 0) await bumpDaily(t, g.tenantId, { collected: received, payments: 1 }, branchOf(g.tenant, m.branchId));
     audit(t, g.tenantId, actorId, old ? 'membership.correct' : 'membership.create', 'subscription', id, old, { ...s, received });
     await notify(t, m.userId, g.tenantId, old ? 'Membership updated' : 'Membership added', `${tenant.name} ${old ? 'updated' : 'added'} your ${plan.name} membership: ${prettyDate(startDate)} to ${prettyDate(endDate)}.`);
