@@ -1019,6 +1019,7 @@ class _AdminPeopleListState extends ConsumerState<AdminPeopleList> {
         loading: const ListSkeleton(rows: 8),
         builder: (d) {
           final all = (d as List).cast<Map>();
+          PhotoCache.warm(all.map((p) => p['photoUrl'] as String?)); // photos load together, in the background
           final t = q.trim().toLowerCase();
           final list = all.where((p) => (branch == null || p['branchId'] == branch) && (t.isEmpty || '${p['name']} ${p['phone'] ?? ''} ${p['memberCode'] ?? ''}'.toLowerCase().contains(t))).toList();
           return RefreshIndicator(
@@ -1040,6 +1041,7 @@ class _AdminPeopleListState extends ConsumerState<AdminPeopleList> {
               for (final p in list)
                 _PersonTile(
                   name: '${p['name'] ?? ''}',
+                  photoUrl: p['photoUrl'] as String?,
                   sub: [
                     if (widget.kind == 'members') p['memberCode'] else _roleName(context, p['role'] as String?),
                     p['branchName'],
@@ -1064,8 +1066,9 @@ class _AdminPeopleListState extends ConsumerState<AdminPeopleList> {
 }
 
 class _PersonTile extends StatelessWidget {
-  const _PersonTile({required this.name, required this.sub, required this.onTap});
+  const _PersonTile({required this.name, required this.sub, required this.onTap, this.photoUrl});
   final String name;
+  final String? photoUrl;
   final String sub;
   final VoidCallback onTap;
   @override
@@ -1076,7 +1079,7 @@ class _PersonTile extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           child: ListTile(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            leading: CircleAvatar(backgroundColor: C.indigo.withAlpha(40), child: Text(name.isEmpty ? '?' : name[0].toUpperCase(), style: const TextStyle(color: C.indigo, fontWeight: FontWeight.w800))),
+            leading: Avatar(name: name.isEmpty ? '?' : name, url: photoUrl, size: 42),
             title: Text(name, style: const TextStyle(fontWeight: FontWeight.w700)),
             subtitle: Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis),
             trailing: const Icon(Icons.chevron_right_rounded),

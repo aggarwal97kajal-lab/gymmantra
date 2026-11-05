@@ -433,7 +433,7 @@ export function superRoutes(app: App) {
     if (kind === 'members') {
       return c.json(
         members
-          .map(([id, e]) => ({ id, userId: e.userId, name: e.name, phone: e.phone, memberCode: e.memberCode, branchId: branchOf(tenant, e.branchId), branchName: branchName(e.branchId), status: e.gone ? 'GONE' : stateOf(e, today).status, role: 'MEMBER' }))
+          .map(([id, e]) => ({ id, userId: e.userId, photoUrl: e.userId && e.photoV && !e.gone ? `/api/v1/photos/${e.userId}?v=${e.photoV}` : null, name: e.name, phone: e.phone, memberCode: e.memberCode, branchId: branchOf(tenant, e.branchId), branchName: branchName(e.branchId), status: e.gone ? 'GONE' : stateOf(e, today).status, role: 'MEMBER' }))
           .sort((a, b) => a.name.localeCompare(b.name)),
       );
     }
@@ -446,7 +446,8 @@ export function superRoutes(app: App) {
         .map((r, i) => {
           const u = users[i];
           const bid = kind === 'trainers' ? profiles[i]?.branchId ?? null : r.data.branchIds?.[0] ?? null;
-          return { id: r.id, userId: r.data.userId ?? r.id, name: u?.name ?? 'User', phone: u?.phone ?? null, email: u?.email ?? null, role: r.data.role, branchId: r.data.role === 'OWNER' ? null : branchOf(tenant, bid), branchName: r.data.role === 'OWNER' ? null : branchName(bid), status: u?.deleted ? 'GONE' : 'ACTIVE' };
+          const uid = r.data.userId ?? r.id;
+          return { id: r.id, userId: uid, photoUrl: u?.photoV && !u.deleted ? `/api/v1/photos/${uid}?v=${u.photoV}` : null, name: u?.name ?? 'User', phone: u?.phone ?? null, email: u?.email ?? null, role: r.data.role, branchId: r.data.role === 'OWNER' ? null : branchOf(tenant, bid), branchName: r.data.role === 'OWNER' ? null : branchName(bid), status: u?.deleted ? 'GONE' : 'ACTIVE' };
         })
         .sort((a, b) => (a.role === b.role ? a.name.localeCompare(b.name) : a.role === 'OWNER' ? -1 : 1)),
     );
