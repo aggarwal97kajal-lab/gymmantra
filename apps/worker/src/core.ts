@@ -1,3 +1,5 @@
+import { queuePush } from './lib/push';
+import type { ServiceAccount } from './lib/gauth';
 import type { Context, Hono } from 'hono';
 import { edgeGet, edgePut } from './lib/edge';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
@@ -258,6 +260,8 @@ export interface Deps {
   secure: boolean;
   /** Reads a JSON file from the static assets (exercise list). */
   assetJson: (path: string) => Promise<any>;
+  /** Firebase service account for phone notifications (null = off). */
+  serviceAccount?: ServiceAccount | null;
 }
 
 export interface Secrets {
@@ -522,6 +526,7 @@ export async function notify(t: Tx, userId: string | null | undefined, tenantId:
   if (!userId) return;
   const doc = (await t.get<{ items: NoteItem[] }>(P.notes(userId))) ?? { items: [] };
   t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, branchId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
+  queuePush({ uid: userId, title, body, data: { kind: 'note', ...(tenantId ? { tenantId } : {}), ...(branchId ? { branchId } : {}) } });
 }
 
 /**

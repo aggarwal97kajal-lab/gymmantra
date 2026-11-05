@@ -1247,3 +1247,39 @@ describe('gym transfer, close, broadcasts and gate', () => {
     expect(g.body.url).not.toContain('abc');
   });
 });
+
+describe('phone notifications', () => {
+  it('a payment sends a push to the member phone through FCM', async () => {
+    const kp = (await crypto.subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+    const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', kp.privateKey)) as ArrayBuffer);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(der).toString('base64')}\n-----END PRIVATE KEY-----\n`;
+    h.deps.serviceAccount = { project_id: 'demo', client_email: 'sa@demo.iam.gserviceaccount.com', private_key: pem };
+    const sent: any[] = [];
+    const real = global.fetch;
+    (global as any).fetch = async (u: any, init?: any) => {
+      const url = String(u);
+      if (url === 'https://oauth2.googleapis.com/token') return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }));
+      if (url.startsWith('https://fcm.googleapis.com/')) {
+        sent.push(JSON.parse(init.body));
+        return new Response('{}');
+      }
+      return real(u, init);
+    };
+    try {
+      const owner = await h.ownerWithGym('Push Gym');
+      const mem = await h.signup('Push Member');
+      expect((await h.api.post('/me/push-token', { token: 'phone-token-1234567890' }, mem.token)).status).toBe(200);
+      await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+      const reqs = await h.api.get('/join-requests', owner.token);
+      await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sent.some((m) => m.message.token === 'phone-token-1234567890' && m.message.notification.title === 'Welcome!')).toBe(true);
+      const topics = await h.api.get('/me/push-topics', mem.token);
+      expect(topics.body.topics).toContain('all');
+      expect(topics.body.topics.some((t: string) => t.startsWith('g_'))).toBe(true);
+    } finally {
+      (global as any).fetch = real;
+      h.deps.serviceAccount = null;
+    }
+  });
+});

@@ -43,6 +43,7 @@ function depsFor(env: WorkerEnv, url: URL): Deps {
     identity,
     superAdminEmail: (env.SUPER_ADMIN_EMAIL ?? '').trim().toLowerCase(),
     googleClientId: googleIds[0] ?? null,
+    serviceAccount: parseServiceAccount(env.FIREBASE_SERVICE_ACCOUNT),
     secure: url.protocol === 'https:',
     assetJson: async (path) => {
       const r = await env.ASSETS.fetch(new URL(path, url.origin).toString());

@@ -1,3 +1,4 @@
+import { gymTopic, pushTokensPath, topicName, type PushTokensDoc } from '../lib/push';
 import { personDetails } from '../lib/person';
 import { Broadcast, broadcastRolesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
 import { bad, conflict, forbidden, HttpError, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -487,6 +488,51 @@ export function meRoutes(app: App) {
     const branch = c.req.header('x-branch-id');
     const items = (doc?.items ?? []).filter((n) => !branch || !n.branchId || !u.staffOf?.[n.tenantId ?? '']?.active || n.branchId === branch);
     return c.json([...items, ...notices, ...fromGm].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 60));
+  });
+
+  /** The phone's notification token (one person can use a few phones). */
+  app.post('/api/v1/me/push-token', async (c) => {
+    const u = await authenticate(c);
+    const b = body(await c.req.json().catch(() => null));
+    const token = str(b, 'token', { min: 20, max: 4096, label: 'token' });
+    const appName = optStr(b, 'app', { max: 20 }) ?? 'main';
+    await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<PushTokensDoc>(pushTokensPath(u.id))) ?? { tokens: [] };
+      t.set(pushTokensPath(u.id), { tokens: [{ token, at: nowIso(), app: appName }, ...cur.tokens.filter((x) => x.token !== token)].slice(0, 5) });
+    });
+    return c.json({ ok: true });
+  });
+  app.post('/api/v1/me/push-token/remove', async (c) => {
+    const u = await authenticate(c);
+    const b = body(await c.req.json().catch(() => null));
+    const token = str(b, 'token', { max: 4096, label: 'token' });
+    await c.var.deps.store.tx(async (t) => {
+      const cur = await t.get<PushTokensDoc>(pushTokensPath(u.id));
+      if (cur) t.set(pushTokensPath(u.id), { tokens: cur.tokens.filter((x) => x.token !== token) });
+    });
+    return c.json({ ok: true });
+  });
+  /** Topics this phone should listen to: everyone, their roles, their state, their gyms' branches. */
+  app.get('/api/v1/me/push-topics', async (c) => {
+    const u = await authenticate(c);
+    const { store } = c.var.deps;
+    const topics = new Set<string>(['all']);
+    for (const r of broadcastRolesOf(u)) topics.add(`role_${r}`);
+    if (u.state) topics.add(topicName(`state_${u.state}`));
+    const memberGyms = Object.entries(u.memberships ?? {});
+    const trainerGyms = Object.entries(u.staffOf ?? {}).filter(([, s]) => s.active && s.role === 'TRAINER').map(([t]) => t);
+    const tenants = await store.getMany<TenantDoc>([...memberGyms.map(([t]) => P.tenant(t)), ...trainerGyms.map((t) => P.tenant(t))]);
+    const rosters = await Promise.all(memberGyms.map(([t]) => readRoster(store, t)));
+    memberGyms.forEach(([tid, mid], i) => {
+      const tn = tenants[i];
+      if (tn) topics.add(gymTopic(tid, branchOf(tn, rosters[i].members[mid]?.branchId), 'M'));
+    });
+    const profiles = await store.getMany<{ branchId?: string | null }>(trainerGyms.map((t) => P.trainer(t, u.id)));
+    trainerGyms.forEach((tid, i) => {
+      const tn = tenants[memberGyms.length + i];
+      if (tn) topics.add(gymTopic(tid, branchOf(tn, profiles[i]?.branchId), 'T'));
+    });
+    return c.json({ topics: [...topics] });
   });
 
   app.post('/api/v1/me/notifications/read', async (c) => {

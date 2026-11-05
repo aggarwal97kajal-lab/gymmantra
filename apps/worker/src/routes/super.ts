@@ -1,6 +1,7 @@
 import { edgeGet, edgePut } from '../lib/edge';
 import { App, audit, authenticate, Broadcast, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
 import { removeAccount } from './me';
+import { queuePush, topicName } from '../lib/push';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { isYmd } from '../lib/dates';
 import { body, int, oneOf, optBool, optInt, optStr, str, strList } from '../lib/validate';
@@ -300,6 +301,8 @@ export function superRoutes(app: App) {
       t.set(P.broadcasts, { items: [item, ...cur.items].slice(0, 40) });
       audit(t, null, u.id, 'broadcast.create', 'broadcast', item.id, null, item);
     });
+    const roleCond = item.roles.includes('ALL') ? `'all' in topics` : item.roles.map((r) => `'role_${r}' in topics`).join(' || ');
+    queuePush({ topicCondition: item.state ? `(${roleCond}) && '${topicName(`state_${item.state}`)}' in topics` : roleCond, title: item.title, body: item.body, data: { kind: 'broadcast' } });
     return c.json(item, 201);
   });
   app.delete('/api/v1/super/broadcasts/:id', async (c) => {

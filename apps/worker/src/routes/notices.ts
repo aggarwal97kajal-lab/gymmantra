@@ -1,3 +1,4 @@
+import { gymTopic, queuePush } from '../lib/push';
 import { App, audit, authenticate, branchOf, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc, need } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -157,6 +158,13 @@ export function noticeRoutes(app: App) {
       t.set(P.notice(g.tenantId, n.id), n);
       audit(t, g.tenantId, u.id, 'notice.create', 'notice', n.id, null, n);
     });
+    // Phone notification to the branch's members / trainers (topics; a status filter stays in-app only).
+    const bids = (branchIds ?? g.tenant.branches.map((x) => x.id)).slice(0, 2);
+    const topics = [
+      ...(forMembers && memberFilter === 'ALL' ? bids.map((bid) => gymTopic(g.tenantId, bid, 'M')) : []),
+      ...(forTrainers ? bids.map((bid) => gymTopic(g.tenantId, bid, 'T')) : []),
+    ].slice(0, 5);
+    if (topics.length) queuePush({ topicCondition: topics.map((x) => `'${x}' in topics`).join(' || '), title: `${g.tenant.name}: ${title}`, body: message, data: { kind: 'notice' } });
     return c.json(n, 201);
   });
 

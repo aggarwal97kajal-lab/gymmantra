@@ -1,3 +1,4 @@
+import { sendPush, takePush } from './lib/push';
 import { gateRoutes } from './routes/gate';
 import { ownershipRoutes } from './routes/ownership';
 import { staffDayRoutes } from './routes/staffdays';
@@ -67,6 +68,16 @@ export function createApp(getDeps: () => Deps) {
     const [secrets] = await Promise.all([loadSecrets(deps.store), ensureBaseData(deps.store)]);
     c.set('secrets', secrets);
     await next();
+    // Phone notifications queued during this request go out after the answer.
+    const pushes = takePush();
+    if (pushes.length && deps.serviceAccount) {
+      const job = sendPush(deps.store, deps.serviceAccount, pushes);
+      try {
+        c.executionCtx.waitUntil(job);
+      } catch {
+        await job;
+      }
+    }
     c.header('cache-control', 'no-store');
     const ms = Date.now() - t0;
     const tokMs = ((st as { tokMs?: number }).tokMs ?? 0) - tk0;
