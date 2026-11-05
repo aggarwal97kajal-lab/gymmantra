@@ -172,6 +172,8 @@ export function checkinRoutes(app: App) {
     const staff = u.staffOf?.[tenantId];
     const isTrainer = !!staff?.active && staff.role === 'TRAINER';
     if (!memberId && !isTrainer) throw forbidden(`You are not a member of ${tenant.name}. Join the gym first with its gym code`);
+    // A fake-location (mock) app on the phone: no check-in (same rule as staff attendance).
+    if (b.mocked === true) throw forbidden('A fake location app is on. Turn it off to check in');
     if (spot.lat != null && spot.lng != null) {
       const lat = coord(b.lat, 90);
       const lng = coord(b.lng, 180);

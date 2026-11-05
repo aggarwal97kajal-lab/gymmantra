@@ -351,11 +351,11 @@ export function authRoutes(app: App) {
     }
     const after = await store.tx(async (t) => {
       const x = (await t.get<UserDoc>(P.user(u.id)))!;
-      const n: UserDoc = { ...x, authEmail: cur.authEmail, mustSetPassword: false, initPw: null };
+      const n: UserDoc = { ...x, authEmail: cur.authEmail, mustSetPassword: false, initPw: null, sessionV: (x.sessionV ?? 0) + 1 };
       t.set(P.user(u.id), n);
       return n;
     });
-    return c.json({ ok: true, user: publicUser(u.id, after) });
+    return c.json({ ok: true, user: publicUser(u.id, after), token: await issueSession(c, u.id, after.sessionV) });
   });
 
   /** Forgot password: Firebase emails a reset link to the account's email. */
@@ -410,11 +410,12 @@ export function authRoutes(app: App) {
     await rateLimit(c, 'reset', code.slice(0, 40));
     const email = await identity.resetPassword(code, password);
     // A fresh password also clears any lockout.
+    // A reset also logs out every phone that was logged in with the old password.
     const row = (await store.query<UserDoc>('users', [['authEmail', email]]))[0];
-    if (row && (row.data.failed || row.data.lockedUntil || row.data.mustSetPassword)) {
+    if (row) {
       await store.tx(async (t) => {
         const u = await t.get<UserDoc>(P.user(row.id));
-        if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null, mustSetPassword: false, initPw: null });
+        if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null, mustSetPassword: false, initPw: null, sessionV: (u.sessionV ?? 0) + 1 });
       });
     }
     return c.json({ ok: true });
@@ -458,7 +459,19 @@ export function authRoutes(app: App) {
         t.set(P.user(u.id), { ...cur, authEmail, fbUid: fb.uid });
       });
     }
-    return c.json({ ok: true });
+    // Every other phone / browser is logged out; this one gets a fresh login.
+    const v = await bumpSession(store, u.id);
+    return c.json({ ok: true, token: await issueSession(c, u.id, v) });
+  });
+}
+
+/** Logs the account out everywhere (password changed). Returns the new session version. */
+async function bumpSession(store: C['var']['deps']['store'], uid: string) {
+  return store.tx(async (t) => {
+    const cur = (await t.get<UserDoc>(P.user(uid)))!;
+    const v = (cur.sessionV ?? 0) + 1;
+    t.set(P.user(uid), { ...cur, sessionV: v });
+    return v;
   });
 }
 

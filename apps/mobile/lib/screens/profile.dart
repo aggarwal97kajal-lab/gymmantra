@@ -733,7 +733,10 @@ class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
         error = null;
       });
       try {
-        await Api.instance.post('/auth/change-password', {if (hasPw) 'current': cur.text, 'next': next.text});
+        final r = await Api.instance.post('/auth/change-password', {if (hasPw) 'current': cur.text, 'next': next.text});
+        // Other phones are logged out; this phone keeps working with the new login.
+        final t = (r is Map ? r['token'] : null) as String?;
+        if (t != null) await Api.instance.setToken(t);
         await ref.read(sessionProvider).refreshUser().catchError((_) {});
         if (context.mounted) {
           toast(context, done, kind: DripKind.ok);

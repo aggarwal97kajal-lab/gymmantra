@@ -20,7 +20,6 @@ const PUBLIC = new Set([
   'GET /api/v1/auth/config', // app settings (Google client id, support number)
   'GET /api/v1/ping', // connection warm-up
   'POST /api/v1/diag', // timing reports from apps (write-only)
-  'GET /api/v1/diag', // read with a private key
   'GET /api/v1/ads/:id/image', // advert picture (random id)
   'GET /api/v1/offers/:tenantId/:id/image', // offer banner picture (random ids)
   'GET /api/v1/exercises', // exercise library

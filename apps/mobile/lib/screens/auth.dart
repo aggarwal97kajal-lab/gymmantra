@@ -665,6 +665,8 @@ class _SetPasswordState extends ConsumerState<SetPasswordScreen> with _Busy {
       if (pw.text.length < 8) throw ApiException(400, short);
       if (pw.text != pw2.text) throw ApiException(400, mismatch);
       final r = await Api.instance.post('/auth/set-password', {'next': pw.text});
+      final t = r['token'] as String?;
+      if (t != null) await Api.instance.setToken(t); // other phones are logged out; this one stays in
       ref.read(sessionProvider).patchUser(Map<String, dynamic>.from(r['user'] as Map));
       if (mounted) toast(context, context.t('Password saved'), kind: DripKind.ok);
     });

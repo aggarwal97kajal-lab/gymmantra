@@ -137,7 +137,10 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
       push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: false, fix: `Google did not accept the key: ${String((e as Error)?.message ?? e).slice(0, 160)}. Make a new key and paste it again` };
     }
   }
-  return new Response(JSON.stringify({ allOk, steps, push }, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+  // Public page: only which steps pass. The error texts (they can describe the server's setup) go to the private log.
+  for (const s of [...steps, push]) if (!s.ok) console.error(`setup-check: ${s.step}: ${s.fix ?? ''}`);
+  const out = { allOk, steps: steps.map((s) => ({ step: s.step, ok: s.ok })), push: { step: push.step, ok: push.ok } };
+  return new Response(JSON.stringify(out, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
 let appInst: ReturnType<typeof createApp> | null = null;

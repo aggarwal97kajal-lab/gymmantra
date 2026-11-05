@@ -487,6 +487,7 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
         if (pos != null) 'lat': pos.latitude,
         if (pos != null) 'lng': pos.longitude,
         if (pos != null) 'accuracy': pos.accuracy,
+        if (pos != null) 'mocked': pos.isMocked,
       });
       HapticFeedback.mediumImpact();
       ref.invalidate(gymsProvider);

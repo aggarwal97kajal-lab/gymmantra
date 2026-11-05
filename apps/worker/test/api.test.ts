@@ -1498,3 +1498,50 @@ describe('check-in only at your own branch', () => {
     expect((await h.api.post('/me/checkin', { code: ownQr.text }, mem.token)).status).toBe(201);
   });
 });
+
+describe('security hardening (Nov 6)', () => {
+  it('changing the password logs out other phones; this phone gets a new login', async () => {
+    const u = await h.signup('Two Phones');
+    const other = (await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).body.token as string;
+    expect((await h.api.get('/auth/me', other)).status).toBe(200);
+    const r = await h.api.post('/auth/change-password', { current: 'secret123', next: 'newsecret123' }, u.token);
+    expect(r.status).toBe(200);
+    expect((await h.api.get('/auth/me', other)).status).toBe(401);
+    expect((await h.api.get('/auth/me', u.token)).status).toBe(401);
+    expect((await h.api.get('/auth/me', r.body.token)).status).toBe(200);
+  });
+
+  it('server errors show only an error ID', async () => {
+    const owner = await h.ownerWithGym('Err Gym');
+    const real = h.store.get.bind(h.store);
+    (h.store as any).get = async (p: string) => {
+      if (p.startsWith('tenants/') && p.endsWith('/roster/main')) throw new Error('secret internal detail');
+      return real(p);
+    };
+    try {
+      const r = await h.api.get('/members', owner.token);
+      expect(r.status).toBe(500);
+      expect(r.body.message).toContain('Error ID');
+      expect(r.body.message).not.toContain('secret internal detail');
+    } finally {
+      (h.store as any).get = real;
+    }
+  });
+
+  it('a member with a fake-location app cannot check in', async () => {
+    const owner = await h.ownerWithGym('Mock Gym');
+    const mem = await h.signup('Mock Member');
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    const qr = (await h.api.get('/gym/checkin-qr', owner.token)).body;
+    expect((await h.api.post('/me/checkin', { code: qr.text, mocked: true }, mem.token)).status).toBe(403);
+    expect((await h.api.post('/me/checkin', { code: qr.text, mocked: false }, mem.token)).status).toBe(201);
+  });
+
+  it('diagnostic log is for the super admin only', async () => {
+    const u = await h.signup('Not Admin');
+    expect((await h.api.get('/diag?key=gmdiag-5c81e2a7')).status).toBe(401);
+    expect((await h.api.get('/diag', u.token)).status).toBe(403);
+  });
+});

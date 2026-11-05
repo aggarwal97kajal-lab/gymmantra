@@ -18,6 +18,7 @@ export const DESK_ROLES: Role[] = ['OWNER', 'FRONT_DESK'];
 
 export interface UserDoc {
   name: string;
+  sessionV?: number; // goes up when the password changes: older logins on other phones stop working
   email: string | null;
   authEmail: string | null; // email used for the Firebase password account
   fbUid: string | null;
@@ -323,8 +324,9 @@ export const SESSION_COOKIE = 'gm_session';
 export const SESSION_DAYS = 30;
 const key = (s: string) => new TextEncoder().encode(s);
 
-export async function issueSession(c: C, uid: string) {
-  const token = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).setSubject(uid).setIssuedAt().setExpirationTime(`${SESSION_DAYS}d`).sign(key(c.var.secrets.jwt));
+export async function issueSession(c: C, uid: string, sessionV?: number) {
+  const v = sessionV ?? (await c.var.deps.store.get<UserDoc>(P.user(uid)))?.sessionV ?? 0;
+  const token = await new SignJWT({ v }).setProtectedHeader({ alg: 'HS256' }).setSubject(uid).setIssuedAt().setExpirationTime(`${SESSION_DAYS}d`).sign(key(c.var.secrets.jwt));
   setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: 'Lax', secure: c.var.deps.secure, path: '/', maxAge: SESSION_DAYS * 86400 });
   return token;
 }
@@ -345,14 +347,18 @@ export async function authenticate(c: C): Promise<AuthUser> {
   if (!token) throw unauthorized();
   if (viaCookie && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !c.req.header('x-gm-client')) throw forbidden('Missing client header');
   let uid: string;
+  let v = 0;
   try {
     const { payload } = await jwtVerify(token, key(c.var.secrets.jwt));
     uid = String(payload.sub);
+    v = typeof payload.v === 'number' ? payload.v : 0;
   } catch {
     throw unauthorized('Session expired. Please log in again');
   }
   const u = await c.var.deps.store.get<UserDoc>(P.user(uid));
   if (!u || u.deleted) throw unauthorized();
+  // The password was changed after this login: this phone has to log in again.
+  if ((u.sessionV ?? 0) !== v) throw unauthorized('Your password was changed. Please log in again');
   const user = { ...u, id: uid };
   // Owner decision: the GymMantra admin uses the website (and later the admin app), not the gym app.
   if (isMobile(c) && isWebOnly(user)) throw unauthorized(WEB_ONLY_MESSAGE);

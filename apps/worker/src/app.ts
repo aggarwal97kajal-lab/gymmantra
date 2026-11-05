@@ -15,7 +15,7 @@ import { programRoutes } from './routes/programs';
 import { ptRoutes } from './routes/pt';
 import { trainerRoutes } from './routes/trainers';
 import { Hono } from 'hono';
-import { Deps, Env, loadSecrets } from './core';
+import { authenticate, Deps, Env, loadSecrets, requireSuper } from './core';
 import { HttpError } from './lib/http';
 import { attendanceRoutes } from './routes/attendance';
 import { authRoutes } from './routes/auth';
@@ -27,7 +27,7 @@ import { ticketRoutes } from './routes/tickets';
 import { transferRoutes } from './routes/transfers';
 import { AlreadyExists } from './store/store';
 
-const DIAG_KEY = 'gmdiag-5c81e2a7';
+const diagHits = new Map<string, { at: number; n: number }>(); // POST /diag limit per network address
 
 async function logDiag(deps: Deps, items: Record<string, unknown>[]) {
   try {
@@ -50,10 +50,17 @@ export function createApp(getDeps: () => Deps) {
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ statusCode: err.status, message: err.message, ...err.extra }, err.status as any);
     if (err instanceof AlreadyExists) return c.json({ statusCode: 409, message: 'This already exists' }, 409);
-    console.error(err);
-    // Show the first part of the error so problems can be reported from a phone screenshot.
-    const detail = String((err as any)?.message ?? err).slice(0, 200);
-    return c.json({ statusCode: 500, message: `Something went wrong on the server. Please try again. (${detail})` }, 500);
+    // The person sees only a short error ID; the real error stays in the private log (Cloudflare logs + diag).
+    const errorId = crypto.randomUUID().slice(0, 8).toUpperCase();
+    console.error(`error ${errorId}`, err);
+    const detail = String((err as any)?.message ?? err).slice(0, 300);
+    const w = logDiag(c.var.deps, [{ at: new Date().toISOString(), src: 'error', id: errorId, m: c.req.method, p: c.req.path, e: detail }]).catch(() => {});
+    try {
+      c.executionCtx.waitUntil(w);
+    } catch {
+      /* tests */
+    }
+    return c.json({ statusCode: 500, message: `Something went wrong on the server. Please try again. (Error ID: ${errorId})`, errorId }, 500);
   });
 
   app.use('/api/*', async (c, next) => {
@@ -102,6 +109,13 @@ export function createApp(getDeps: () => Deps) {
   app.get('/api/v1/ping', (c) => c.json({ ok: true }));
 
   app.post('/api/v1/diag', async (c) => {
+    // Open to apps without login, so it is limited: 20 reports a minute per network address.
+    const ip = c.req.header('cf-connecting-ip') ?? 'local';
+    const now = Date.now();
+    const hit = diagHits.get(ip);
+    if (hit && now - hit.at < 60_000 && hit.n >= 20) return c.json({ ok: true });
+    diagHits.set(ip, hit && now - hit.at < 60_000 ? { at: hit.at, n: hit.n + 1 } : { at: now, n: 1 });
+    if (diagHits.size > 5000) diagHits.clear();
     const b = await c.req.json().catch(() => null);
     const list = Array.isArray(b?.items) ? (b.items as unknown[]).slice(0, 30) : [];
     const clean = list
@@ -111,7 +125,8 @@ export function createApp(getDeps: () => Deps) {
     return c.json({ ok: true });
   });
   app.get('/api/v1/diag', async (c) => {
-    if (c.req.query('key') !== DIAG_KEY) return c.json({ statusCode: 404, message: 'Not found' }, 404);
+    await authenticate(c); // GymMantra super admin only (no fixed key in the code any more)
+    requireSuper(c);
     const day = c.req.query('day') ?? new Date().toISOString().slice(0, 10);
     const d = await c.var.deps.store.get<{ items: unknown[] }>(`diag/${day}`);
     return c.json(d?.items ?? []);
