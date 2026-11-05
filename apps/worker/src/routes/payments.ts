@@ -1,3 +1,4 @@
+import { superLater } from '../lib/superpush';
 import { App, audit, authenticate, C, gymOf, notify, P, requireSuper, Role, TenantDoc } from '../core';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -298,6 +299,8 @@ export function paymentRoutes(app: App) {
       t.set(P.planPayment(key), paid);
       return { payment: paid, bill };
     });
+    if (out.payment.status === 'PAID' && out.bill) superLater(c, 'payments', `Plan payment ₹${out.payment.amount}`, `${g.tenant.name} · ${out.payment.planName} · ${out.payment.app ?? 'UPI'}`);
+    if (out.payment.status === 'FAILED') superLater(c, 'failed', 'Plan payment failed', `${g.tenant.name} · ₹${out.payment.amount} · ${out.payment.planName}`);
     return c.json(out);
   });
 

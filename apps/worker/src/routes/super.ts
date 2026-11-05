@@ -1,3 +1,4 @@
+import { ADMIN_PUSH, SUPER_KINDS } from '../lib/superpush';
 import { edgeGet, edgePut } from '../lib/edge';
 import { App, audit, authenticate, Broadcast, P, requireSuper, Role, TenantDoc, UserDoc } from '../core';
 import { removeAccount } from './me';
@@ -277,6 +278,22 @@ export function superRoutes(app: App) {
         .sort((a, b) => b.members - a.members)
         .slice(0, 10),
     });
+  });
+
+  /** Which phone notifications the super admin wants (board 63). */
+  app.get('/api/v1/super/push-settings', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const d = (await c.var.deps.store.get<Record<string, boolean>>(ADMIN_PUSH)) ?? {};
+    return c.json(Object.fromEntries(SUPER_KINDS.map((k) => [k, d[k] !== false])));
+  });
+  app.put('/api/v1/super/push-settings', async (c) => {
+    await authenticate(c);
+    requireSuper(c);
+    const b = body(await c.req.json().catch(() => null));
+    const next = Object.fromEntries(SUPER_KINDS.map((k) => [k, b[k] !== false]));
+    await c.var.deps.store.tx(async (t) => t.set(ADMIN_PUSH, next));
+    return c.json(next);
   });
 
   /** Super admin → notification to everyone, or to owners / staff / trainers / members, optionally one state. */

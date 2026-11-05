@@ -1330,4 +1330,12 @@ const hindi = <String, String>{
   "Internet is slow — still loading…": "इंटरनेट धीमा है — अभी लोड हो रहा है…",
   "{gym} filled in these details. You can change them.": "{gym} ने ये डिटेल भरी हैं। आप इन्हें बदल सकते हैं।",
   "Screenshots are off for this photo": "इस फ़ोटो का स्क्रीनशॉट नहीं लिया जा सकता",
+  "⏳ Last day of your {plan} plan": "⏳ आपके {plan} प्लान का आख़िरी दिन",
+  "⏳ {plan} plan ends in {n} days": "⏳ {plan} प्लान {n} दिन में ख़त्म",
+  "Renew so offers, PT and reports keep working.": "रिन्यू करें ताकि ऑफ़र, PT और रिपोर्ट चलते रहें।",
+  "Notification settings": "नोटिफ़िकेशन सेटिंग",
+  "New tickets and replies": "नए टिकट और जवाब",
+  "Failed payments": "फ़ेल पेमेंट",
+  "Gym plans that ended": "जिन जिम का प्लान ख़त्म हुआ",
+  "Which phone notifications you get.": "आपको कौन-सी फ़ोन नोटिफ़िकेशन मिलें।",
 };

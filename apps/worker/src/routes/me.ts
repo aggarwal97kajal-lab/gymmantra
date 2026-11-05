@@ -1,3 +1,4 @@
+import { superLater } from '../lib/superpush';
 import { gymTopic, pushTokensPath, topicName, type PushTokensDoc } from '../lib/push';
 import { personDetails } from '../lib/person';
 import { Broadcast, broadcastRolesOf, Deps, notifyDesk, accountRole, branchOf, gymFace, App, authenticate, C, isDeskStaff, roleLocked, isTrainer, syncRosterPhoto, MemberDoc, NoteItem, P, paidOf, readRoster, rosterEntry, stateOf, SubDoc, TenantDoc, UserDoc, userNames } from '../core';
@@ -448,6 +449,7 @@ export function meRoutes(app: App) {
       tx.create(P.ticket(id), doc);
       return doc;
     });
+    superLater(c, 'tickets', 'New support ticket', `${u.name}: ${subject}`);
     return c.json({ id, ...t }, 201);
   });
 
@@ -468,7 +470,9 @@ export function meRoutes(app: App) {
 
   app.post('/api/v1/me/tickets/:id/messages', async (c) => {
     const u = await authenticate(c);
-    return c.json(await replyTicket(c, c.req.param('id'), (t) => t.userId === u.id, false), 201);
+    const out = await replyTicket(c, c.req.param('id'), (t) => t.userId === u.id, false);
+    superLater(c, 'tickets', 'Ticket reply', `${u.name} wrote on their ticket`);
+    return c.json(out, 201);
   });
 
   app.get('/api/v1/me/notifications', async (c) => {

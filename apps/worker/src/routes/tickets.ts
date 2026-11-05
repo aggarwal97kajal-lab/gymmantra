@@ -1,3 +1,4 @@
+import { superLater } from '../lib/superpush';
 import { App, authenticate, C, gymOf, notify, P, requireSuper, UserDoc } from '../core';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, optStr, str } from '../lib/validate';
@@ -166,7 +167,9 @@ export function ticketRoutes(app: App) {
   app.post('/api/v1/tickets/:id/messages', async (c) => {
     await authenticate(c);
     const g = await gymOf(c);
-    return c.json(await replyTicket(c, c.req.param('id'), gymAllowed(g.tenantId), true), 201);
+    const out = await replyTicket(c, c.req.param('id'), gymAllowed(g.tenantId), true);
+    superLater(c, 'tickets', 'Ticket reply', `${c.var.user.name} (${g.tenant.name}) wrote on a ticket`);
+    return c.json(out, 201);
   });
   app.post('/api/v1/tickets/:id/resolve', async (c) => {
     await authenticate(c);

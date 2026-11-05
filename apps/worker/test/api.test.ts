@@ -1293,3 +1293,32 @@ describe('phone notifications', () => {
     }
   });
 });
+
+describe('plan reminders and GM Admin notifications', () => {
+  it('reminder text by days left', async () => {
+    const { reminderFor } = await import('../src/lib/superpush');
+    const base: any = { name: 'Iron Gym', status: 'ACTIVE', trialEndsAt: null };
+    const end = (d: string) => ({ ...base, planEndsAt: `${d}T18:29:59.000Z` });
+    expect(reminderFor(end('2026-11-20'), 'Pro', '2026-11-05')).toBeNull();
+    expect(reminderFor(end('2026-11-12'), 'Pro', '2026-11-05')!.title).toBe('Pro plan ends in 7 days');
+    expect(reminderFor(end('2026-11-06'), 'Pro', '2026-11-05')!.title).toBe('Pro plan ends tomorrow');
+    expect(reminderFor(end('2026-11-05'), 'Pro', '2026-11-05')!.title).toBe('Last day of your Pro plan');
+    expect(reminderFor(end('2026-11-01'), 'Pro', '2026-11-05')!.title).toBe('Pro plan has ended');
+    expect(reminderFor(end('2026-09-01'), 'Pro', '2026-11-05')).toBeNull(); // 65 days ago, not a weekly day
+    expect(reminderFor(end('2026-09-03'), 'Pro', '2026-11-05')!.title).toBe('Pro plan has ended'); // 63 days = 9 weeks
+    expect(reminderFor({ ...base, status: 'TRIAL', trialEndsAt: '2026-11-08T18:29:59.000Z' }, null, '2026-11-05')!.title).toBe('Free trial ends in 3 days');
+  });
+
+  it('super admin hears about a new gym, and can switch it off', async () => {
+    const boss = await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' });
+    const sup = boss.status === 200 ? boss.body.token : (await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' })).body.token;
+    await h.ownerWithGym('Notify Me Gym');
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await h.api.get('/me/notifications', sup)).body.some((n: any) => n.title === 'New gym registered' && n.body.includes('Notify Me Gym'))).toBe(true);
+    expect((await h.api.put('/super/push-settings', { gyms: false }, sup)).body.gyms).toBe(false);
+    await h.ownerWithGym('Quiet Gym');
+    await new Promise((r) => setTimeout(r, 30));
+    expect((await h.api.get('/me/notifications', sup)).body.some((n: any) => n.body.includes('Quiet Gym'))).toBe(false);
+    await h.api.put('/super/push-settings', { gyms: true }, sup);
+  });
+});

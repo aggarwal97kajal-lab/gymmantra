@@ -1594,6 +1594,31 @@ class _PlanStrip extends ConsumerWidget {
     if (sub == null) return const SizedBox.shrink();
     final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
     final items = <Widget>[];
+    // Paid plan ending within 7 days (board 64): yellow strip with Renew.
+    final endsAt = DateTime.tryParse((sub['planEndsAt'] as String?) ?? '')?.toLocal();
+    if (owner && sub['plan'] != null && endsAt != null) {
+      final today = DateTime.now();
+      final left = DateTime(endsAt.year, endsAt.month, endsAt.day).difference(DateTime(today.year, today.month, today.day)).inDays;
+      if (left <= 7) {
+        items.add(Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Panel(
+            color: C.warn.withAlpha(36),
+            padding: const EdgeInsets.all(14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              Text(
+                left <= 0 ? context.t('⏳ Last day of your {plan} plan', {'plan': sub['plan']['name']}) : context.t('⏳ {plan} plan ends in {n} days', {'plan': sub['plan']['name'], 'n': left}),
+                style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF92400E)),
+              ),
+              const SizedBox(height: 2),
+              Text(context.t('Renew so offers, PT and reports keep working.'), style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E))),
+              const SizedBox(height: 10),
+              FilledButton(onPressed: () => context.push('/o/subscription'), child: Text(context.t('Renew now'))),
+            ]),
+          ),
+        ));
+      }
+    }
     if (sub['inTrial'] == true) {
       final left = sub['trialDaysLeft'] as int? ?? 0;
       final total = sub['trialTotalDays'] as int? ?? 90;

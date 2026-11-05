@@ -1,5 +1,6 @@
 import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { cronFanouts } from './lib/push';
+import { cronReminders } from './lib/superpush';
 import { setEdgeKv } from './lib/edge';
 import { createApp } from './app';
 import { loadSecrets, type Deps } from './core';
@@ -146,6 +147,7 @@ export default {
     try {
       const d = depsFor(env, new URL('https://cron.gymmantra.internal/'));
       ctx.waitUntil(cronFanouts(d.store, d.serviceAccount ?? null).catch(() => {}));
+      ctx.waitUntil(cronReminders(d, d.serviceAccount ?? null).catch(() => {}));
     } catch {
       /* settings missing: nothing to do */
     }

@@ -1,3 +1,4 @@
+import { superLater } from '../lib/superpush';
 import { App, audit, authenticate, Branch, branchCode, cleanRights, gymOf, isTrainer, notify, P, RIGHT_PRESETS, RIGHTS, Role, Roster, TenantDoc, UserDoc } from '../core';
 import { personDetails } from '../lib/person';
 import { addMonths, todayIST } from '../lib/dates';
@@ -155,6 +156,7 @@ export function gymRoutes(app: App) {
       t.set(P.user(u.id), { ...cur, appRole: 'OWNER', staffOf: { ...cur.staffOf, [id]: { role: 'OWNER', branchIds: [branch.id], active: true } } });
       audit(t, id, u.id, 'gym.create', 'tenant', id, null, tenant);
     });
+    superLater(c, 'gyms', 'New gym registered', `${tenant.name}${tenant.city ? ` · ${tenant.city}` : ''} · free trial`);
     return c.json({ id, ...tenant }, 201);
   });
 

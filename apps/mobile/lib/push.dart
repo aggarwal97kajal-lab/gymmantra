@@ -9,9 +9,10 @@ import 'theme.dart' show adminApp;
 /// Phone notifications (Firebase Cloud Messaging). The server sends every in-app notification to the
 /// person's phones, and gym notices / GymMantra messages to topics this phone listens to.
 /// Settings come from the Firebase Android app (google-services.json), so no Gradle plugin is needed.
-const _options = FirebaseOptions(
+final _options = FirebaseOptions(
   apiKey: 'AIzaSyBlDQq21YwTODUlsVhVz2qo1_HF1fvVBvI',
-  appId: '1:869545734393:android:f05f26de050ce2b1dd3228',
+  // Each Android app (com.gymmantra.gymmantra / com.gymmantra.admin) has its own Firebase app id.
+  appId: adminApp ? '1:869545734393:android:3a6bac68eed665a3dd3228' : '1:869545734393:android:f05f26de050ce2b1dd3228',
   messagingSenderId: '869545734393',
   projectId: 'gymmantra',
   storageBucket: 'gymmantra.firebasestorage.app',
@@ -24,7 +25,6 @@ class Push {
 
   /// At app start. Never stops the app from opening.
   static Future<void> init() async {
-    if (adminApp) return; // the GM Admin app is a separate Android app; it is not registered in Firebase yet
     try {
       await Firebase.initializeApp(options: _options).timeout(const Duration(seconds: 8));
       _ready = true;
@@ -46,12 +46,12 @@ class Push {
       await fm.requestPermission();
       final t = await fm.getToken();
       if (t != null) {
-        await Api.instance.post('/me/push-token', {'token': t, 'app': 'main'});
+        await Api.instance.post('/me/push-token', {'token': t, 'app': adminApp ? 'admin' : 'main'});
         await Prefs.setString('push:token', t);
       }
       _refresh ??= fm.onTokenRefresh.listen((nt) async {
         try {
-          await Api.instance.post('/me/push-token', {'token': nt, 'app': 'main'});
+          await Api.instance.post('/me/push-token', {'token': nt, 'app': adminApp ? 'admin' : 'main'});
           await Prefs.setString('push:token', nt);
         } catch (_) {}
       });

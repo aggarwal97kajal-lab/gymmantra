@@ -1143,3 +1143,71 @@ class _AdminBroadcastState extends ConsumerState<AdminBroadcast> {
     );
   }
 }
+
+// ============================================================ notification settings (board 63)
+
+class AdminPushSettings extends StatefulWidget {
+  const AdminPushSettings({super.key});
+  @override
+  State<AdminPushSettings> createState() => _AdminPushSettingsState();
+}
+
+class _AdminPushSettingsState extends State<AdminPushSettings> {
+  Map<String, bool>? prefs;
+
+  @override
+  void initState() {
+    super.initState();
+    Api.instance.get('/super/push-settings').then((r) {
+      if (mounted) setState(() => prefs = (r as Map).map((k, v) => MapEntry('$k', v == true)));
+    }).catchError((Object e) {
+      if (mounted) toastError(context, e);
+    });
+  }
+
+  Future<void> set(String k, bool on) async {
+    final before = Map<String, bool>.from(prefs!);
+    setState(() => prefs![k] = on);
+    try {
+      await Api.instance.put('/super/push-settings', prefs!);
+    } catch (e) {
+      if (mounted) {
+        setState(() => prefs = before);
+        toastError(context, e);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      ('tickets', Icons.confirmation_number_rounded, context.t('New tickets and replies')),
+      ('payments', Icons.payments_rounded, context.t('Plan payments')),
+      ('gyms', Icons.storefront_rounded, context.t('New gyms')),
+      ('failed', Icons.error_outline_rounded, context.t('Failed payments')),
+      ('expired', Icons.alarm_rounded, context.t('Gym plans that ended')),
+    ];
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Notification settings'))),
+      body: prefs == null
+          ? const ListSkeleton()
+          : ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+              Muted(context.t('Which phone notifications you get.'), size: 12.5),
+              const SizedBox(height: 10),
+              Panel(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Column(children: [
+                  for (final (k, icon, label) in items)
+                    SwitchListTile(
+                      secondary: Icon(icon, color: C.indigo),
+                      title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      value: prefs![k] ?? true,
+                      activeTrackColor: C.indigo,
+                      onChanged: (v) => set(k, v),
+                    ),
+                ]),
+              ),
+            ]),
+    );
+  }
+}
