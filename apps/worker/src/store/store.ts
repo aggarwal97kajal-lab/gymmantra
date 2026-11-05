@@ -28,6 +28,10 @@ export interface Store extends Reader {
   tx<R>(fn: (t: Tx) => Promise<R>): Promise<R>;
   set(path: string, data: Doc): Promise<void>;
   delete(path: string): Promise<void>;
+  /** Backup: the next `limit` documents of the whole database after path `after`, in path order. */
+  dump(after: string | null, limit: number): Promise<{ p: string; d: Doc }[]>;
+  /** Restore: writes these documents back (overwrites them). */
+  load(rows: { p: string; d: Doc }[]): Promise<void>;
 }
 
 export class AlreadyExists extends Error {
@@ -71,6 +75,16 @@ export class MemoryStore implements Store {
   }
   async delete(path: string) {
     this.docs.delete(path);
+  }
+  async dump(after: string | null, limit: number) {
+    return [...this.docs.keys()]
+      .filter((p) => after === null || p > after)
+      .sort()
+      .slice(0, limit)
+      .map((p) => ({ p, d: clone(this.docs.get(p)!) }));
+  }
+  async load(rows: { p: string; d: Doc }[]) {
+    for (const r of rows) this.docs.set(r.p, clone(r.d));
   }
   async tx<R>(fn: (t: Tx) => Promise<R>): Promise<R> {
     // Serialise transactions so tests see the same behaviour as Firestore.

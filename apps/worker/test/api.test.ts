@@ -1545,3 +1545,44 @@ describe('security hardening (Nov 6)', () => {
     expect((await h.api.get('/diag', u.token)).status).toBe(403);
   });
 });
+
+describe('backup to GitHub (Nov 6)', () => {
+  const backupAll = async () => {
+    const pages: { data: string; n: number }[] = [];
+    let after: string | null = null;
+    for (let i = 0; i < 50; i++) {
+      const r = await h.api.call('POST', '/backup/page', { body: { after }, headers: { authorization: 'Bearer gh-backup' } });
+      expect(r.status).toBe(200);
+      pages.push(r.body);
+      after = r.body.next;
+      if (!after) break;
+    }
+    return pages;
+  };
+
+  it('backs up every document encrypted, and restore brings a lost document back', async () => {
+    const o = await h.ownerWithGym('Backup Gym');
+    const pages = await backupAll();
+    expect(pages.reduce((n, p) => n + p.n, 0)).toBeGreaterThan(5);
+    expect(pages.map((p) => p.data).join('')).not.toContain('Backup Gym'); // encrypted
+    const path = `tenants/${o.gym.id}`;
+    const before = await h.store.get(path);
+    await h.store.delete(path);
+    for (const p of pages) {
+      const r = await h.api.call('POST', '/backup/restore', { body: { data: p.data }, headers: { authorization: 'Bearer gh-restore' } });
+      expect(r.status).toBe(200);
+    }
+    expect(await h.store.get(path)).toEqual(before);
+  });
+
+  it('only the right GitHub workflow can call it, and a changed file is refused', async () => {
+    expect((await h.api.call('POST', '/backup/page', { body: {} })).status).toBe(401);
+    expect((await h.api.call('POST', '/backup/page', { body: {}, headers: { authorization: 'Bearer gh-restore' } })).status).toBe(401);
+    expect((await h.api.call('POST', '/backup/restore', { body: { data: 'x' }, headers: { authorization: 'Bearer gh-backup' } })).status).toBe(401);
+    const owner = await h.ownerWithGym('Other Gym');
+    expect((await h.api.call('POST', '/backup/page', { body: {}, token: owner.token })).status).toBe(401);
+    const [p] = await backupAll();
+    const bad = p.data.slice(0, 40) + (p.data[40] === 'A' ? 'B' : 'A') + p.data.slice(41);
+    expect((await h.api.call('POST', '/backup/restore', { body: { data: bad }, headers: { authorization: 'Bearer gh-restore' } })).status).toBe(400);
+  });
+});

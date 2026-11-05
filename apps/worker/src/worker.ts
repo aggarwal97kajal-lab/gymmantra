@@ -3,6 +3,7 @@ import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { cronFanouts } from './lib/push';
 import { cronReminders } from './lib/superpush';
 import { setEdgeKv } from './lib/edge';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createApp } from './app';
 import { loadSecrets, type Deps } from './core';
 import { ensureBaseData } from './routes/super';
@@ -32,6 +33,29 @@ const SECURITY_HEADERS: Record<string, string> = {
 
 let deps: Deps | null = null;
 
+// Nightly backup (routes/backup.ts): only these GitHub workflows, on main, may call it.
+const BACKUP_REPO = 'aggarwal97kajal-lab/gymmantra';
+const GITHUB_JWKS = createRemoteJWKSet(new URL('https://token.actions.githubusercontent.com/.well-known/jwks'));
+
+function backupDeps(serverPassword: string): NonNullable<Deps['backup']> {
+  let key: Promise<CryptoKey> | null = null;
+  return {
+    async verify(token, workflow) {
+      const { payload } = await jwtVerify(token, GITHUB_JWKS, { issuer: 'https://token.actions.githubusercontent.com', audience: 'gymmantra-backup' });
+      return payload.repository === BACKUP_REPO && payload.ref === 'refs/heads/main' && payload.workflow_ref === `${BACKUP_REPO}/.github/workflows/${workflow}.yml@refs/heads/main`;
+    },
+    key() {
+      // The key comes from the server password (a Cloudflare secret), so it is not stored in the
+      // database that is being backed up. Changing SERVER_PASSWORD means old backups cannot be opened.
+      key ??= (async () => {
+        const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(serverPassword), 'HKDF', false, ['deriveKey']);
+        return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new TextEncoder().encode('gymmantra-backup'), info: new TextEncoder().encode('v1') }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+      })();
+      return key;
+    },
+  };
+}
+
 function depsFor(env: WorkerEnv, url: URL): Deps {
   if (deps) return deps;
   setEdgeKv(env.GM_KV ?? null);
@@ -47,6 +71,7 @@ function depsFor(env: WorkerEnv, url: URL): Deps {
     superAdminEmail: (env.SUPER_ADMIN_EMAIL ?? '').trim().toLowerCase(),
     googleClientId: googleIds[0] ?? null,
     serviceAccount: parseServiceAccount(env.FIREBASE_SERVICE_ACCOUNT),
+    backup: backupDeps(env.SERVER_PASSWORD),
     secure: url.protocol === 'https:',
     assetJson: async (path) => {
       const r = await env.ASSETS.fetch(new URL(path, url.origin).toString());

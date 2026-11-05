@@ -52,7 +52,9 @@ export function setup() {
     store = new MemoryStore();
     identity = new FakeIdentity();
   }
-  const deps: Deps = { store, identity, superAdminEmail: 'boss@gymmantra.app', googleClientId: 'test-client', secure: false, assetJson: async () => exercises };
+  const backupKey = crypto.subtle.importKey('raw', new Uint8Array(32).fill(7), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  const backup = { verify: async (tok: string, wf: string) => tok === `gh-${wf}`, key: () => backupKey };
+  const deps: Deps = { store, identity, superAdminEmail: 'boss@gymmantra.app', googleClientId: 'test-client', secure: false, assetJson: async () => exercises, backup };
   const app = createApp(() => deps);
   let phoneN = 9000000000;
   const nextPhone = () => String(++phoneN);

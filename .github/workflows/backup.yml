@@ -1,0 +1,25 @@
+name: backup
+# Every night at 2 AM India time: the whole database, encrypted by the server, kept here for 30 days.
+# If it fails, GitHub emails the repo owner.
+on:
+  schedule:
+    - cron: '30 20 * * *'
+  workflow_dispatch:
+permissions:
+  id-token: write # GitHub's signed login token; the server accepts only this workflow on main
+  contents: read
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - run: python3 -I .github/scripts/backup.py backup "$RUNNER_TEMP/backup"
+      - run: echo "DAY=$(TZ=Asia/Kolkata date +%Y-%m-%d)" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gymmantra-backup-${{ env.DAY }}
+          path: ${{ runner.temp }}/backup
+          retention-days: 30
+          if-no-files-found: error

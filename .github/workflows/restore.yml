@@ -1,0 +1,35 @@
+name: restore
+# Puts a backup back into the database. Documents in the backup are overwritten with the backup's
+# copy; documents made after the backup stay as they are.
+# Actions → restore → Run workflow: give the run ID of the backup (the number in its page link)
+# and type RESTORE.
+on:
+  workflow_dispatch:
+    inputs:
+      backup_run_id:
+        description: 'Run ID of the backup to put back (number in the backup run link)'
+        required: true
+      confirm:
+        description: 'Type RESTORE to confirm'
+        required: true
+permissions:
+  id-token: write
+  actions: read
+  contents: read
+jobs:
+  restore:
+    runs-on: ubuntu-24.04
+    steps:
+      - if: inputs.confirm != 'RESTORE'
+        run: echo "Type RESTORE to confirm" && exit 1
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.backup_run_id }}
+          github-token: ${{ github.token }}
+          pattern: gymmantra-backup-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/backup
+      - run: python3 -I .github/scripts/backup.py restore "$RUNNER_TEMP/backup"

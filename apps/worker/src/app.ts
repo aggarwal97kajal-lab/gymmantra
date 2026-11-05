@@ -1,4 +1,5 @@
 import { sendPush, takePush } from './lib/push';
+import { backupRoutes } from './routes/backup';
 import { gateRoutes } from './routes/gate';
 import { logoRoutes } from './routes/logos';
 import { ownershipRoutes } from './routes/ownership';
@@ -163,6 +164,7 @@ export function createApp(getDeps: () => Deps) {
   ownershipRoutes(app);
   gateRoutes(app);
   logoRoutes(app);
+  backupRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

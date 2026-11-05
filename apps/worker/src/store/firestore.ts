@@ -184,6 +184,23 @@ export class FirestoreStore implements Store {
     await this.call('POST', `${this.base}:commit`, { writes: [{ delete: this.name(path) }] });
   }
 
+  async dump(after: string | null, limit: number) {
+    // A query over every collection at every depth, in document-name order.
+    const structuredQuery: any = { from: [{ allDescendants: true }], orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }], limit };
+    if (after) structuredQuery.startAt = { values: [{ referenceValue: this.name(after) }], before: false };
+    const res: any[] = await this.call('POST', `${this.base}:runQuery`, { structuredQuery });
+    const prefix = this.name('');
+    return res.filter((r) => r.document).map((r) => ({ p: (r.document.name as string).slice(prefix.length), d: decFields(r.document.fields ?? {}) }));
+  }
+
+  async load(rows: { p: string; d: Doc }[]) {
+    for (let i = 0; i < rows.length; i += 400) {
+      const part = rows.slice(i, i + 400);
+      for (const r of part) this.forget(r.p);
+      await this.call('POST', `${this.base}:commit`, { writes: part.map((r) => ({ update: { name: this.name(r.p), fields: encFields(r.d) } })) });
+    }
+  }
+
   /**
    * Atomic read-then-write without Firestore server transactions (signed-in
    * Firebase users may not start them over REST). Every document read is
