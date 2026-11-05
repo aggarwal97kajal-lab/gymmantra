@@ -144,6 +144,7 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
   final phone = TextEditingController();
   final place = Address();
   Uint8List? logo;
+  double? up; // upload meter while the gym and its logo are sent
   bool busy = false;
   String? error;
 
@@ -159,17 +160,28 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
       error = null;
     });
     try {
-      await Api.instance.post('/gyms', {
+      final body = {
         'name': name.text.trim(),
         'phone': phone.text.trim(),
         ...place.toJson(),
         if (logo != null) 'logo': {'mime': 'image/jpeg', 'base64': base64Encode(logo!)},
-      });
+      };
+      if (logo != null) {
+        setState(() => up = 0);
+        await Api.instance.postProgress('/gyms', body, (sent, total) {
+          if (mounted && total > 0) setState(() => up = (sent / total).clamp(0.0, 1.0).toDouble());
+        });
+      } else {
+        await Api.instance.post('/gyms', body);
+      }
       await ref.read(sessionProvider).refreshUser();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() {
+        busy = false;
+        up = null;
+      });
     }
   }
 
@@ -191,6 +203,7 @@ class _RegisterGymState extends ConsumerState<RegisterGymScreen> {
             title: context.t('Gym logo'),
             hint: context.t('Optional · shown to your members, trainers and staff'),
             local: logo,
+            progress: up,
             onPick: () async {
               final b = await pickLogo(context);
               if (b != null) setState(() => logo = b);

@@ -1371,4 +1371,8 @@ const hindi = <String, String>{
   "Not in any gym": "किसी जिम में नहीं",
   "Login": "लॉग इन",
   "Account made": "अकाउंट बना",
+  "Uploading… {p}%": "अपलोड हो रहा है… {p}%",
+  "Logo saved": "लोगो सेव हो गया",
+  "For the gym and its main branch": "जिम और उसकी मुख्य ब्रांच के लिए",
+  "Only for this branch": "सिर्फ़ इस ब्रांच के लिए",
 };

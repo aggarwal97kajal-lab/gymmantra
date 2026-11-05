@@ -311,8 +311,8 @@ Map<String, dynamic> withBranch(Map g) {
   out['branchName'] = cur['name'];
   // Main (first) branch uses the gym's name; any other branch shows only its own name.
   out['name'] = cur['id'] == branches.first['id'] ? g['name'] : cur['name'];
-  // Each branch may have its own logo; without one it shows the gym's.
-  out['logoUrl'] = cur['logoUrl'] ?? g['logoUrl'];
+  // Each branch shows only its own logo; the main (first) branch shows the gym's.
+  out['logoUrl'] = cur['logoUrl'] ?? (cur['id'] == branches.first['id'] ? g['logoUrl'] : null);
   if (cur['address'] != null && '${cur['address']}'.isNotEmpty) {
     out['addressLine'] = cur['address'];
     out['city'] = null;

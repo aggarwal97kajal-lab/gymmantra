@@ -726,6 +726,8 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
   bool filled = false;
   bool busy = false;
   String? error;
+  Uint8List? logoBytes; // logo being uploaded
+  double? logoUp; // its upload meter
 
   String local(dynamic s) => ((s as String?) ?? '').replaceFirst('+91', '');
 
@@ -819,18 +821,29 @@ class _GymSettingsState extends ConsumerState<GymSettingsScreen> {
                 LogoPickerRow(
                   name: (g['name'] as String?) ?? 'G',
                   title: context.t('Gym logo'),
-                  hint: context.t('Shown to everyone in your gym'),
+                  hint: context.t('For the gym and its main branch'),
                   url: g['logoUrl'] as String?,
+                  local: logoBytes,
+                  progress: logoUp,
                   onPick: () async {
                     if (!owner) return;
                     final b = await pickLogo(context);
                     if (b == null) return;
+                    setState(() {
+                      logoBytes = b;
+                      logoUp = 0;
+                    });
                     try {
-                      await uploadLogo(b);
+                      await uploadLogo(b, onProgress: (d) {
+                        if (mounted) setState(() => logoUp = d);
+                      });
                       ref.invalidate(gymProvider);
                       ref.read(sessionProvider).refreshUser().catchError((_) {});
+                      if (context.mounted) toast(context, context.t('Logo saved'), kind: DripKind.ok);
                     } catch (e) {
                       if (context.mounted) toastError(context, e);
+                    } finally {
+                      if (mounted) setState(() => logoUp = null);
                     }
                   },
                   onRemove: owner
@@ -1015,6 +1028,33 @@ class _BranchFormState extends State<_BranchForm> {
   late String? logoUrl = isMain ? widget.gym['logoUrl'] as String? : widget.edit?['logoUrl'] as String?;
   Uint8List? logo; // picked, not uploaded yet
   bool removeLogo = false;
+  double? up; // upload meter 0…1
+
+  /// Editing a branch: the logo goes up as soon as it is picked (with the meter), so Save is quick.
+  Future<void> pickAndUpload() async {
+    final b = await pickLogo(context);
+    if (b == null || !mounted) return;
+    setState(() {
+      logo = b;
+      removeLogo = false;
+    });
+    if (widget.edit == null) return; // a new branch uploads after it is made
+    setState(() => up = 0);
+    try {
+      logoUrl = await uploadLogo(b, branchId: isMain ? null : widget.edit!['id'] as String, onProgress: (d) {
+        if (mounted) setState(() => up = d);
+      });
+      logo = null;
+      changed = true;
+      if (mounted) toast(context, context.t('Logo saved'), kind: DripKind.ok);
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    } finally {
+      if (mounted) setState(() => up = null);
+    }
+  }
+
+  bool changed = false; // logo already saved (go back with "changed")
   bool busy = false;
   String? error;
 
@@ -1045,7 +1085,10 @@ class _BranchFormState extends State<_BranchForm> {
       if (isMain) await Api.instance.patch('/gym', p);
       final branchId = isMain ? null : id;
       if (logo != null) {
-        await uploadLogo(logo!, branchId: branchId);
+        setState(() => up = 0);
+        await uploadLogo(logo!, branchId: branchId, onProgress: (d) {
+          if (mounted) setState(() => up = d);
+        });
       } else if (removeLogo) {
         await Api.instance.delete(branchId == null ? '/gym/logo' : '/gym/logo?branchId=$branchId');
       }
@@ -1053,29 +1096,32 @@ class _BranchFormState extends State<_BranchForm> {
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() {
+        busy = false;
+        up = null;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final shownName = isMain ? (widget.gym['name'] as String? ?? '') : (name.text.isEmpty ? '?' : name.text);
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) Navigator.pop(context, changed);
+      },
+      child: Scaffold(
       appBar: AppBar(title: Text(context.t(widget.edit == null ? 'Add branch' : 'Edit branch'))),
       body: ListView(padding: const EdgeInsets.fromLTRB(18, 8, 18, 32), children: [
         LogoPickerRow(
           name: shownName,
           title: context.t(isMain ? 'Gym logo' : 'Branch logo'),
-          hint: context.t(isMain ? 'Shown to everyone in your gym' : 'Without one, the gym logo is shown'),
+          hint: context.t(isMain ? 'For the gym and its main branch' : 'Only for this branch'),
           url: removeLogo ? null : logoUrl,
           local: logo,
-          onPick: () async {
-            final b = await pickLogo(context);
-            if (b != null) setState(() {
-              logo = b;
-              removeLogo = false;
-            });
-          },
+          progress: up,
+          onPick: pickAndUpload,
           onRemove: () => setState(() {
             logo = null;
             removeLogo = true;
@@ -1094,8 +1140,9 @@ class _BranchFormState extends State<_BranchForm> {
         Muted(context.t('GST number is optional. Each branch can have its own; it must start with the state code (Delhi = 07).'), size: 12),
         ErrorText(error),
         const SizedBox(height: 14),
-        FilledButton(onPressed: busy ? null : save, child: Text(busy ? context.t('Saving…') : context.t(widget.edit == null ? 'Add branch' : 'Save changes'))),
+        FilledButton(onPressed: busy || up != null ? null : save, child: Text(busy ? context.t('Saving…') : context.t(widget.edit == null ? 'Add branch' : 'Save changes'))),
       ]),
+    ),
     );
   }
 }
@@ -1528,8 +1575,8 @@ class BranchesScreen extends ConsumerWidget {
                   child: Panel(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                       Row(children: [
-                        // The main branch shows the gym's name and logo; other branches their own (or the gym logo).
-                        GymLogo(name: i == 0 ? '${g['name']}' : '${b['name']}', url: (i == 0 ? g['logoUrl'] : b['logoUrl'] ?? g['logoUrl']) as String?, size: 46),
+                        // The main branch shows the gym's name and logo; every other branch only its own logo.
+                        GymLogo(name: i == 0 ? '${g['name']}' : '${b['name']}', url: (i == 0 ? (b['logoUrl'] ?? g['logoUrl']) : b['logoUrl']) as String?, size: 46),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

@@ -1359,9 +1359,9 @@ describe('branch address, GST and logos; state broadcasts; GM Admin people by gy
     const owner = { ...o, gym: g.body };
     const br = (await h.api.post('/gym/branches', { name: 'Second' }, owner.token)).body;
     const mem = await join(owner, br.code, 'Logo Member', br.id);
-    // member of the second branch sees the gym logo until the branch has its own
+    // member of the second branch: no logo until that branch has its own (the gym's logo is for the main branch)
     let mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
-    expect(mg.logoUrl).toBe(g.body.logoUrl);
+    expect(mg.logoUrl).toBeNull();
     const up = await h.api.put('/gym/logo', { mime: 'image/jpeg', base64: JPEG, branchId: br.id }, owner.token);
     expect(up.status).toBe(201);
     mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
@@ -1374,7 +1374,7 @@ describe('branch address, GST and logos; state broadcasts; GM Admin people by gy
     expect((await h.api.put('/gym/logo', { mime: 'image/jpeg', base64: JPEG }, mem.token)).status).toBe(403);
     expect((await h.api.del(`/gym/logo?branchId=${br.id}`, owner.token)).status).toBe(200);
     mg = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym;
-    expect(mg.logoUrl).toBe(g.body.logoUrl);
+    expect(mg.logoUrl).toBeNull();
   });
 
   it('a state notification reaches members of gyms in that state even without their own state', async () => {

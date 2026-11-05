@@ -456,7 +456,8 @@ export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
     branchName: b?.name ?? null,
     code: (b && branchCode(t, b)) ?? t.gymCode,
     address: (multi && b?.address) || t.address,
-    logoUrl: b?.logoUrl || t.logoUrl || null, // the branch's own logo, else the gym's
+    // A branch shows only its own logo; the main (first) branch shows the gym's logo.
+    logoUrl: b?.logoUrl || (!b || b.id === t.branches[0]?.id ? t.logoUrl : null) || null,
     state: b?.state || t.state || null,
   };
 }

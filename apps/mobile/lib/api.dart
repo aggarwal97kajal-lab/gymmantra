@@ -224,6 +224,9 @@ class Api {
   }
   Future<dynamic> post(String path, [Object? body]) => _send('POST', path, body ?? {});
 
+  /// POST with an upload meter (sent bytes, total bytes).
+  Future<dynamic> postProgress(String path, Object body, void Function(int sent, int total) onSendProgress) => _send('POST', path, body, onSendProgress);
+
   /// A POST made with a given login (used after log-out, when this phone has already forgotten it).
   Future<void> postAs(String bearer, String path, [Object? body]) async {
     try {

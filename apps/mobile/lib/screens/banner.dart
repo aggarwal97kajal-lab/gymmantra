@@ -128,8 +128,12 @@ Future<Uint8List?> pickLogo(BuildContext context) async {
 }
 
 /// Uploads a logo for the gym (branchId null) or one branch. Returns its new link.
-Future<String?> uploadLogo(Uint8List bytes, {String? branchId}) async {
-  final r = await Api.instance.put('/gym/logo', {'mime': 'image/jpeg', 'base64': base64Encode(bytes), if (branchId != null) 'branchId': branchId});
+Future<String?> uploadLogo(Uint8List bytes, {String? branchId, void Function(double done)? onProgress}) async {
+  final r = await Api.instance.put(
+    '/gym/logo',
+    {'mime': 'image/jpeg', 'base64': base64Encode(bytes), if (branchId != null) 'branchId': branchId},
+    onSendProgress: onProgress == null ? null : (sent, total) => onProgress(total <= 0 ? 0 : (sent / total).clamp(0.0, 1.0).toDouble()),
+  );
   final url = (r as Map)['logoUrl'] as String?;
   if (url != null) PhotoCache.put(url, bytes);
   return url;
@@ -137,7 +141,10 @@ Future<String?> uploadLogo(Uint8List bytes, {String? branchId}) async {
 
 /// Logo box for forms: the logo (or + when none) with Change / Remove.
 class LogoPickerRow extends StatelessWidget {
-  const LogoPickerRow({super.key, required this.name, required this.title, required this.hint, this.url, this.local, required this.onPick, this.onRemove});
+  const LogoPickerRow({super.key, required this.name, required this.title, required this.hint, this.url, this.local, required this.onPick, this.onRemove, this.progress});
+
+  /// 0…1 while the logo uploads (a ring with the percentage on the logo); null when not uploading.
+  final double? progress;
   final String name;
   final String title;
   final String hint;
@@ -154,8 +161,10 @@ class LogoPickerRow extends StatelessWidget {
       child: Row(children: [
         InkWell(
           borderRadius: BorderRadius.circular(18),
-          onTap: onPick,
-          child: has
+          onTap: progress != null ? null : onPick,
+          child: progress != null
+              ? UploadRing(progress: progress!, child: GymLogo(name: name, url: url, local: local, size: 68))
+              : has
               ? GymLogo(name: name, url: url, local: local, size: 68)
               : Container(
                   width: 68,
@@ -168,7 +177,8 @@ class LogoPickerRow extends StatelessWidget {
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-            Text(hint, style: TextStyle(color: p.mut, fontSize: 12.5)),
+            Text(progress != null ? context.t('Uploading… {p}%', {'p': (progress! * 100).round()}) : hint, style: TextStyle(color: progress != null ? p.primary : p.mut, fontSize: 12.5, fontWeight: progress != null ? FontWeight.w700 : null)),
+            if (progress == null)
             Wrap(spacing: 4, children: [
               TextButton(style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 4), minimumSize: const Size(0, 32)), onPressed: onPick, child: Text(context.t(has ? 'Change logo' : 'Add logo'))),
               if (has && onRemove != null)
@@ -179,4 +189,28 @@ class LogoPickerRow extends StatelessWidget {
       ]),
     );
   }
+}
+
+
+/// A logo (or photo) under a dimmed layer with a circular meter and the percentage, while it uploads.
+class UploadRing extends StatelessWidget {
+  const UploadRing({super.key, required this.progress, required this.child, this.size = 68});
+  final double progress;
+  final Widget child;
+  final double size;
+  @override
+  Widget build(BuildContext context) => SizedBox(
+        width: size,
+        height: size,
+        child: Stack(alignment: Alignment.center, children: [
+          child,
+          Container(width: size, height: size, decoration: BoxDecoration(color: const Color(0x88000000), borderRadius: BorderRadius.circular(size * 0.28))),
+          SizedBox(
+            width: size * 0.72,
+            height: size * 0.72,
+            child: CircularProgressIndicator(value: progress <= 0 ? null : progress, strokeWidth: 3.5, color: Colors.white, backgroundColor: Colors.white24),
+          ),
+          Text('${(progress * 100).round()}%', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13)),
+        ]),
+      );
 }
