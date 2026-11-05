@@ -728,8 +728,6 @@ class _ChangePasswordState extends ConsumerState<ChangePasswordScreen> {
     );
   }
 }
-}
-
 
 const _secure = MethodChannel('gymmantra/secure');
 
