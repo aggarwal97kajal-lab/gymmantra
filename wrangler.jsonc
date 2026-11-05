@@ -16,8 +16,11 @@
   // Keep the settings typed in the Cloudflare dashboard when deploying.
   "keep_vars": true,
   "observability": { "enabled": true },
-  // Run the Worker in the Cloudflare data centre next to the database (Firestore, Mumbai). Users reach it in one hop; every database call is then ~10 ms instead of 1–2 s.
-  "placement": { "region": "gcp:asia-south1" },
+  // Cloudflare runs the Worker where it is fastest for the database (D1, Asia Pacific).
+  "placement": { "mode": "smart" },
+  // The database: Cloudflare D1 "gymmantra-db" (Asia Pacific). DB_BACKEND "d1" = use it; anything else = Firestore.
+  "d1_databases": [{ "binding": "GM_DB", "database_name": "gymmantra-db", "database_id": "58115bdb-ef4e-4020-a44f-a5146a47071e" }],
+  "vars": { "DB_BACKEND": "d1" },
   // Shared memory for all Worker instances (database sign-in, secrets). Created automatically on deploy.
   "kv_namespaces": [{ "binding": "GM_KV" }],
   // Every minute: finishes sending phone notifications to large groups (lib/push.ts).

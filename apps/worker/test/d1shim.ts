@@ -2,10 +2,10 @@
 // (TEST_STORE=d1). Real D1 is SQLite too; batch() is one transaction, like on Cloudflare.
 import type { D1Like, D1StatementLike } from '../src/store/d1';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { DatabaseSync } = require('node:sqlite');
-
 export function memoryD1(): D1Like & { rowsRead: number } {
+  // Loaded only when used: some Node versions (e.g. the Cloudflare build) have no node:sqlite.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { DatabaseSync } = require('node:sqlite');
   const db = new DatabaseSync(':memory:');
   const stmt = (sql: string, args: unknown[] = []): D1StatementLike & { exec(): any } => {
     const s = {
