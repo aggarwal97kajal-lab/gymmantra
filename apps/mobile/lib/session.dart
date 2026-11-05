@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'api.dart';
 import 'prefs.dart';
+import 'push.dart';
 import 'theme.dart' show adminApp;
 
 class Session extends ChangeNotifier {
@@ -153,7 +154,10 @@ class Session extends ChangeNotifier {
 
   /// Fetches the main screens of this person's part of the app in the background,
   /// so tapping a tab or menu shows data at once instead of waiting for the server.
-  void warmUp() => Future.delayed(const Duration(milliseconds: 1200), _warmUp); // first let the open screen load
+  void warmUp() {
+    Future.delayed(const Duration(milliseconds: 1200), _warmUp); // first let the open screen load
+    Future.delayed(const Duration(seconds: 3), Push.register); // phone notifications: token + topics
+  }
 
   void _warmUp() {
     if (user == null) return;
@@ -272,6 +276,7 @@ class Session extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await Push.unregister();
     try {
       await api.post('/auth/logout');
     } catch (_) {}

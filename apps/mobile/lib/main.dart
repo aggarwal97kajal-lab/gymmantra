@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show HttpOverrides;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +29,7 @@ import 'screens/workouts.dart';
 import 'screens/branch.dart';
 import 'photo.dart';
 import 'session.dart';
+import 'push.dart';
 import 'theme.dart';
 import 'ui.dart';
 
@@ -35,6 +37,7 @@ Future<void> main() async {
   HttpOverrides.global = Ipv4FirstOverrides(); // see Api.ipv4First
   WidgetsFlutterBinding.ensureInitialized();
   await Future.wait([Prefs.init(), PhotoCache.init()]);
+  unawaited(Push.init());
   AppSettings.instance.load();
   TapHaptics.install();
   runApp(const ProviderScope(child: GymMantraApp()));
