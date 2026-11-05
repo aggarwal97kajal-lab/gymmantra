@@ -491,7 +491,7 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
           barrierDismissible: false,
           builder: (ctx) => AlertDialog(
             title: Text(ctx.t('Did the payment go through?')),
-            content: Text(ctx.t('If {amount} was paid in your UPI app, tap "Yes, paid". Your plan turns on at once.', {'amount': rupees(p['amount'] as num?)})),
+            content: Text(ctx.t('If {amount} was paid in your UPI app, tap "Yes, paid". We turn on your plan as soon as we see the money.', {'amount': rupees(p['amount'] as num?)})),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('No, not paid'))),
               FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Yes, paid'))),
@@ -508,6 +508,11 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
       final r = await Api.instance.post('/subscription/payments/$key/done', {'upiStatus': status, if (answer.ref != null) 'upiRef': answer.ref, 'app': app?.name ?? 'UPI'}) as Map;
       if (!mounted) return;
       final pay = r['payment'] as Map;
+      if (pay['status'] == 'CHECKING') {
+        ref.invalidate(subscriptionProvider);
+        setState(() => error = context.t('Thank you! We will turn on your plan as soon as we see the money (payment ID {id}). You will get a notification.', {'id': '${pay['payId']}'}));
+        return;
+      }
       if (pay['status'] != 'PAID') {
         setState(() => error = context.t('The UPI app says the payment failed. No money was taken for the plan — try again.'));
         return;
@@ -612,7 +617,7 @@ class _PlanPayState extends ConsumerState<PlanPayScreen> {
             child: Text(q == null ? context.t('Pay') : context.t('Pay {amount}', {'amount': rupees(q['total'] as num?)})),
           ),
           const SizedBox(height: 8),
-          if (q != null) Center(child: Muted(context.t('Only {amount} will be charged · UPI · plan turns on at once', {'amount': rupees(q['total'] as num?)}), size: 12, align: TextAlign.center)),
+          if (q != null) Center(child: Muted(context.t('Only {amount} will be charged · UPI', {'amount': rupees(q['total'] as num?)}), size: 12, align: TextAlign.center)),
         ]),
         if (paying) BusyCover(text: context.t('Waiting for the UPI app…')),
       ]),

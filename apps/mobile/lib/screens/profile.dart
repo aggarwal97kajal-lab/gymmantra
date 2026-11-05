@@ -413,11 +413,34 @@ class NotificationBell extends ConsumerWidget {
   }
 }
 
+/// A gym asked to add this person as staff: they say yes or no (nothing changes without a yes).
+Future<void> answerStaffInvite(BuildContext context, String tenantId) async {
+  final yes = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(ctx.t('Staff invite')),
+      content: Text(ctx.t('A gym wants to add you as its staff. They will see your name, mobile number, email and photo. Accept only if you work there.')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Decline'), style: const TextStyle(color: C.red))),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Accept'))),
+      ],
+    ),
+  );
+  if (yes == null || !context.mounted) return;
+  try {
+    await Api.instance.post('/me/staff-invites/$tenantId/${yes ? 'accept' : 'decline'}', {});
+    if (context.mounted) toast(context, context.t(yes ? 'Done. Log out and log in as "Gym staff" to work for this gym.' : 'Invite declined'), kind: DripKind.ok);
+  } catch (e) {
+    if (context.mounted) toastError(context, e);
+  }
+}
+
 /// Opens the page a notification is about (also used when a phone notification is tapped).
 Future<void> openNote(BuildContext context, WidgetRef ref, Map n) async {
   final s = ref.read(sessionProvider);
   final r = noteRoute(s.mode, goOfNote(n), staffDesk: s.isStaffDesk);
   if (r == null) return;
+  if (r.path.startsWith('@invite:')) return answerStaffInvite(context, r.path.substring(8));
   final path = r.path == '@membership' ? await membershipPath(n['tenantId'] as String?) : r.path;
   if (!context.mounted) return;
   if (r.tab || path == '/home') {

@@ -52,3 +52,17 @@ export function strList(b: B, k: string, max = 30): string[] | undefined {
   if (!Array.isArray(v) || v.length > max || v.some((x) => typeof x !== 'string' || x.length > 120)) throw bad(`Invalid ${k}`);
   return (v as string[]).map((s) => s.trim()).filter(Boolean);
 }
+
+/** The file really is the JPEG / PNG it says it is (checked from its first bytes). */
+export function isImage(mime: string, b64: string) {
+  let head: string;
+  try {
+    head = atob(b64.slice(0, 16));
+  } catch {
+    return false;
+  }
+  const c = (i: number) => head.charCodeAt(i);
+  if (mime === 'image/jpeg') return c(0) === 0xff && c(1) === 0xd8 && c(2) === 0xff;
+  if (mime === 'image/png') return c(0) === 0x89 && c(1) === 0x50 && c(2) === 0x4e && c(3) === 0x47;
+  return false;
+}

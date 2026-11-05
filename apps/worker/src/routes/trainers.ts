@@ -1,3 +1,4 @@
+import { isImage } from '../lib/validate';
 import { App, audit, authenticate, branchOf, gymOf, inBranch, P, Role, TenantDoc, UserDoc, gymFace, need, notify } from '../core';
 import { noticesFor } from './notices';
 import { isYmd, todayIST } from '../lib/dates';
@@ -311,6 +312,7 @@ export function trainerRoutes(app: App) {
     const mime = oneOf(b, 'mime', ['image/jpeg', 'image/png'] as const)!;
     const b64 = str(b, 'base64', { max: 560_000, label: 'the picture' });
     if (Math.floor((b64.length * 3) / 4) > MAX_BANNER) throw bad('Banner must be smaller than 400 KB');
+    if (!isImage(mime, b64)) throw bad('This file is not a JPEG or PNG image');
     const v = Date.now();
     const out = await c.var.deps.store.tx(async (t) => {
       const o = isUuid(id) ? await t.get<OfferDoc>(P.offer(g.tenantId, id)) : null;

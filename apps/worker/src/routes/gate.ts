@@ -65,10 +65,13 @@ const httpsUrl = (v: string | undefined, label: string) => {
   if (!v) return null;
   try {
     const u = new URL(v);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new Error();
+    // https only (the link often carries the device's key), and only a public internet address.
+    if (u.protocol !== 'https:') throw new Error();
+    const h = u.hostname.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.local') || h.endsWith('.internal') || /^\[|^\d+\.\d+\.\d+\.\d+$/.test(h)) throw new Error();
     return u.toString();
   } catch {
-    throw bad(`Enter a valid web address for ${label}`);
+    throw bad(`Enter a valid https:// web address (not a local or IP address) for ${label}`);
   }
 };
 

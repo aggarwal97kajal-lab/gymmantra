@@ -330,6 +330,29 @@ class _AdminPaymentsState extends ConsumerState<AdminPayments> {
     }
   }
 
+  /// The owner said "Yes, paid" but the UPI app gave no SUCCESS: turn the plan on once the money is seen.
+  Future<void> confirm(Map p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.t('Money received?')),
+        content: Text(ctx.t('Check that {amount} with note {id} is in the bank account. The plan of {gym} turns on and a receipt is made.', {'amount': rupees(p['amount'] as num?), 'id': '${p['payId']}', 'gym': '${p['gymName']}'})),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Yes, received'))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await Api.instance.post('/super/payments/${p['id']}/confirm', {});
+      if (mounted) toast(context, context.t('Plan turned on'), kind: DripKind.ok);
+      ref.invalidate(_payments);
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final v = ref.watch(_payments(status));
@@ -338,7 +361,7 @@ class _AdminPaymentsState extends ConsumerState<AdminPayments> {
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-          child: Seg<String>(value: status, items: [('PAID', context.t('Paid'), null), ('CANCELLED', context.t('Cancelled'), null), ('FAILED', context.t('Failed'), null)], onChanged: (x) => setState(() => status = x)),
+          child: Seg<String>(value: status, items: [('CHECKING', context.t('To check'), null), ('PAID', context.t('Paid'), null), ('CANCELLED', context.t('Cancelled'), null), ('FAILED', context.t('Failed'), null)], onChanged: (x) => setState(() => status = x)),
         ),
         Expanded(
           child: RefreshIndicator(
@@ -371,6 +394,14 @@ class _AdminPaymentsState extends ConsumerState<AdminPayments> {
                           Muted('${p['planName']} · ${context.t(p['cycle'] == 'ANNUAL' ? '1 year' : '1 month')}${p['couponCode'] != null ? ' · ${p['couponCode']}' : ''}', size: 12.5),
                           Muted('${p['payId']}${p['app'] != null ? ' · ${p['app']}' : ''}${p['upiRef'] != null ? ' · Ref ${p['upiRef']}' : ''} · ${fmtDateTime((p['paidAt'] ?? p['createdAt']) as String)}', size: 12),
                           if (p['reason'] != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text(p['reason'] as String, style: const TextStyle(color: C.red, fontSize: 12.5))),
+                          if (p['status'] == 'CHECKING') ...[
+                            const SizedBox(height: 8),
+                            Row(children: [
+                              Expanded(child: FilledButton(onPressed: () => confirm(p), child: Text(context.t('Received')))),
+                              const SizedBox(width: 8),
+                              Expanded(child: OutlinedButton(onPressed: () => cancel(p), child: Text(context.t('Not received'), style: const TextStyle(color: C.red)))),
+                            ]),
+                          ],
                           if (p['status'] == 'PAID') ...[
                             const SizedBox(height: 8),
                             Row(children: [

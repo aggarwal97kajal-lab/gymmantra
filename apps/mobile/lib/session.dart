@@ -389,6 +389,7 @@ String? goOfNote(Map n) => (n['go'] as String?) ?? (n['kind'] == 'DUE' ? 'due' :
 /// when tapped (the member's own membership page in that gym).
 ({String path, bool tab})? noteRoute(String mode, String? go, {bool staffDesk = false}) {
   if (go == null || go.isEmpty) return null;
+  if (go.startsWith('staff-invite:')) return (path: '@invite:${go.substring(13)}', tab: false); // asks Accept / Decline
   final ticket = go.startsWith('ticket:') ? go.substring(7) : null;
   if (adminApp) {
     if (ticket != null) return (path: '/a/ticket/$ticket', tab: false);

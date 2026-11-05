@@ -74,6 +74,11 @@ class _AppState extends ConsumerState<GymMantraApp> {
     }
     final r = noteRoute(session.mode, go, staffDesk: session.isStaffDesk);
     if (r == null) return;
+    if (r.path.startsWith('@invite:')) {
+      final ctx = router.routerDelegate.navigatorKey.currentContext;
+      if (ctx != null) answerStaffInvite(ctx, r.path.substring(8));
+      return;
+    }
     if (r.path == '@membership') {
       membershipPath(_pushTenant).then((p) => p == '/home' ? router.go(p) : router.push(p));
       return;

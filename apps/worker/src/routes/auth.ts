@@ -4,7 +4,7 @@ import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
 import { hasDetails, personDetails } from '../lib/person';
-import { rateLimit } from '../lib/ratelimit';
+import { bumpCounter, clearCounter, ipOf, rateLimit, readCounter } from '../lib/ratelimit';
 import { cleanRights, RIGHTS, accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
 
 export const MAX_LOGIN_ATTEMPTS = 3;
@@ -76,9 +76,9 @@ export const phoneAuthEmail = (phone: string) => `${phone.replace('+', '')}@phon
 /** Creates a password account in Firebase and the GymMantra user record. */
 /** The gym made this account: don't sign up again, set a password from the email link. */
 function addedByGym(u: UserDoc) {
-  const gym = u.createdByGym!.gymName;
+  // The gym's name and the email are not shown: anyone could type someone's mobile number here.
   const asStaff = u.appRole === 'STAFF';
-  return new HttpError(409, `An account with this email already exists. ${gym} has made you ${asStaff ? 'gym staff' : 'a member'}. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: gym, email: u.email, asStaff });
+  return new HttpError(409, `An account with these details already exists. Your gym has made you ${asStaff ? 'gym staff' : 'a member'}. Don't make a new account — just set your password and log in`, { code: 'ADDED_BY_GYM', gymName: 'Your gym', asStaff });
 }
 
 /** A second login address for the same inbox: name@gmail.com → name+gm4821@gmail.com. */
@@ -177,6 +177,10 @@ async function findGoogleUser(c: C, g: { sub: string; email: string | null }): P
   if (!g.email) return null;
   const row = (await store.query<UserDoc>('users', [['email', g.email]])).find((r) => !r.data.deleted);
   if (!row) return null;
+  // Emails typed at sign-up or in Profile are not checked, so Google is linked only to an account
+  // without a password of its own (Google-made, or made by a gym and waiting for its first password).
+  // Otherwise someone could sign up with another person's email and wait for them to use Google.
+  if (row.data.authEmail && !row.data.mustSetPassword) throw conflict('An account with this email already exists. Log in with your email or mobile number and password');
   const user = await store.tx(async (t) => {
     const u = (await t.get<UserDoc>(P.user(row.id)))!;
     const n = { ...u, googleSub: u.googleSub ?? g.sub };
@@ -239,35 +243,43 @@ export function authRoutes(app: App) {
     if (!uid && email && (await store.query<UserDoc>('users', [['email', email]])).some((r) => !r.data.authEmail && !r.data.deleted)) {
       throw bad('This account was created with Google. Use "Continue with Google" to log in');
     }
-    if (!uid || !user || user.deleted) throw unauthorized('Wrong email/mobile or password');
-    if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
+    // Wrong tries are counted per account and per phone network (IP), in memory/cache, not in the
+    // database: someone else cannot lock your account from their phone, and an unknown email/mobile
+    // gets exactly the same answers as a real one (nobody can test who has an account).
+    const who = uid && user && !user.deleted ? `${uid}:${user.sessionV ?? 0}` : `x:${email ?? phone ?? identifier}`;
+    const ip = ipOf(c) ?? '';
+    const lockKey = `lock:${who}:${ip}`;
+    const failKey = `fail:${who}:${ip}`;
+    const lock = await readCounter(lockKey, LOCK_MINUTES * 60_000);
+    if (lock) throw tooMany(new Date(lock.start + LOCK_MINUTES * 60_000).toISOString());
+    if (user && !user.deleted && user.lockedUntil && new Date(user.lockedUntil) > new Date()) throw tooMany(user.lockedUntil);
+    const wrong = async () => {
+      const f = await bumpCounter(failKey, LOCK_MINUTES * 60_000);
+      if (f.n >= MAX_LOGIN_ATTEMPTS) {
+        await clearCounter(failKey);
+        await bumpCounter(lockKey, LOCK_MINUTES * 60_000);
+        return tooMany(new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString());
+      }
+      const left = MAX_LOGIN_ATTEMPTS - f.n;
+      return unauthorized(`Wrong email/mobile or password. ${left} attempt${left === 1 ? '' : 's'} left`);
+    };
+    if (!uid || !user || user.deleted) throw await wrong();
     if (!user.authEmail) throw bad('This account was created with Google. Use "Continue with Google" to log in');
 
     try {
       await identity.signIn(user.authEmail, password);
     } catch (e) {
       if (!(e instanceof HttpError) || e.message !== 'WRONG_PASSWORD') throw e;
-      const res = await store.tx(async (t) => {
-        const u = (await t.get<UserDoc>(P.user(uid!)))!;
-        const failed = (u.failed ?? 0) + 1;
-        if (failed >= MAX_LOGIN_ATTEMPTS) {
-          const until = new Date(Date.now() + LOCK_MINUTES * 60_000).toISOString();
-          t.set(P.user(uid!), { ...u, failed: 0, lockedUntil: until });
-          return { locked: until, left: 0 };
-        }
-        t.set(P.user(uid!), { ...u, failed });
-        return { locked: null, left: MAX_LOGIN_ATTEMPTS - failed };
-      });
-      if (res.locked) throw tooMany(res.locked);
-      throw unauthorized(`Wrong password. ${res.left} attempt${res.left === 1 ? '' : 's'} left`);
+      throw await wrong();
     }
+    await clearCounter(failKey);
     // Only write when something changes (saves two database round trips on a normal log-in).
-    const needsWrite = (user.failed ?? 0) > 0 || !!user.lockedUntil || (!user.isSuperAdmin && !!user.email && user.email === c.var.deps.superAdminEmail);
+    const needsWrite = (user.failed ?? 0) > 0 || !!user.lockedUntil || (!user.isSuperAdmin && !!user.authEmail && user.authEmail === c.var.deps.superAdminEmail);
     const fresh = !needsWrite
       ? user
       : await store.tx(async (t) => {
           const u = (await t.get<UserDoc>(P.user(uid!)))!;
-          const promote = !u.isSuperAdmin && !!u.email && u.email === c.var.deps.superAdminEmail;
+          const promote = !u.isSuperAdmin && !!u.authEmail && u.authEmail === c.var.deps.superAdminEmail; // the login email, not the editable profile email
           const next = { ...u, failed: 0, lockedUntil: null, isSuperAdmin: u.isSuperAdmin || promote };
           t.set(P.user(uid!), next);
           return next;
@@ -367,6 +379,8 @@ export function authRoutes(app: App) {
     const phone = email ? null : normalizePhone(identifier);
     if (!email && !phone) throw bad('Enter a valid email or 10-digit mobile number');
     await rateLimit(c, 'forgot', email ?? phone);
+    // Same answer whether or not an account exists, so nobody can test who has an account.
+    const answer = { sent: true, to: email ?? 'the email on this account' };
     let user: UserDoc | null = null;
     if (phone) {
       const uid = (await store.get<{ uid: string }>(P.phone(phone)))?.uid;
@@ -374,24 +388,9 @@ export function authRoutes(app: App) {
     } else {
       user = (await store.query<UserDoc>('users', [['email', email!]]))[0]?.data ?? null;
     }
-    if ((!user || user.deleted) && email) {
-      // A login from a sign-up that did not finish: let them reset it, then sign up again.
-      try {
-        await identity.sendPasswordReset(email);
-      } catch {
-        throw notFound('No GymMantra account found with this email or mobile number');
-      }
-      const [n, d] = email.split('@');
-      return c.json({ sent: true, to: `${n.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, n.length - 1)))}@${d}` });
-    }
-    if (!user || user.deleted) throw notFound('No GymMantra account found with this email or mobile number');
-    if (!user.authEmail) throw bad('This account uses Google sign-in. Use "Continue with Google" to log in');
-    if (user.authEmail.endsWith('@phone.gymmantra.app')) {
-      throw bad('This account has no email address. Ask your gym to help you reset the password');
-    }
-    await identity.sendPasswordReset(user.authEmail);
-    const [name, domain] = user.authEmail.split('@');
-    return c.json({ sent: true, to: `${name.slice(0, 1)}${'•'.repeat(Math.max(2, Math.min(6, name.length - 1)))}@${domain}` });
+    const to = user && !user.deleted ? user.authEmail : email; // a login from a sign-up that did not finish: let them reset it
+    if (to && !to.endsWith('@phone.gymmantra.app')) await identity.sendPasswordReset(to).catch(() => {});
+    return c.json(answer);
   });
 
   /** Our own "set a new password" page (the link in the reset email points here). */

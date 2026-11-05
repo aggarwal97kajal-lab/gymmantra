@@ -249,7 +249,13 @@ class _AddStaffState extends ConsumerState<AddStaffScreen> {
         if (role == 'FRONT_DESK') 'rights': rights,
       });
       if (!mounted) return;
-      toast(context, (r is Map && r['accountMade'] == true) ? context.t('Staff added. They log in as "Gym staff" with Google, or set a password first.') : context.t('Staff added'));
+      toast(
+          context,
+          (r is Map && r['invited'] == true)
+              ? context.t('This person already has a GymMantra account. We sent them an invite — they become staff when they accept it.')
+              : (r is Map && r['accountMade'] == true)
+                  ? context.t('Staff added. They log in as "Gym staff" with Google, or set a password first.')
+                  : context.t('Staff added'));
       context.pop();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());

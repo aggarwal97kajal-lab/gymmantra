@@ -1,3 +1,4 @@
+import { rateLimit } from '../lib/ratelimit';
 import { superLater } from '../lib/superpush';
 import { gymTopic, pushTokensPath, topicName, type PushTokensDoc } from '../lib/push';
 import { personDetails } from '../lib/person';
@@ -100,6 +101,7 @@ export function meRoutes(app: App) {
 
   app.get('/api/v1/me/gym-lookup', async (c) => {
     const u = await authenticate(c);
+    await rateLimit(c, 'gymcode', u.id, 20); // gym codes cannot be guessed by trying many
     const { store } = c.var.deps;
     const code = (c.req.query('code') ?? '').trim().toUpperCase();
     const ref0 = code ? await store.get<{ tenantId: string; branchId?: string; expiresAt?: string }>(P.gymCode(code)) : null;
@@ -130,6 +132,7 @@ export function meRoutes(app: App) {
 
   app.post('/api/v1/me/join', async (c) => {
     const u = await authenticate(c);
+    await rateLimit(c, 'gymcode', u.id, 20);
     const { store } = c.var.deps;
     const b = body(await c.req.json().catch(() => null));
     const code = str(b, 'gymCode', { max: 20, label: 'the gym code' }).toUpperCase();
@@ -348,6 +351,7 @@ export function meRoutes(app: App) {
     const phone = phoneIn !== undefined ? normalizePhone(phoneIn) : undefined;
     if (phoneIn && !phone) throw bad('Enter a valid 10-digit mobile number');
     if (email && email !== u.email && (await store.query<UserDoc>('users', [['email', email]])).some((r) => r.id !== u.id && !r.data.deleted)) throw conflict('This email ID already exists');
+    if (email && email !== u.email && email === c.var.deps.superAdminEmail) throw conflict('This email ID already exists');
     const out = await store.tx(async (t) => {
       const cur = (await t.get<UserDoc>(P.user(u.id)))!;
       const next = { ...cur };

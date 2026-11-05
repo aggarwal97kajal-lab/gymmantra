@@ -201,7 +201,8 @@ export function checkinRoutes(app: App) {
         // The visit counts for the branch whose QR was scanned.
         return recordMemberCheckIn(t, tenantId, mem, { method: 'SELF', byId: u.id, branchId: hit.branchId, oncePerDay: true });
       });
-      const gate = out.result === 'ALLOWED' ? await openGate(c.var.deps, tenantId, hit.branchId) : null;
+      // The door opens from the app only where the gym's location was checked (no location set = no remote opening).
+      const gate = out.result === 'ALLOWED' && spot.lat != null && spot.lng != null ? await openGate(c.var.deps, tenantId, hit.branchId) : null;
       return c.json({ kind: 'MEMBER', gym, ...out, gate }, 201);
     }
     // Trainer attendance
@@ -216,7 +217,7 @@ export function checkinRoutes(app: App) {
       t.set(P.attendanceEv(tenantId, uuid()), { memberId: null, trainerId: u.id, memberName: u.name, memberCode: 'TRAINER', branchId: hit.branchId, day: today, at, result: 'ALLOWED', reason: 'Trainer', method: 'SELF', scannedById: u.id });
       return { duplicate: false, visitsThisMonth: next.visits, at };
     });
-    const gate = await openGate(c.var.deps, tenantId, hit.branchId);
+    const gate = spot.lat != null && spot.lng != null ? await openGate(c.var.deps, tenantId, hit.branchId) : null;
     return c.json({ kind: 'TRAINER', gym, result: 'ALLOWED', reason: out.duplicate ? 'Already checked in today' : null, ...out, gate }, 201);
   });
 }

@@ -357,9 +357,11 @@ export function memberRoutes(app: App) {
     }
     try {
       const m = await store.tx(async (t) => {
-        const r = await addMember(t, g, u.id, { ...input, userId: existingUser ?? made?.uid ?? null, details: full?.details });
-        if (existingUser) await linkUser(t, existingUser, g.tenantId, r.m.id);
-        else if (made && full) {
+        // Someone who already has a GymMantra account is not linked here: they join with the gym code
+        // (their request links to this record by mobile number). Otherwise anyone could make a gym,
+        // type a stranger's mobile number and see their details.
+        const r = await addMember(t, g, u.id, { ...input, userId: made?.uid ?? null, details: full?.details });
+        if (made && full) {
           const phoneRef = await t.get<{ uid: string }>(P.phone(input.phone));
           if (phoneRef) throw conflict('This mobile number already has a GymMantra account');
           t.create(P.phone(input.phone), { uid: made.uid });

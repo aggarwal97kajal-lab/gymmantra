@@ -1,3 +1,4 @@
+import { resetRateLimits } from '../src/lib/ratelimit';
 import { createApp } from '../src/app';
 import { Deps, resetSecretCache } from '../src/core';
 import { FakeIdentity, FirebaseIdentity, serverToken } from '../src/identity';
@@ -36,6 +37,7 @@ import exercises from '../../../media/exercises/exercises.json';
 
 export function setup() {
   resetSecretCache();
+  resetRateLimits();
   resetBaseCheck();
   let store: Store;
   let identity: any;

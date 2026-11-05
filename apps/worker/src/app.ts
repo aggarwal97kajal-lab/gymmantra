@@ -43,6 +43,7 @@ async function logDiag(deps: Deps, items: Record<string, unknown>[]) {
 }
 
 let lastDiagAt = 0;
+let lastAppDiagAt = 0;
 
 /** Builds the GymMantra API. The same app runs on Cloudflare, in tests and in the local preview. */
 export function createApp(getDeps: () => Deps) {
@@ -122,7 +123,12 @@ export function createApp(getDeps: () => Deps) {
     const clean = list
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object')
       .map((x) => ({ at: new Date().toISOString(), src: 'app', m: String(x.m ?? '').slice(0, 8), p: String(x.p ?? '').slice(0, 120), s: Number(x.s ?? 0), ms: Number(x.ms ?? 0), e: String(x.e ?? '').slice(0, 160), v: String(b?.v ?? '').slice(0, 20), net: String(b?.net ?? '').slice(0, 120), n: Number(x.n ?? 1), colo: String((c.req.raw as { cf?: { colo?: string } }).cf?.colo ?? '') }));
-    if (clean.length) await logDiag(c.var.deps, clean);
+    // At most one database write every 10 s per server instance, however many phones report
+    // (a flood of reports must not use up the database's free daily writes).
+    if (clean.length && now - lastAppDiagAt > 10_000) {
+      lastAppDiagAt = now;
+      await logDiag(c.var.deps, clean);
+    }
     return c.json({ ok: true });
   });
   app.get('/api/v1/diag', async (c) => {

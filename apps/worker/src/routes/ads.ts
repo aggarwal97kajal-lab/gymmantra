@@ -1,3 +1,4 @@
+import { isImage } from '../lib/validate';
 import { App, audit, authenticate, P, requireSuper, TenantDoc } from '../core';
 import { isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -121,6 +122,7 @@ export function adRoutes(app: App) {
     const b64 = str(b, 'base64', { max: 500_000 });
     const size = Math.floor((b64.length * 3) / 4);
     if (size > MAX_IMAGE) throw bad('Image must be smaller than 350 KB');
+    if (!isImage(mime, b64)) throw bad('This file is not a JPEG or PNG image');
     const v = Date.now();
     const out = await c.var.deps.store.tx(async (t) => {
       const ad = isUuid(id) ? await t.get<AdDoc>(P.ad(id)) : null;

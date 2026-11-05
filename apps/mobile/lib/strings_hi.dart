@@ -1412,4 +1412,13 @@ const hindi = <String, String>{
   "Raise a ticket": "टिकट बनाएं",
   "No answer found. Raise a ticket below.": "जवाब नहीं मिला। नीचे टिकट बनाएं।",
   "Still need help? Raise a ticket": "अभी भी मदद चाहिए? टिकट बनाएं",
+  "Staff invite": "स्टाफ इनवाइट",
+  "A gym wants to add you as its staff. They will see your name, mobile number, email and photo. Accept only if you work there.": "एक जिम आपको अपना स्टाफ बनाना चाहता है। उन्हें आपका नाम, मोबाइल नंबर, ईमेल और फोटो दिखेगा। तभी स्वीकार करें जब आप वहां काम करते हों।",
+  "Accept": "स्वीकार करें",
+  "Done. Log out and log in as \"Gym staff\" to work for this gym.": "हो गया। इस जिम के लिए काम करने के लिए लॉग आउट करके \"जिम स्टाफ\" के रूप में लॉग इन करें।",
+  "Invite declined": "इनवाइट मना कर दिया",
+  "This person already has a GymMantra account. We sent them an invite — they become staff when they accept it.": "इस व्यक्ति का पहले से GymMantra अकाउंट है। हमने उन्हें इनवाइट भेजा है — स्वीकार करने पर वे स्टाफ बन जाएंगे।",
+  "Thank you! We will turn on your plan as soon as we see the money (payment ID {id}). You will get a notification.": "धन्यवाद! पैसे दिखते ही हम आपका प्लान चालू कर देंगे (पेमेंट ID {id})। आपको नोटिफिकेशन मिलेगा।",
+  "If {amount} was paid in your UPI app, tap \"Yes, paid\". We turn on your plan as soon as we see the money.": "अगर UPI ऐप में {amount} का पेमेंट हो गया है, तो \"हां, पेमेंट हो गया\" दबाएं। पैसे दिखते ही हम आपका प्लान चालू कर देंगे।",
+  "Only {amount} will be charged · UPI": "सिर्फ {amount} लगेंगे · UPI",
 };

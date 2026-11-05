@@ -1,3 +1,4 @@
+import { resetRateLimits } from '../src/lib/ratelimit';
 import { P } from '../src/core';
 import { makeQrToken } from '../src/lib/qr';
 import { addDays, todayIST } from '../src/lib/dates';
@@ -63,17 +64,27 @@ describe('auth', () => {
     expect(r3.status).toBe(429);
     expect(r3.body.message).toMatch(/Too many attempts. Try again in 15 minutes/);
     expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).status).toBe(429);
-    const user = (await h.store.get<any>(P.user(u.user.id)))!;
-    await h.store.set(P.user(u.user.id), { ...user, lockedUntil: new Date(Date.now() - 1000).toISOString() });
+    // Another phone network is not locked: nobody can lock someone else's account from their phone
+    expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' }, undefined, { 'cf-connecting-ip': '1.2.3.4' })).status).toBe(200);
+    resetRateLimits(); // 15 minutes later
     expect((await h.api.post('/auth/login', { identifier: u.email, password: 'secret123' })).status).toBe(200);
+  });
+
+  it('an unknown email gets the same answers as a real one (nobody can test who has an account)', async () => {
+    const r1 = await h.api.post('/auth/login', { identifier: 'nobody@test.in', password: 'wrong1' });
+    expect([r1.status, r1.body.message]).toEqual([401, 'Wrong email/mobile or password. 2 attempts left']);
+    await h.api.post('/auth/login', { identifier: 'nobody@test.in', password: 'wrong2' });
+    expect((await h.api.post('/auth/login', { identifier: 'nobody@test.in', password: 'wrong3' })).status).toBe(429);
+    const f = await h.api.post('/auth/forgot', { identifier: '9876543210' });
+    expect([f.status, f.body.sent]).toEqual([200, true]);
   });
 
   it('forgot password sends a reset email for email or mobile', async () => {
     const u = await h.signup();
     const r = await h.api.post('/auth/forgot', { identifier: u.phone });
     expect(r.status).toBe(200);
-    expect(r.body.to).toMatch(/^u•+@test\.in$/);
-    expect((await h.api.post('/auth/forgot', { identifier: 'nobody@test.in' })).status).toBe(404);
+    expect(r.body.to).toBe('the email on this account'); // the email itself is never shown
+    expect((await h.api.post('/auth/forgot', { identifier: 'nobody@test.in' })).status).toBe(200);
     if (!(h.deps.identity as any).resets) return;
     expect((h.deps.identity as any).resets).toContain(u.email);
   });
@@ -133,12 +144,11 @@ describe('auth', () => {
     expect(again.body.existing).toBe(true);
   });
 
-  it('Google with the same verified email opens the same password account (no second account)', async () => {
+  it('Google never opens a password account made with the same email (that email was never checked)', async () => {
     const u = await h.signup();
     const g = await h.api.post('/auth/google/signup', { idToken: `google:g-2:${u.email}` });
-    expect(g.status).toBe(200);
-    expect(g.body.user.email).toBe(u.email);
-    expect((await h.api.post('/auth/google/login', { idToken: `google:g-2:${u.email}` })).body.user.id).toBe(g.body.user.id);
+    expect(g.status).toBe(409);
+    expect((await h.api.post('/auth/google/login', { idToken: `google:g-2:${u.email}` })).status).toBe(409);
     // Google without a verified email cannot take an account
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-3:' })).status).toBe(404);
   });
@@ -329,8 +339,14 @@ describe('member app', () => {
     const owner = await h.ownerWithGym('Link Gym');
     const mem = await h.signup('Walk In');
     const added = (await h.api.post('/members', { name: 'Walk In', phone: mem.phone }, owner.token)).body;
-    // Adding a member whose number already has an account links it straight away
-    expect(added.userId).toBe(mem.user.id);
+    // An existing account is not linked by the gym (a stranger could make a gym and see their details)…
+    expect(added.userId).toBeNull();
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships).toHaveLength(0);
+    expect((await h.api.get(`/members/${added.id}`, owner.token)).body.profile?.dob ?? null).toBeNull();
+    // …it links when the person joins with the gym code and the gym approves
+    await h.api.post('/me/join', { gymCode: owner.gym.gymCode }, mem.token);
+    const jr = (await h.api.get('/join-requests', owner.token)).body[0];
+    expect((await h.api.post(`/join-requests/${jr.id}/approve`, {}, owner.token)).body.id).toBe(added.id);
     expect((await h.api.get('/me/gyms', mem.token)).body.memberships).toHaveLength(1);
   });
 
@@ -1012,7 +1028,8 @@ describe('Nov 3: coupons, UPI payments, full details, branch codes', () => {
     const s = await h.api.post('/auth/signup', { ...d, email: 'rahul@test.in', phone: h.nextPhone(), password: 'secret123' });
     expect(s.status).toBe(409);
     expect(s.body.code).toBe('ADDED_BY_GYM');
-    expect(s.body.gymName).toBe('Detail Gym');
+    expect(s.body.gymName).toBe('Your gym'); // the gym's name is not shown to whoever types the number
+    expect(s.body.email).toBeUndefined();
     // PIN must match the state
     expect((await h.api.post('/members', { ...d, pincode: '400001', phone: h.nextPhone(), email: 'x@test.in' }, o.token)).status).toBe(400);
     // normal sign-up with details
@@ -1460,7 +1477,9 @@ describe('notifications open the right page, check-in switch, branch moves right
     const second = (await h.api.post('/gym/branches', { name: 'Second' }, owner.token)).body;
     const m = (await h.api.post('/members', { name: 'Mover', phone: h.nextPhone() }, owner.token)).body;
     const desk = await h.signup('Desk Person');
-    await h.api.post('/gym/staff', { phone: desk.phone, role: 'FRONT_DESK', tempPassword: 'secret123', name: 'Desk Person' }, owner.token);
+    const inv = await h.api.post('/gym/staff', { phone: desk.phone, role: 'FRONT_DESK', tempPassword: 'secret123', name: 'Desk Person' }, owner.token);
+    expect(inv.body.invited).toBe(true); // an existing account must agree first
+    expect((await h.api.post(`/me/staff-invites/${owner.gym.id}/accept`, {}, desk.token)).status).toBe(200);
     const staff = (await h.api.get('/gym/staff', owner.token)).body.find((s: any) => s.userId === desk.user.id || s.id === desk.user.id);
     expect(staff).toBeTruthy();
     await h.api.patch(`/gym/staff/${staff.id}`, { rights: ['members', 'memberEdit'] }, owner.token);
@@ -1473,6 +1492,7 @@ describe('notifications open the right page, check-in switch, branch moves right
     const owner = await h.ownerWithGym('Rem Gym');
     const desk = await h.signup('Rem Desk');
     await h.api.post('/gym/staff', { phone: desk.phone, role: 'FRONT_DESK', tempPassword: 'secret123', name: 'Rem Desk' }, owner.token);
+    await h.api.post(`/me/staff-invites/${owner.gym.id}/accept`, {}, desk.token);
     const { cronAttendanceReminders } = await import('../src/lib/attendrem');
     const elevenIst = new Date(`${new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10)}T05:45:00Z`);
     await cronAttendanceReminders(h.deps, null, elevenIst);
@@ -1584,5 +1604,54 @@ describe('backup to GitHub (Nov 6)', () => {
     const [p] = await backupAll();
     const bad = p.data.slice(0, 40) + (p.data[40] === 'A' ? 'B' : 'A') + p.data.slice(41);
     expect((await h.api.call('POST', '/backup/restore', { body: { data: bad }, headers: { authorization: 'Bearer gh-restore' } })).status).toBe(400);
+  });
+});
+
+describe('pen-test fixes (Nov 6)', () => {
+  const boss = async () => {
+    await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' });
+    return (await h.api.post('/auth/login', { identifier: 'boss@gymmantra.app', password: 'secret123' })).body.token as string;
+  };
+
+  it('a plan payment without the UPI app saying SUCCESS waits for the super admin', async () => {
+    const sa = await boss();
+    const o = await h.ownerWithGym('Check Pay Gym');
+    const pro = ((await h.api.get('/saas-plans')).body.plans as any[]).find((p) => p.name === 'Pro');
+    await h.api.post('/subscription/payments', { key: 'key-chk-0001', planId: pro.id, cycle: 'MONTHLY' }, o.token);
+    const done = await h.api.post('/subscription/payments/key-chk-0001/done', { upiStatus: 'SUBMITTED' }, o.token);
+    expect([done.body.payment.status, done.body.bill]).toEqual(['CHECKING', null]);
+    expect((await h.api.get('/subscription', o.token)).body.plan).toBeNull();
+    expect((await h.api.post('/super/payments/key-chk-0001/confirm', {}, o.token)).status).toBe(403);
+    expect((await h.api.get('/super/payments?status=CHECKING', sa)).body.payments).toHaveLength(1);
+    const ok = await h.api.post('/super/payments/key-chk-0001/confirm', {}, sa);
+    expect([ok.status, ok.body.payment.status]).toEqual([200, 'PAID']);
+    expect((await h.api.get('/subscription', o.token)).body.plan?.name).toBe('Pro');
+    // and one whose money never came is cancelled without turning anything on
+    await h.api.post('/subscription/payments', { key: 'key-chk-0002', planId: pro.id, cycle: 'MONTHLY' }, o.token);
+    await h.api.post('/subscription/payments/key-chk-0002/done', {}, o.token);
+    expect((await h.api.post('/super/payments/key-chk-0002/cancel', {}, sa)).body.status).toBe('CANCELLED');
+  });
+
+  it('a staff invite can be declined; nothing changes for that person', async () => {
+    const owner = await h.ownerWithGym('Invite Gym');
+    const p = await h.signup('Some Member');
+    expect((await h.api.post('/gym/staff', { phone: p.phone, role: 'OWNER', name: 'X Y' }, owner.token)).body.invited).toBe(true);
+    expect((await h.api.get('/gym/staff', owner.token)).body.some((s: any) => s.id === p.user.id)).toBe(false);
+    expect((await h.api.post(`/me/staff-invites/${owner.gym.id}/decline`, {}, p.token)).status).toBe(200);
+    expect((await h.api.get('/auth/me', p.token)).body.gyms).toHaveLength(0);
+    expect((await h.api.post(`/me/staff-invites/${owner.gym.id}/accept`, {}, p.token)).status).toBe(404);
+  });
+
+  it('gate link must be https on the internet; offer picture must really be a picture', async () => {
+    const owner = await h.ownerWithGym('Safe Gym');
+    for (const url of ['http://relay.example/open', 'https://192.168.1.5/open', 'https://localhost/x']) expect((await h.api.put('/gym/gate', { type: 'webhook', url }, owner.token)).status).toBe(400);
+    const offer = (await h.api.post('/offers', { title: 'Offer', details: 'x', forMembers: true, validTill: '2030-01-01' }, owner.token)).body;
+    const html = btoa('<html><script>alert(1)</script></html>');
+    expect((await h.api.post(`/offers/${offer.id}/image`, { mime: 'image/png', base64: html }, owner.token)).status).toBe(400);
+  });
+
+  it('profile email cannot be set to the GymMantra admin email', async () => {
+    const u = await h.signup();
+    expect((await h.api.patch('/me/contact', { email: 'boss@gymmantra.app', password: 'secret123' }, u.token)).status).toBe(409);
   });
 });

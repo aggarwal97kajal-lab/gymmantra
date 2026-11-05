@@ -145,7 +145,8 @@ export function attendanceRoutes(app: App) {
     const days: string[] = [];
     for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);
     const cell = (v: unknown) => {
-      const s = v == null ? '' : String(v);
+      let s = v == null ? '' : String(v);
+      if (/^(=|@|\t|\r|[+-](?![\d ]))/.test(s)) s = `'${s}`; // a name like =HYPERLINK(...) must not run as an Excel formula
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const time = (iso: string) => new Date(new Date(iso).getTime() + 5.5 * 3600_000).toISOString().slice(11, 16);

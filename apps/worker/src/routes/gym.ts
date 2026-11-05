@@ -342,11 +342,14 @@ export function gymRoutes(app: App) {
     if (uid && (await store.get<UserDoc>(P.user(uid)))?.deleted) uid = null;
     if (!uid && email) uid = (await store.query<UserDoc>('users', [['email', email]])).find((r) => !r.data.deleted)?.id ?? null;
     let made: { uid: string; idToken?: string; authEmail: string; pw: string } | null = null;
+    let createdNow = false; // account made just now by this request (website: with a first password)
+    let invited = false;
     const tempPw = optStr(b, 'tempPassword', { max: 100 });
     if (!uid && tempPw) {
       // Website: the owner gives a first password.
       if (tempPw.length < 8) throw bad('Set a temporary password (at least 8 characters) for the new staff account');
       uid = (await createPasswordUser(c, { name, email, phone, password: tempPw, appRole: role === 'OWNER' ? 'OWNER' : 'STAFF' })).uid;
+      createdNow = true;
     }
     if (!uid) {
       if (!email) throw bad('Enter the email ID');
@@ -396,14 +399,20 @@ export function gymRoutes(app: App) {
           t.set(P.user(staffUid), nu);
           const st = (await t.get<{ users: number }>(P.stats)) ?? { users: 0 };
           t.set(P.stats, { ...st, users: (st.users ?? 0) + 1 });
+        } else if (createdNow) {
+          const target = (await t.get<UserDoc>(P.user(staffUid)))!;
+          t.set(P.user(staffUid), { ...target, staffOf: { ...target.staffOf, [g.tenantId]: { role, branchIds, active: true, rights } } });
         } else {
+          // Someone who already has a GymMantra account must agree first (otherwise anyone could
+          // make a gym, type a stranger's mobile number and see their details or change their app).
           const target = (await t.get<UserDoc>(P.user(staffUid)))!;
           if (isTrainer(target)) throw bad('This person is a trainer. A trainer cannot be gym staff');
-          t.set(P.user(staffUid), {
-            ...target,
-            appRole: target.appRole && target.appRole !== 'MEMBER' ? target.appRole : role === 'OWNER' ? 'OWNER' : 'STAFF',
-            staffOf: { ...target.staffOf, [g.tenantId]: { role, branchIds, active: true, rights } },
-          });
+          const inv = { ...s, active: false, invite: true };
+          t.set(P.staff(g.tenantId, staffUid), inv);
+          audit(t, g.tenantId, u.id, 'staff.invite', 'staff', staffUid, null, inv);
+          invited = true;
+          await notify(t, staffUid, g.tenantId, 'Staff invite', `${g.tenant.name} wants to add you as ${role === 'OWNER' ? 'an owner' : 'staff'}. Tap to accept or decline.`, null, `staff-invite:${g.tenantId}`);
+          return;
         }
         t.set(P.staff(g.tenantId, staffUid), s);
         audit(t, g.tenantId, u.id, 'staff.create', 'staff', staffUid, null, s);
@@ -413,7 +422,37 @@ export function gymRoutes(app: App) {
       if (made?.idToken) await identity.deleteAccount(made.idToken).catch(() => {});
       throw e;
     }
+    if (invited) return c.json({ id: staffUid, role, branchIds, rights, active: false, invited: true, accountMade: false }, 201);
     return c.json({ id: staffUid, role, branchIds, rights, active: true, accountMade: !!made }, 201);
+  });
+
+  /** The person answers a staff invite (see POST /gym/staff). */
+  app.post('/api/v1/me/staff-invites/:tenantId/:answer', async (c) => {
+    const u = await authenticate(c);
+    const tid = c.req.param('tenantId');
+    const accept = c.req.param('answer') === 'accept';
+    if (!accept && c.req.param('answer') !== 'decline') throw notFound('Not found');
+    const { store } = c.var.deps;
+    const out = await store.tx(async (t) => {
+      const [s, me, tenant] = (await t.getMany<any>([P.staff(tid, u.id), P.user(u.id), P.tenant(tid)])) as [StaffDoc & { invite?: boolean } | null, UserDoc, TenantDoc | null];
+      if (!s?.invite || s.active || !tenant) throw notFound('This invite is no longer open');
+      if (!accept) {
+        t.delete(P.staff(tid, u.id));
+        audit(t, tid, u.id, 'staff.invite.decline', 'staff', u.id, s, null);
+        return { ok: true, accepted: false };
+      }
+      if (isTrainer(me)) throw bad('A trainer cannot be gym staff');
+      const next = { ...s, active: true, invite: false };
+      t.set(P.staff(tid, u.id), next);
+      t.set(P.user(u.id), {
+        ...me,
+        appRole: me.appRole && me.appRole !== 'MEMBER' ? me.appRole : s.role === 'OWNER' ? 'OWNER' : 'STAFF',
+        staffOf: { ...me.staffOf, [tid]: { role: s.role, branchIds: s.branchIds, active: true, rights: s.rights } },
+      });
+      audit(t, tid, u.id, 'staff.invite.accept', 'staff', u.id, s, next);
+      return { ok: true, accepted: true, gymName: tenant.name };
+    });
+    return c.json(out);
   });
 
   app.patch('/api/v1/gym/staff/:id', async (c) => {
