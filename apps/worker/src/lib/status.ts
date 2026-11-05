@@ -66,6 +66,7 @@ export interface MemberState<T extends SubLike = SubLike> {
   endsOn: Ymd | null; // effective end including freezes
   due: number;
   frozenUntil: Ymd | null;
+  frozenDays?: number; // freeze days added to the end date (current membership and the renewals after it)
 }
 
 export function computeState<T extends SubLike>(all: T[], today: Ymd): MemberState<T> {
@@ -73,37 +74,58 @@ export function computeState<T extends SubLike>(all: T[], today: Ymd): MemberSta
   if (subs.length === 0) {
     return { status: 'NO_PLAN', current: null, upcoming: null, daysLeft: null, endsOn: null, due: 0, frozenUntil: null };
   }
-  const covering = subs
-    .filter((s) => s.startDate <= today && today <= effectiveEnd(s))
-    .sort((a, b) => (effectiveEnd(b) > effectiveEnd(a) ? 1 : -1));
-  const future = subs.filter((s) => s.startDate > today).sort((a, b) => (a.startDate > b.startDate ? 1 : -1));
+  // Frozen days push every renewal that follows in the same chain later (a 7-day freeze on this year's
+  // membership also moves next year's start and end by 7 days). Each membership gets its shifted dates.
+  const frozenOf = (s: T) => s.freezes.reduce((n, f) => n + freezeUsedDays(f), 0);
+  const ranges: { s: T; start: Ymd; end: Ymd; shiftBefore: number }[] = [];
+  {
+    let shift = 0;
+    let prevEnd = null as Ymd | null;
+    for (const x of [...subs].sort((a, b) => (a.startDate > b.startDate ? 1 : a.startDate < b.startDate ? -1 : 0))) {
+      const pe: Ymd | null = prevEnd;
+      const chained: boolean = pe != null && addDays(x.startDate, shift) <= addDays(pe, 1);
+      if (!chained) shift = 0;
+      const start = addDays(x.startDate, shift);
+      const end = addDays(effectiveEnd(x), shift);
+      ranges.push({ s: x, start, end, shiftBefore: shift });
+      prevEnd = chained && pe != null && String(pe) > String(end) ? pe : end;
+      shift += frozenOf(x);
+    }
+  }
+  const covering = ranges.filter((r) => r.start <= today && today <= r.end).sort((a, b) => (b.end > a.end ? 1 : b.end < a.end ? -1 : 0));
+  const future = ranges.filter((r) => r.start > today).sort((a, b) => (a.start > b.start ? 1 : -1));
   const due = subs.reduce((n, s) => n + Math.max(0, s.total - s.paid), 0);
 
   if (covering.length) {
     const cur = covering[0];
     // If a renewal follows directly, days left run to the end of the chain.
-    let chainEnd = effectiveEnd(cur);
+    let chainEnd = cur.end;
+    let frozenDays = cur.shiftBefore + frozenOf(cur.s);
     for (const f of future) {
-      if (f.startDate <= addDays(chainEnd, 1)) chainEnd = effectiveEnd(f) > chainEnd ? effectiveEnd(f) : chainEnd;
+      if (f.start <= addDays(chainEnd, 1)) {
+        if (f.end > chainEnd) chainEnd = f.end;
+        frozenDays = Math.max(frozenDays, f.shiftBefore + frozenOf(f.s));
+      }
     }
     const daysLeft = diffDays(today, chainEnd);
-    const fr = activeFreeze(cur, today);
+    const fr = activeFreeze(cur.s, today);
     const status: MembershipStatus = fr ? 'FROZEN' : daysLeft > ENDING_SOON_DAYS ? 'ACTIVE' : 'ENDING_SOON';
     return {
       status,
-      current: cur,
-      upcoming: future[0] ?? null,
+      current: cur.s,
+      upcoming: future[0]?.s ?? null,
       daysLeft,
       endsOn: chainEnd,
       due,
       frozenUntil: fr ? addDays(fr.startDate, freezeUsedDays(fr) - 1) : null,
+      frozenDays,
     };
   }
   if (future.length) {
-    return { status: 'UPCOMING', current: null, upcoming: future[0], daysLeft: null, endsOn: effectiveEnd(future[0]), due, frozenUntil: null };
+    return { status: 'UPCOMING', current: null, upcoming: future[0].s, daysLeft: null, endsOn: future[0].end, due, frozenUntil: null };
   }
-  const latest = [...subs].sort((a, b) => (effectiveEnd(b) > effectiveEnd(a) ? 1 : -1))[0];
-  return { status: 'EXPIRED', current: latest, upcoming: null, daysLeft: diffDays(today, effectiveEnd(latest)), endsOn: effectiveEnd(latest), due, frozenUntil: null };
+  const latest = [...ranges].sort((a, b) => (b.end > a.end ? 1 : -1))[0];
+  return { status: 'EXPIRED', current: latest.s, upcoming: null, daysLeft: diffDays(today, latest.end), endsOn: latest.end, due, frozenUntil: null };
 }
 
 export interface EntryDecision {

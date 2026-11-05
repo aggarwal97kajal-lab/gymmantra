@@ -65,6 +65,22 @@ class _AppState extends ConsumerState<GymMantraApp> {
     session.refreshUser().catchError((_) {});
   }
 
+  void _openGo(String? go, int tries) {
+    final session = ref.read(sessionProvider);
+    // Still starting (splash / not logged in yet): try again shortly, for up to ~10 s.
+    if (!session.ready || session.user == null || !splashDone.value) {
+      if (tries < 20) Future.delayed(const Duration(milliseconds: 500), () => _openGo(go, tries + 1));
+      return;
+    }
+    final r = noteRoute(session.mode, go);
+    if (r == null) return;
+    if (r.tab) {
+      router.go(r.path);
+    } else {
+      router.push(r.path);
+    }
+  }
+
   @override
   void dispose() {
     _life?.dispose();
@@ -89,6 +105,11 @@ class _AppState extends ConsumerState<GymMantraApp> {
       _liveRefresh();
       Future.delayed(const Duration(seconds: 9), _liveRefresh);
     };
+    // Tapping a phone notification opens the page it is about (after the app has started).
+    Push.onOpen = (go) => _openGo(go, 0);
+    final waiting = Push.pendingGo;
+    Push.pendingGo = null;
+    if (waiting != null) Future.delayed(const Duration(milliseconds: 600), () => _openGo(waiting, 0));
     if (adminApp) {
       router = adminRouter(session, splashDone, const SplashScreen(), () => splashDone.value);
       return;
@@ -114,6 +135,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
         // Each kind of person has their own part of the app.
         const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/', '/checkin', '/pdf'];
         if (shared.any((p) => loc.startsWith(p))) return null;
+        // Staff never open the GymMantra plan page (that is for the owner).
+        if (loc.startsWith('/o/subscription') && session.isStaffDesk) return '/o/home';
         final (home, prefix) = switch (session.mode) {
           'owner' => ('/o/home', '/o/'),
           'trainer' => ('/t/home', '/t/'),
@@ -175,7 +198,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         ),
         GoRoute(path: '/o/pt', builder: (_, __) => const OwnerPtClientsScreen()),
         GoRoute(path: '/o/subscription', builder: (_, __) => const SubscriptionScreen()),
-        GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!)),
+        GoRoute(path: '/o/bill/:id', builder: (_, s) => BillScreen(id: s.pathParameters['id']!, then: s.uri.queryParameters['do'])),
         GoRoute(path: '/o/address', builder: (_, __) => const GymAddressScreen()),
         GoRoute(path: '/o/branches', builder: (_, __) => const BranchesScreen()),
         GoRoute(path: '/o/staff', builder: (_, __) => const StaffListScreen()),

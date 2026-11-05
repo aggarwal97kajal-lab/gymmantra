@@ -1,9 +1,17 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart' as pw;
+import 'package:share_plus/share_plus.dart';
+import 'reports_kit.dart' show saveAndOffer;
 import '../api.dart';
 import '../i18n.dart';
 import '../photo.dart';
@@ -90,7 +98,10 @@ class OwnerAvatar extends ConsumerWidget {
   final bool label;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final u = ref.watch(sessionProvider).user ?? {};
+    final s = ref.watch(sessionProvider);
+    final u = s.user ?? {};
+    // The plan-coloured ring is for the gym owner only (staff do not see the GymMantra plan).
+    if (s.isStaffDesk) return Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: size);
     final ring = ref.watch(subscriptionProvider).valueOrNull?['ring'] as String?;
     return GlowRing(ring: ring, size: size, label: label, child: Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: size));
   }
@@ -172,13 +183,17 @@ class LockSheet extends ConsumerWidget {
             ),
         ],
         const SizedBox(height: 14),
-        FilledButton(
-          onPressed: () {
-            Navigator.pop(context);
-            context.push('/o/subscription');
-          },
-          child: Text(context.t('Upgrade to {plan}', {'plan': planName})),
-        ),
+        // Staff cannot buy the plan; only the owner can.
+        if (ProviderScope.containerOf(context, listen: false).read(sessionProvider).isStaffDesk)
+          Muted(context.t('Ask your gym owner to upgrade.'), align: TextAlign.center)
+        else
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(context);
+              context.push('/o/subscription');
+            },
+            child: Text(context.t('Upgrade to {plan}', {'plan': planName})),
+          ),
         TextButton(onPressed: () => Navigator.pop(context), child: Text(context.t('Not now'))),
       ]),
     );
@@ -300,6 +315,20 @@ class _SubscriptionState extends ConsumerState<SubscriptionScreen> {
                       Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                         Text(rupees(b['total'] as num?), style: TextStyle(fontWeight: FontWeight.w800, decoration: b['cancelledAt'] != null ? TextDecoration.lineThrough : null)),
                         if (b['cancelledAt'] != null) Text(context.t('Cancelled'), style: const TextStyle(color: C.red, fontSize: 11, fontWeight: FontWeight.w800)),
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: context.t('Download'),
+                            icon: Icon(Icons.download_rounded, color: context.c.primary, size: 21),
+                            onPressed: () => context.push('/o/bill/${b['id']}?do=download'),
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: context.t('Share'),
+                            icon: Icon(Icons.share_rounded, color: context.c.primary, size: 20),
+                            onPressed: () => context.push('/o/bill/${b['id']}?do=share'),
+                          ),
+                        ]),
                       ]),
                     ]),
                   ),
@@ -816,12 +845,77 @@ String _amountInWords(num n) {
 
 final _billProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/subscription/bills/$id'));
 
-class BillScreen extends ConsumerWidget {
-  const BillScreen({super.key, required this.id});
+class BillScreen extends ConsumerStatefulWidget {
+  const BillScreen({super.key, required this.id, this.then});
   final String id;
+
+  /// Opened from the bill list's Download / Share buttons: do that as soon as the receipt is on screen.
+  final String? then;
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final v = ref.watch(_billProvider(id));
+  ConsumerState<BillScreen> createState() => _BillScreenState();
+}
+
+class _BillScreenState extends ConsumerState<BillScreen> {
+  final paperKey = GlobalKey();
+  bool busy = false;
+  bool ranThen = false;
+
+  /// The receipt as a one-page PDF (a sharp picture of the paper on an A4 page).
+  Future<(String, List<int>)?> _pdf() async {
+    final b = ref.read(_billProvider(widget.id)).valueOrNull as Map?;
+    final box = paperKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+    if (b == null || box == null) return null;
+    final img = await box.toImage(pixelRatio: 3);
+    final png = (await img.toByteData(format: ui.ImageByteFormat.png))!.buffer.asUint8List();
+    final doc = pw.Document();
+    doc.addPage(pw.Page(
+      pageFormat: pw.PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(24),
+      build: (_) => pw.Center(child: pw.Image(pw.MemoryImage(png), fit: pw.BoxFit.contain)),
+    ));
+    final name = 'GymMantra-receipt-${(b['number'] ?? widget.id).toString().replaceAll(RegExp(r'[^A-Za-z0-9-]'), '')}.pdf';
+    return (name, await doc.save());
+  }
+
+  Future<void> download() async {
+    setState(() => busy = true);
+    try {
+      final f = await _pdf();
+      if (f != null && mounted) await saveAndOffer(context, f.$1, f.$2, 'application/pdf');
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> share() async {
+    setState(() => busy = true);
+    try {
+      final f = await _pdf();
+      if (f == null) return;
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/${f.$1}');
+      await file.writeAsBytes(f.$2, flush: true);
+      await Share.shareXFiles([XFile(file.path, mimeType: 'application/pdf')], text: 'GymMantra receipt');
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = ref.watch(_billProvider(widget.id));
+    // From the list's buttons: run Download / Share once the receipt has been drawn.
+    if (!ranThen && widget.then != null && v.hasValue) {
+      ranThen = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => Future.delayed(const Duration(milliseconds: 250), () {
+            if (!mounted) return;
+            widget.then == 'share' ? share() : download();
+          }));
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFE9ECF1),
       appBar: AppBar(
@@ -843,8 +937,30 @@ class BillScreen extends ConsumerWidget {
       ),
       body: AsyncBody(
         value: v,
-        onRetry: () => ref.invalidate(_billProvider(id)),
-        builder: (b) => ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 24), children: [ReceiptPaper(bill: b as Map)]),
+        onRetry: () => ref.invalidate(_billProvider(widget.id)),
+        builder: (b) => ListView(padding: const EdgeInsets.fromLTRB(12, 4, 12, 24), children: [
+          RepaintBoundary(key: paperKey, child: ReceiptPaper(bill: b as Map)),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48), foregroundColor: const Color(0xFF0F172A), backgroundColor: Colors.white),
+                onPressed: busy ? null : download,
+                icon: const Icon(Icons.download_rounded),
+                label: Text(context.t('Download')),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                onPressed: busy ? null : share,
+                icon: const Icon(Icons.share_rounded),
+                label: Text(context.t('Share')),
+              ),
+            ),
+          ]),
+        ]),
       ),
     );
   }

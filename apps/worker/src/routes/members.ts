@@ -511,6 +511,7 @@ export function memberRoutes(app: App) {
         status: state.status,
         daysLeft: state.daysLeft,
         endsOn: state.endsOn,
+        frozenDays: state.frozenDays ?? 0,
         due: state.due,
         frozenUntil: state.frozenUntil,
         currentId: state.current?.id ?? null,
@@ -556,7 +557,12 @@ export function memberRoutes(app: App) {
       if (b.gender !== undefined) after.gender = oneOf(b, 'gender', ['male', 'female', 'other'] as const, true) ?? null;
       if (b.branchId !== undefined) {
         after.branchId = optStr(b, 'branchId') ?? null;
-        checkBranch(g, after.branchId);
+        const moving = branchOf(g.tenant, after.branchId) !== branchOf(g.tenant, before.branchId);
+        // Moving a member to another branch: the owner, or staff with the "Branch moves" right.
+        if (moving && g.role !== 'OWNER') {
+          need(g, 'transfers');
+          if (after.branchId && !g.tenant.branches.some((x) => x.id === after.branchId)) throw bad('Unknown branch');
+        } else checkBranch(g, after.branchId);
         if (branchOf(g.tenant, after.branchId) !== branchOf(g.tenant, before.branchId)) after.memberCode = memberCodeFor(g.tenant, branchOf(g.tenant, after.branchId), before.memberCode);
       }
       if (b.notes !== undefined) after.notes = optStr(b, 'notes', { max: 500 }) ?? null;

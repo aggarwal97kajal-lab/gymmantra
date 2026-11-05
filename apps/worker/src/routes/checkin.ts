@@ -1,7 +1,7 @@
 import { openGate } from './gate';
-import { App, audit, authenticate, branchCode, gymOf, MemberDoc, P, TenantDoc, need } from '../core';
+import { App, audit, authenticate, branchCode, branchOf, gymOf, MemberDoc, P, TenantDoc, need } from '../core';
 import { todayIST } from '../lib/dates';
-import { bad, forbidden, notFound, nowIso, uuid } from '../lib/http';
+import { bad, forbidden, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { body, str } from '../lib/validate';
 import { recordMemberCheckIn } from './attendance';
 import { ensureBranchCodes } from './gym';
@@ -99,7 +99,23 @@ export function checkinRoutes(app: App) {
       multiBranch: g.tenant.branches.length > 1,
       locationSet: spot.lat != null,
       radiusM: RADIUS_M,
+      appCheckin: br?.appCheckin !== false,
     });
+  });
+
+  /** Owner: this branch checks in from the app (QR) or uses its own entry system. */
+  app.put('/api/v1/gym/checkin-mode', async (c) => {
+    const u = await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const b = body(await c.req.json().catch(() => null));
+    if (typeof b.on !== 'boolean') throw bad('Choose on or off');
+    const on = b.on;
+    await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
+      t.set(P.tenant(g.tenantId), { ...cur, branches: cur.branches.map((x) => (x.id === g.branchId ? { ...x, appCheckin: on } : x)) });
+      audit(t, g.tenantId, u.id, 'checkin.mode', 'branch', g.branchId, null, { appCheckin: on });
+    });
+    return c.json({ appCheckin: on });
   });
 
   /** Owner: make a new check-in QR (old printouts stop working). */
@@ -148,6 +164,10 @@ export function checkinRoutes(app: App) {
     if (!tenant || !cfg || !hit) throw bad('This QR is old or not valid. Ask the gym for the new check-in QR');
     const spot = hit.spot;
     const branchName = tenant.branches.find((b) => b.id === hit.branchId)?.name ?? null;
+    if (tenant.branches.find((x) => x.id === branchOf(tenant, hit.branchId))?.appCheckin === false) {
+      const where = hit.branchId && hit.branchId !== tenant.branches[0]?.id ? branchName ?? tenant.name : tenant.name;
+      throw new HttpError(403, `App check-in is off at ${where}. Please check in at the front desk.`, { code: 'CHECKIN_OFF' });
+    }
     const memberId = u.memberships?.[tenantId];
     const staff = u.staffOf?.[tenantId];
     const isTrainer = !!staff?.active && staff.role === 'TRAINER';

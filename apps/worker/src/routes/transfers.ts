@@ -24,7 +24,11 @@ export interface TransferDoc {
 
 export const TRANSFER_OFF = 'Your gym owner has not enabled transfer of your membership. Ask at the front desk or the gym owner';
 
-const branchName = (t: TenantDoc, id: string | null) => t.branches.find((b) => b.id === branchOf(t, id))?.name ?? 'Main branch';
+// The main (first) branch is shown with the gym's name.
+const branchName = (t: TenantDoc, id: string | null) => {
+  const b = t.branches.find((x) => x.id === branchOf(t, id));
+  return !b || b.id === t.branches[0]?.id ? t.name : b.name;
+};
 
 export function transferRoutes(app: App) {
   /** Member: branches of my gym, which one I am in, whether transfer is on, and my pending request. */
@@ -121,7 +125,8 @@ export function transferRoutes(app: App) {
   /** Owner approves or declines. Approving moves the member (member doc + roster). */
   app.post('/api/v1/transfers/:id/:action', async (c) => {
     const u = await authenticate(c);
-    const g = await gymOf(c, 'OWNER');
+    const g = await gymOf(c);
+    if (g.role !== 'OWNER') need(g, 'transfers'); // owner, or staff with the "Branch moves" right
     const action = oneOf({ a: c.req.param('action') }, 'a', ['approve', 'decline'] as const);
     const id = c.req.param('id');
     const out = await c.var.deps.store.tx(async (t) => {

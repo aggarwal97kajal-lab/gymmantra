@@ -8,6 +8,7 @@ import '../i18n.dart';
 import '../photo.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'profile.dart' show NotificationBell;
 import '../ui.dart';
 import 'home.dart' show openUrl;
 import 'pt.dart';
@@ -72,11 +73,7 @@ class TrainerHomeScreen extends ConsumerWidget {
                   Muted(context.t('Trainer'), size: 13.5),
                 ]),
               ),
-              Material(
-                color: context.c.surf,
-                shape: CircleBorder(side: BorderSide(color: context.c.line)),
-                child: InkWell(customBorder: const CircleBorder(), onTap: () => context.push('/notifications'), child: const SizedBox(width: 42, height: 42, child: Icon(Icons.notifications_none_rounded))),
-              ),
+              const NotificationBell(),
               const SizedBox(width: 10),
               GestureDetector(onTap: () => context.go('/t/profile'), child: Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: 42)),
             ]),
@@ -114,11 +111,6 @@ class TrainerHomeScreen extends ConsumerWidget {
                         ),
                         Icon(Icons.chevron_right_rounded, color: context.c.mut),
                       ]),
-                    ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(onPressed: () => context.push('/checkin'), icon: const Icon(Icons.qr_code_scanner_rounded, size: 18), label: Text(context.t('Scan the gate QR'))),
                     ),
                     const SizedBox(height: 10),
                     Row(children: [

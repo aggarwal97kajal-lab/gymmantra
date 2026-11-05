@@ -1,3 +1,4 @@
+import { createFanout, queuePush } from '../lib/push';
 import { App, audit, authenticate, branchOf, gymOf, inBranch, MemberDoc, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc, need } from '../core';
 import { diffDays, todayIST } from '../lib/dates';
 import { bad, conflict, forbidden, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -81,13 +82,16 @@ export function dueRoutes(app: App) {
       chunk.forEach(({ m, uid }, i) => {
         const doc = docs[i] ?? { items: [] };
         const body = `₹${m.due.toLocaleString('en-IN')} is due at ${g.tenant.name} (paid ₹${m.paid.toLocaleString('en-IN')} of ₹${m.total.toLocaleString('en-IN')}). Please pay at the front desk.`;
-        const item: NoteItem & { kind?: string } = { id: uuid(), tenantId: g.tenantId, title: `Payment due: ₹${m.due.toLocaleString('en-IN')}`, body, createdAt: at, readAt: null, kind: 'DUE' };
+        const item: NoteItem & { kind?: string } = { id: uuid(), tenantId: g.tenantId, title: `Payment due: ₹${m.due.toLocaleString('en-IN')}`, body, createdAt: at, readAt: null, kind: 'DUE', go: 'due' };
         t.set(P.notes(uid), { ...doc, items: [item, ...(doc.items ?? [])].slice(0, 50) });
+        // Phone notification too (app closed or open). A few go at once; a big list goes by the every-minute job.
+        if (chunk.length <= 20) queuePush({ uid, title: item.title, body, data: { kind: 'note', tenantId: g.tenantId, go: 'due' } });
       });
       const tn = (await t.get<TenantDoc>(P.tenant(g.tenantId)))!;
       t.set(P.tenant(g.tenantId), { ...tn, dueRemindedAt: at });
       audit(t, g.tenantId, u.id, 'dues.remind', 'tenant', g.tenantId, null, { count: chunk.length });
     });
+    if (chunk.length > 20) await createFanout(store, chunk.map((x) => x.uid), 'Payment due', `You have money due at ${g.tenant.name}. Please pay at the front desk.`, { kind: 'note', tenantId: g.tenantId, go: 'due' });
     return c.json({ sent: chunk.length, noApp: list.length - targets.length, at });
   });
 

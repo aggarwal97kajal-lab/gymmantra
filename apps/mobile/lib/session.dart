@@ -350,3 +350,51 @@ final offersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(re
 final trainersProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/trainers'));
 final gymProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym'));
 final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/home'));
+
+/// Where a notification takes the person (by what it is about and who they are). Null: nowhere special.
+/// Tab pages are opened with go(), other pages with push() so Back returns.
+({String path, bool tab})? noteRoute(String mode, String? go) {
+  if (go == null || go.isEmpty) return null;
+  final ticket = go.startsWith('ticket:') ? go.substring(7) : null;
+  if (adminApp) {
+    if (ticket != null) return (path: '/a/ticket/$ticket', tab: false);
+    return switch (go) {
+      'tickets' => (path: '/a/tickets', tab: false),
+      'payments' => (path: '/a/payments', tab: false),
+      'gyms' => (path: '/a/gyms', tab: true),
+      _ => null,
+    };
+  }
+  if (ticket != null) return (path: '/help/ticket/$ticket', tab: false);
+  switch (mode) {
+    case 'owner':
+      return switch (go) {
+        'due' || 'membership' || 'members' => (path: '/o/members', tab: true),
+        'requests' || 'requests:move' || 'requests:pt' => (path: '/o/requests', tab: true),
+        'subscription' => (path: '/o/subscription', tab: false),
+        'staffdays' => (path: '/o/staff-attendance', tab: false),
+        'attendance' => (path: '/o/my-attendance', tab: false),
+        'pt' || 'pt-pay' => (path: '/o/pt', tab: false),
+        _ => (path: '/o/home', tab: true),
+      };
+    case 'trainer' || 'waiting' || 'trainerJoin':
+      return switch (go) {
+        'pt' => (path: '/t/clients', tab: true),
+        'attendance' => (path: '/t/my-attendance', tab: false),
+        _ => (path: '/t/home', tab: true),
+      };
+    case 'member':
+      return switch (go) {
+        'due' || 'membership' => (path: '/my-plan', tab: true),
+        _ => (path: '/home', tab: true),
+      };
+  }
+  return null;
+}
+
+/// Unread notifications (for the bell's red number).
+final unreadCountProvider = Provider.autoDispose<int>((ref) {
+  final v = ref.watch(notificationsProvider).valueOrNull;
+  if (v is! List) return 0;
+  return v.whereType<Map>().where((n) => n['readAt'] == null).length;
+});

@@ -26,6 +26,12 @@ class Push {
   /// Called when a notification arrives (the session reloads the account: plan, roles, gyms).
   static void Function()? onChange;
 
+  /// A notification was tapped: open the page it is about ("go" from the server).
+  static void Function(String? go)? onOpen;
+
+  /// Tapped while the app was closed: waits here until the app is ready to open it.
+  static String? pendingGo;
+
   /// At app start. Never stops the app from opening.
   static Future<void> init() async {
     try {
@@ -40,12 +46,26 @@ class Push {
         onChange?.call();
       });
       // Tapping a notification opens the app: show fresh data.
-      FirebaseMessaging.onMessageOpenedApp.listen((_) {
+      FirebaseMessaging.onMessageOpenedApp.listen((m) {
         Api.instance.refreshOpenScreens();
         onChange?.call();
+        _open(m.data['go'] as String?);
       });
+      // The app was opened by tapping a notification.
+      FirebaseMessaging.instance.getInitialMessage().then((m) {
+        if (m != null) _open(m.data['go'] as String?);
+      }).catchError((_) {});
     } catch (_) {
       _ready = false;
+    }
+  }
+
+  static void _open(String? go) {
+    if (go == null || go.isEmpty) return;
+    if (onOpen != null) {
+      onOpen!(go);
+    } else {
+      pendingGo = go;
     }
   }
 

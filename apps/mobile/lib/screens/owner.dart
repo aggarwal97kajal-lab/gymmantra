@@ -11,6 +11,7 @@ import '../i18n.dart';
 import '../photo.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'profile.dart' show NotificationBell;
 import '../ui.dart';
 import 'home.dart' show openUrl, waLink;
 import 'pt.dart';
@@ -114,7 +115,7 @@ class OwnerHomeScreen extends ConsumerWidget {
           },
           child: ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
             Row(children: [
-              GestureDetector(onTap: () => context.push('/o/subscription'), child: const OwnerAvatar(size: 46)),
+              GestureDetector(onTap: () => context.push(s.isStaffDesk ? '/o/profile' : '/o/subscription'), child: const OwnerAvatar(size: 46)),
               const SizedBox(width: 10),
               // The logo, name and code of the branch being looked at (they all change with Switch branch).
               GymLogo(name: (gym['name'] as String?) ?? 'GymMantra', url: gym['logoUrl'] as String?, size: 40),
@@ -125,7 +126,7 @@ class OwnerHomeScreen extends ConsumerWidget {
                   Muted('${context.t(gym['role'] == 'FRONT_DESK' ? 'Front desk' : 'Owner')} · ${gym['gymCode'] ?? ''}', size: 12.5),
                 ]),
               ),
-              _RoundIcon(icon: Icons.notifications_none_rounded, onTap: () => context.push('/notifications')),
+              const NotificationBell(),
             ]),
             const SizedBox(height: 14),
             const BranchChip(),
@@ -589,7 +590,7 @@ class OwnerMemberScreen extends ConsumerWidget {
                   ),
                   if (bs.length > 1)
                     TextButton.icon(
-                      onPressed: ref.read(sessionProvider).myGym?['role'] == 'OWNER' ? () => moveMemberSheet(context, ref, id, bid) : null,
+                      onPressed: ref.read(sessionProvider).can('transfers') ? () => moveMemberSheet(context, ref, id, bid) : null,
                       icon: const Icon(Icons.swap_horiz_rounded, size: 18),
                       label: Text('${bname ?? context.t('Branch')} · ${context.t('Move')}'),
                     ),
@@ -599,7 +600,12 @@ class OwnerMemberScreen extends ConsumerWidget {
               Panel(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text((cur?['planName'] as String?) ?? context.t('No plan yet'), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
-                  if (st['endsOn'] != null) Muted(context.t('Ends {date}', {'date': fmtDate(st['endsOn'] as String?)})),
+                  if (st['endsOn'] != null)
+                    Text.rich(TextSpan(children: [
+                      TextSpan(text: context.t('Ends {date}', {'date': fmtDate(st['endsOn'] as String?)}), style: TextStyle(color: context.c.mut, fontSize: 13)),
+                      if ((st['frozenDays'] as int? ?? 0) > 0)
+                        TextSpan(text: '  ${context.t('+{n} days freeze', {'n': st['frozenDays']})}', style: const TextStyle(color: C.blue, fontWeight: FontWeight.w700, fontSize: 12)),
+                    ])),
                   if (st['daysLeft'] != null && (st['daysLeft'] as int) >= 0) Muted(context.t('{n} days left', {'n': st['daysLeft']})),
                   if (due <= 0 && history.isNotEmpty) ...[
                     const SizedBox(height: 8),
@@ -1510,8 +1516,10 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
   @override
   Widget build(BuildContext context) {
     final t = widget.trainer;
+    // Only the owner changes a trainer's PT packages and share; staff can only look.
+    final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
     Widget field(TextEditingController c, String label, {String? prefix}) => Expanded(
-          child: TextField(controller: c, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: label, prefixText: prefix, isDense: true)),
+          child: TextField(controller: c, readOnly: !owner, keyboardType: TextInputType.number, onChanged: (_) => setState(() {}), decoration: InputDecoration(labelText: label, prefixText: prefix, isDense: true)),
         );
     return Scaffold(
       appBar: AppBar(title: Text(t['name'] as String)),
@@ -1530,7 +1538,18 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
         ],
         if (t['phone'] != null) Center(child: TextButton.icon(onPressed: () => openUrl('tel:${t['phone']}'), icon: const Icon(Icons.call_rounded, size: 18), label: Text(t['phone'] as String))),
         const SizedBox(height: 8),
-        TextField(controller: speciality, decoration: InputDecoration(labelText: context.t('Speciality'))),
+        if (!owner)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Panel(
+              child: Row(children: [
+                Icon(Icons.lock_outline_rounded, color: context.c.mut, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Muted(context.t('Only the gym owner can change PT packages and share.'), size: 12.5)),
+              ]),
+            ),
+          ),
+        TextField(controller: speciality, readOnly: !owner, decoration: InputDecoration(labelText: context.t('Speciality'))),
         const SizedBox(height: 12),
         Row(children: [
           field(years, context.t('Experience (years)')),
@@ -1538,6 +1557,7 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
           field(share, context.t('Trainer share %')),
         ]),
         const SizedBox(height: 8),
+        if (owner)
         Wrap(spacing: 8, children: [
           for (final pc in [0, 50, 80, 100])
             ChoiceChip(
@@ -1573,16 +1593,18 @@ class _OwnerTrainerState extends ConsumerState<OwnerTrainerScreen> {
                     Row(children: [field(p.days, context.t('Valid days')), const SizedBox(width: 8), field(p.perWeek, context.t('Days / week'))]),
                   ]),
                 ),
-                IconButton(onPressed: () => setState(() => pkgs.removeAt(i)), icon: const Icon(Icons.delete_outline_rounded, color: C.red)),
+                if (owner) IconButton(onPressed: () => setState(() => pkgs.removeAt(i)), icon: const Icon(Icons.delete_outline_rounded, color: C.red)),
               ]),
             ),
           ),
-        OutlinedButton.icon(onPressed: () => setState(() => pkgs.add(_Pkg())), icon: const Icon(Icons.add_rounded), label: Text(context.t('Add package'))),
-        ErrorText(error),
-        const SizedBox(height: 16),
-        FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save'))),
-        const SizedBox(height: 8),
-        TextButton(onPressed: remove, child: Text(context.t('Remove trainer'), style: const TextStyle(color: C.red))),
+        if (owner) ...[
+          OutlinedButton.icon(onPressed: () => setState(() => pkgs.add(_Pkg())), icon: const Icon(Icons.add_rounded), label: Text(context.t('Add package'))),
+          ErrorText(error),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: busy ? null : save, child: Text(context.t('Save'))),
+          const SizedBox(height: 8),
+          TextButton(onPressed: remove, child: Text(context.t('Remove trainer'), style: const TextStyle(color: C.red))),
+        ],
       ]),
     );
   }
@@ -1595,8 +1617,9 @@ class _PlanStrip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final sub = ref.watch(subscriptionProvider).valueOrNull;
-    if (sub == null) return const SizedBox.shrink();
     final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
+    // Staff never see the GymMantra plan (trial meter, renew): that is the owner's business.
+    if (sub == null || !owner) return const SizedBox.shrink();
     final items = <Widget>[];
     // Paid plan ending within 7 days (board 64): yellow strip with Renew.
     final endsAt = DateTime.tryParse((sub['planEndsAt'] as String?) ?? '')?.toLocal();

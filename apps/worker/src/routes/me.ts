@@ -69,7 +69,7 @@ export function meRoutes(app: App) {
           memberCode: e.memberCode,
           gym: (() => {
             const f = gymFace(tn, e.branchId);
-            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: f.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED' };
+            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: f.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED', appCheckin: f.appCheckin };
           })(),
           ...(() => {
             const bid = branchOf(tn, e.branchId);
@@ -80,6 +80,7 @@ export function meRoutes(app: App) {
           planName: st.current?.planName ?? st.upcoming?.planName ?? null,
           daysLeft: st.daysLeft,
           endsOn: st.endsOn,
+          frozenDays: st.frozenDays ?? 0,
           startsOn: st.current?.startDate ?? st.upcoming?.startDate ?? null,
           visitsThisMonth: logs[i]?.month === month ? logs[i]!.visits : 0,
           lastVisitAt: logs[i]?.lastAllowedAt ?? null,
@@ -181,6 +182,14 @@ export function meRoutes(app: App) {
   });
 
   /** "My membership" screen. Shows what the gym entered, and who updated it. */
+  /** The member's own check-ins (every one, newest first; the last 30). */
+  app.get('/api/v1/me/memberships/:memberId/checkins', async (c) => {
+    await authenticate(c);
+    const { tenantId, m } = await myMember(c, c.req.param('memberId'));
+    const log = await c.var.deps.store.get<ScanLog>(P.lastScan(tenantId, m.id));
+    return c.json((log?.recent ?? []).map((r) => ({ at: r.at, result: r.result, reason: r.reason })));
+  });
+
   app.get('/api/v1/me/memberships/:memberId', async (c) => {
     await authenticate(c);
     const { m, tenant, tenantId } = await myMember(c, c.req.param('memberId'));
@@ -201,6 +210,7 @@ export function meRoutes(app: App) {
       status: st.status,
       daysLeft: st.daysLeft,
       endsOn: st.endsOn,
+      frozenDays: st.frozenDays ?? 0,
       due: st.due,
       frozenUntil: st.frozenUntil,
       current: curDoc
@@ -449,7 +459,7 @@ export function meRoutes(app: App) {
       tx.create(P.ticket(id), doc);
       return doc;
     });
-    superLater(c, 'tickets', 'New support ticket', `${u.name}: ${subject}`);
+    superLater(c, 'tickets', 'New support ticket', `${u.name}: ${subject}`, `ticket:${id}`);
     return c.json({ id, ...t }, 201);
   });
 
@@ -471,7 +481,7 @@ export function meRoutes(app: App) {
   app.post('/api/v1/me/tickets/:id/messages', async (c) => {
     const u = await authenticate(c);
     const out = await replyTicket(c, c.req.param('id'), (t) => t.userId === u.id, false);
-    superLater(c, 'tickets', 'Ticket reply', `${u.name} wrote on their ticket`);
+    superLater(c, 'tickets', 'Ticket reply', `${u.name} wrote on their ticket`, `ticket:${c.req.param('id')}`);
     return c.json(out, 201);
   });
 

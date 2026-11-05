@@ -14,19 +14,19 @@ import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show PhoneField;
 import 'branch.dart' show branchesOf;
+import 'reports_kit.dart' show saveAndOffer;
 import 'person.dart';
 
 // Boards 50–62: staff, attendance, staff attendance, import, gate, transfer gym.
 
 final staffProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/staff'));
-final attendanceTodayProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/attendance/today'));
 final gateProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/gate'));
 
-const rightKeys = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'];
+const rightKeys = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'];
 const presets = {
   'RECEPTION': ['members', 'memberEdit', 'payments', 'checkin', 'requests'],
   'CHECKIN': ['members', 'checkin'],
-  'MANAGER': ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'],
+  'MANAGER': ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'],
 };
 
 String rightLabel(BuildContext context, String k) => switch (k) {
@@ -35,6 +35,7 @@ String rightLabel(BuildContext context, String k) => switch (k) {
       'payments' => context.t('Take payments'),
       'checkin' => context.t('Check-in and gate'),
       'requests' => context.t('Approve requests'),
+      'transfers' => context.t('Branch moves'),
       'offers' => context.t('Send offers and notices'),
       'reports' => context.t('Money reports'),
       _ => context.t('Plans and gym settings'),
@@ -44,8 +45,9 @@ String rightSub(BuildContext context, String k) => switch (k) {
       'members' => context.t('Members list and member page'),
       'memberEdit' => context.t('New member, edit details, import'),
       'payments' => context.t('Memberships, payments, freeze'),
-      'checkin' => context.t('Scan member QR, manual check-in, open gate'),
-      'requests' => context.t('Join and transfer requests'),
+      'checkin' => context.t('Manual check-in, see who came, open gate'),
+      'requests' => context.t('Join and PT requests'),
+      'transfers' => context.t('Move a member to another branch and approve move requests'),
       'offers' => '',
       'reports' => context.t('Collection, dues'),
       _ => '',
@@ -444,64 +446,80 @@ class _StaffEditState extends ConsumerState<StaffEditScreen> {
 
 // ============================================================ attendance (owner / front desk)
 
-class DeskAttendanceScreen extends ConsumerWidget {
+/// Check-ins of one day at the branch being looked at (every check-in, newest first).
+final attendanceDayProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, day) => branchGet(ref, day.isEmpty ? '/attendance/today' : '/attendance/today?day=$day'));
+
+class DeskAttendanceScreen extends ConsumerStatefulWidget {
   const DeskAttendanceScreen({super.key, this.tab = false});
   final bool tab;
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final v = ref.watch(attendanceTodayProvider);
+  ConsumerState<DeskAttendanceScreen> createState() => _DeskAttendanceState();
+}
+
+class _DeskAttendanceState extends ConsumerState<DeskAttendanceScreen> {
+  String day = ''; // '' = today
+
+  String _ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    final v = ref.watch(attendanceDayProvider(day));
     final s = ref.watch(sessionProvider);
+    final today = _ymd(DateTime.now());
+    final yesterday = _ymd(DateTime.now().subtract(const Duration(days: 1)));
+    // Three boxes of the same size, numbers and labels on one line each.
     Widget stat(String n, String label, Color color) => Expanded(
-          child: Panel(
-            padding: const EdgeInsets.all(12),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(n, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
-              Muted(label, size: 12),
-            ]),
+          child: SizedBox(
+            height: 82,
+            child: Panel(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(n, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: color)),
+                Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: context.c.mut, fontSize: 12)),
+              ]),
+            ),
           ),
         );
+    final isToday = day.isEmpty || day == today;
     return Scaffold(
-      appBar: AppBar(title: Text(context.t('Attendance')), automaticallyImplyLeading: !tab),
+      appBar: AppBar(
+        title: Text(context.t('Attendance')),
+        automaticallyImplyLeading: !widget.tab,
+        actions: [IconButton(tooltip: context.t('Download Excel'), icon: const Icon(Icons.download_rounded), onPressed: () => attendanceExcelSheet(context, ref))],
+      ),
       body: RefreshIndicator(
         color: context.c.primary,
-        onRefresh: () async => ref.invalidate(attendanceTodayProvider),
+        onRefresh: () async => ref.invalidate(attendanceDayProvider(day)),
         child: AsyncBody(
           value: v,
-          onRetry: () => ref.invalidate(attendanceTodayProvider),
+          onRetry: () => ref.invalidate(attendanceDayProvider(day)),
           builder: (d) {
             final events = ((d['events'] as List?) ?? const []).cast<Map>();
+            // How many times each member came in this day (shown as "2×").
+            final times = <String, int>{};
+            for (final e in events) {
+              final id = e['memberId'] as String?;
+              if (id != null && e['result'] != 'BLOCKED') times[id] = (times[id] ?? 0) + 1;
+            }
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 24), children: [
               Row(children: [
-                stat('${d['checkins'] ?? 0}', context.t('Check-ins today'), C.ok),
+                stat('${d['checkins'] ?? 0}', isToday ? context.t('Check-ins today') : context.t('Check-ins'), C.ok),
                 const SizedBox(width: 8),
-                stat('${d['inGymNow'] ?? 0}', context.t('In the gym now'), context.c.primary),
+                stat('${isToday ? d['inGymNow'] ?? 0 : times.length}', isToday ? context.t('In the gym now') : context.t('Members came'), context.c.primary),
                 const SizedBox(width: 8),
                 stat('${d['blocked'] ?? 0}', context.t('Stopped'), C.red),
               ]),
               const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () async {
-                      await context.push('/o/attendance/scan');
-                      ref.invalidate(attendanceTodayProvider);
-                    },
-                    icon: const Icon(Icons.qr_code_scanner_rounded),
-                    label: Text(context.t('Scan member QR')),
-                  ),
+              if (s.can('checkin'))
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                  onPressed: () async {
+                    await context.push('/o/attendance/manual');
+                    ref.invalidate(attendanceDayProvider(day));
+                  },
+                  icon: const Icon(Icons.edit_note_rounded),
+                  label: Text(context.t('Manual entry')),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await context.push('/o/attendance/manual');
-                      ref.invalidate(attendanceTodayProvider);
-                    },
-                    icon: const Icon(Icons.edit_note_rounded),
-                    label: Text(context.t('Manual')),
-                  ),
-                ),
-              ]),
               if (s.isStaffDesk) ...[
                 const SizedBox(height: 10),
                 Panel(
@@ -515,10 +533,30 @@ class DeskAttendanceScreen extends ConsumerWidget {
                   ]),
                 ),
               ],
-              const SizedBox(height: 14),
-              SectionTitle(context.t('Today')),
+              const SizedBox(height: 12),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  ChoiceChip(label: Text(context.t('Today')), selected: isToday, onSelected: (_) => setState(() => day = '')),
+                  const SizedBox(width: 6),
+                  ChoiceChip(label: Text(context.t('Yesterday')), selected: day == yesterday, onSelected: (_) => setState(() => day = yesterday)),
+                  const SizedBox(width: 6),
+                  ChoiceChip(
+                    avatar: const Icon(Icons.calendar_month_rounded, size: 16),
+                    label: Text(!isToday && day != yesterday ? fmtDate(day) : context.t('Pick date')),
+                    selected: !isToday && day != yesterday,
+                    onSelected: (_) async {
+                      final now = DateTime.now();
+                      final p = await showDatePicker(context: context, initialDate: now, firstDate: now.subtract(const Duration(days: 365)), lastDate: now);
+                      if (p != null) setState(() => day = _ymd(p) == today ? '' : _ymd(p));
+                    },
+                  ),
+                ]),
+              ),
+              const SizedBox(height: 10),
+              SectionTitle(isToday ? context.t('Today') : fmtDate(day), trailing: Muted(context.t('{n} check-ins', {'n': events.length}), size: 12)),
               if (events.isEmpty)
-                Panel(child: Muted(context.t('No check-ins yet today.'), align: TextAlign.center))
+                Panel(child: Muted(isToday ? context.t('No check-ins yet today.') : context.t('No check-ins on this day.'), align: TextAlign.center))
               else
                 Panel(
                   padding: const EdgeInsets.symmetric(vertical: 4),
@@ -529,7 +567,12 @@ class DeskAttendanceScreen extends ConsumerWidget {
                         leading: Avatar(name: (e['member']?['name'] as String?) ?? '', size: 38),
                         title: Text((e['member']?['name'] as String?) ?? '', style: const TextStyle(fontWeight: FontWeight.w700)),
                         subtitle: Text(
-                          [e['member']?['memberCode'], fmtTime(e['scannedAt'] as String?), if (e['result'] == 'BLOCKED') e['reason']].where((x) => x != null).join(' · '),
+                          [
+                            e['member']?['memberCode'],
+                            fmtTime(e['scannedAt'] as String?),
+                            if ((times[e['memberId']] ?? 0) > 1 && e['result'] != 'BLOCKED') context.t('{n} times today', {'n': times[e['memberId']]}),
+                            if (e['result'] == 'BLOCKED') e['reason'],
+                          ].where((x) => x != null).join(' · '),
                           style: TextStyle(color: context.c.mut, fontSize: 12),
                         ),
                         trailing: _InOut(blocked: e['result'] == 'BLOCKED'),
@@ -542,6 +585,77 @@ class DeskAttendanceScreen extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Excel (CSV, opens in Excel / Google Sheets) of check-ins: staff get members; the owner members or staff.
+Future<void> attendanceExcelSheet(BuildContext context, WidgetRef ref) async {
+  final owner = ref.read(sessionProvider).myGym?['role'] == 'OWNER';
+  String ymd(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  final now = DateTime.now();
+  var kind = 'members';
+  var range = 7;
+  DateTimeRange? custom;
+  var busy = false;
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(ctx.t('Download Excel'), style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+            Muted(ctx.t('Opens in Excel or Google Sheets.'), size: 12.5),
+            const SizedBox(height: 12),
+            if (owner)
+              Wrap(spacing: 8, children: [
+                ChoiceChip(label: Text(ctx.t('Members')), selected: kind == 'members', onSelected: (_) => setState(() => kind = 'members')),
+                ChoiceChip(label: Text(ctx.t('Staff & trainers')), selected: kind == 'staff', onSelected: (_) => setState(() => kind = 'staff')),
+              ]),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 6, children: [
+              for (final (n, l) in [(1, ctx.t('Today')), (7, ctx.t('7 days')), (30, ctx.t('This month'))])
+                ChoiceChip(label: Text(l), selected: custom == null && range == n, onSelected: (_) => setState(() {
+                      range = n;
+                      custom = null;
+                    })),
+              ChoiceChip(
+                avatar: const Icon(Icons.date_range_rounded, size: 16),
+                label: Text(custom == null ? ctx.t('Pick dates') : '${fmtDate(ymd(custom!.start))} – ${fmtDate(ymd(custom!.end))}'),
+                selected: custom != null,
+                onSelected: (_) async {
+                  final r = await showDateRangePicker(context: ctx, firstDate: now.subtract(const Duration(days: 365)), lastDate: now);
+                  if (r != null) setState(() => custom = r);
+                },
+              ),
+            ]),
+            Muted(ctx.t('Up to 31 days at a time.'), size: 11.5),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      setState(() => busy = true);
+                      final from = custom?.start ?? (range == 30 ? DateTime(now.year, now.month, 1) : now.subtract(Duration(days: range - 1)));
+                      final to = custom?.end ?? now;
+                      try {
+                        final b = await Api.instance.bytes('/api/v1/attendance/export?kind=$kind&from=${ymd(from)}&to=${ymd(to)}');
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        if (context.mounted) await saveAndOffer(context, '${kind == 'staff' ? 'staff' : 'members'}-attendance-${ymd(from)}-to-${ymd(to)}.csv', b, 'text/csv');
+                      } catch (e) {
+                        if (ctx.mounted) toastError(ctx, e);
+                        setState(() => busy = false);
+                      }
+                    },
+              icon: const Icon(Icons.table_view_rounded),
+              label: Text(busy ? ctx.t('Please wait…') : ctx.t('Download')),
+            ),
+          ]),
+        ),
+      ),
+    ),
+  );
 }
 
 String fmtTime(String? iso) {

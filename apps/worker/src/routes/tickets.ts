@@ -102,7 +102,7 @@ export async function setTicketStatus(c: C, id: string, status: TicketStatus) {
     const next: Ticket = { ...t, status, resolvedAt: status === 'RESOLVED' ? now : status === 'CLOSED' ? t.resolvedAt ?? null : null, updatedAt: now };
     tx.set(P.ticket(id), next);
     const note = ticketStatus(t) !== status ? STATUS_NOTE[status]?.(t.number ?? '') : undefined;
-    if (note) await notify(tx, t.userId, t.tenantId, note[0], `${t.subject} · ${note[1]}`);
+    if (note) await notify(tx, t.userId, t.tenantId, note[0], `${t.subject} · ${note[1]}`, null, `ticket:${id}`);
     return { id, ...next, ...ticketFlags(next) };
   });
 }
@@ -139,7 +139,7 @@ export async function replyTicket(c: C, id: string, allowed: (t: Ticket) => bool
     }
     // Support's answer → the person's turn. The person's answer → open again for support.
     tx.set(P.ticket(id), { ...t, status: fromStaff ? 'WAITING' : 'OPEN', resolvedAt: null, updatedAt: msg.createdAt, messages: [...t.messages, msg].slice(-200) });
-    if (fromStaff) await notify(tx, t.userId, t.tenantId, `Reply on ticket ${t.number ?? ''}`.trim(), t.subject);
+    if (fromStaff) await notify(tx, t.userId, t.tenantId, `Reply on ticket ${t.number ?? ''}`.trim(), t.subject, null, `ticket:${id}`);
   });
   return msg;
 }
@@ -168,7 +168,7 @@ export function ticketRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c);
     const out = await replyTicket(c, c.req.param('id'), gymAllowed(g.tenantId), true);
-    superLater(c, 'tickets', 'Ticket reply', `${c.var.user.name} (${g.tenant.name}) wrote on a ticket`);
+    superLater(c, 'tickets', 'Ticket reply', `${c.var.user.name} (${g.tenant.name}) wrote on a ticket`, `ticket:${c.req.param('id')}`);
     return c.json(out, 201);
   });
   app.post('/api/v1/tickets/:id/resolve', async (c) => {

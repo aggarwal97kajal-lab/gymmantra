@@ -391,12 +391,52 @@ class _NotificationsState extends ConsumerState<NotificationsScreen> {
 }
 
 
-/// One notification; the icon follows what it is about.
-class _NoteCard extends StatelessWidget {
+/// The bell on every Home: a red number of unread notifications; tap opens the list.
+class NotificationBell extends ConsumerWidget {
+  const NotificationBell({super.key, this.size = 42});
+  final double size;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final n = ref.watch(unreadCountProvider);
+    return Material(
+      color: context.c.surf,
+      shape: CircleBorder(side: BorderSide(color: context.c.line)),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => context.push('/notifications'),
+        child: SizedBox(
+          width: size,
+          height: size,
+          child: Badge(
+            isLabelVisible: n > 0,
+            label: Text(n > 99 ? '99+' : '$n', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800)),
+            backgroundColor: C.red,
+            offset: const Offset(6, -6),
+            child: Icon(n > 0 ? Icons.notifications_rounded : Icons.notifications_none_rounded, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens the page a notification is about (also used when a phone notification is tapped).
+void openNote(BuildContext context, WidgetRef ref, Map n) {
+  final r = noteRoute(ref.read(sessionProvider).mode, n['go'] as String? ?? ((n['kind'] == 'DUE') ? 'due' : null));
+  if (r == null) return;
+  if (r.tab) {
+    context.go(r.path);
+  } else {
+    context.push(r.path);
+  }
+}
+
+/// One notification; the icon follows what it is about. Tap → the page it is about.
+class _NoteCard extends ConsumerWidget {
   const _NoteCard({required this.n});
   final Map n;
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final title = (n['title'] as String?) ?? '';
     final kind = (n['kind'] as String?) ?? (title.startsWith('Payment due') ? 'DUE' : '');
     final (IconData icon, Color color) = switch (kind) {
@@ -410,7 +450,11 @@ class _NoteCard extends StatelessWidget {
     };
     final t = DateTime.tryParse(n['createdAt'] as String? ?? '')?.toLocal();
     final time = t == null ? '' : TimeOfDay.fromDateTime(t).format(context);
-    return Panel(
+    final target = noteRoute(ref.read(sessionProvider).mode, n['go'] as String? ?? (kind == 'DUE' ? 'due' : null));
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: target == null ? null : () => openNote(context, ref, n),
+      child: Panel(
       padding: const EdgeInsets.all(14),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         IconTile(icon, color: color, size: 38),
@@ -428,7 +472,9 @@ class _NoteCard extends StatelessWidget {
             Text((n['body'] as String?) ?? '', style: TextStyle(color: context.c.mut, height: 1.35)),
           ]),
         ),
+        if (target != null) Padding(padding: const EdgeInsets.only(left: 4, top: 8), child: Icon(Icons.chevron_right_rounded, color: context.c.mut, size: 20)),
       ]),
+    ),
     );
   }
 }

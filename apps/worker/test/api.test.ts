@@ -1409,3 +1409,75 @@ describe('branch address, GST and logos; state broadcasts; GM Admin people by gy
     expect((await h.api.get(`/super/users/${mem.user.id}`, mem.token)).status).toBe(403);
   });
 });
+
+describe('notifications open the right page, check-in switch, branch moves right, history', () => {
+  const join = async (owner: { token: string }, code: string, name: string) => {
+    const m = await h.signup(name);
+    await h.api.post('/me/join', { gymCode: code }, m.token);
+    const reqs = await h.api.get('/join-requests', owner.token);
+    await h.api.post(`/join-requests/${reqs.body[0].id}/approve`, {}, owner.token);
+    return m;
+  };
+
+  it('a notification carries where it opens (go)', async () => {
+    const owner = await h.ownerWithGym('Go Gym');
+    const mem = await join(owner, owner.gym.gymCode, 'Go Member');
+    const notes = (await h.api.get('/me/notifications', mem.token)).body;
+    expect(notes.find((n: any) => n.title === 'Welcome!')).toBeTruthy();
+    const plan = (await h.api.post('/plans', { name: 'Monthly', months: 1, price: 1000 }, owner.token)).body;
+    const mid = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].memberId;
+    await h.api.post(`/members/${mid}/memberships`, { planId: plan.id, paymentMode: 'NOT_PAID', allowEntryWhileDue: true }, owner.token);
+    expect((await h.api.post('/dues/remind', {}, owner.token)).body.sent).toBe(1);
+    const after = (await h.api.get('/me/notifications', mem.token)).body;
+    expect(after.find((n: any) => String(n.title).startsWith('Payment due')).go).toBe('due');
+  });
+
+  it('owner turns app check-in off for a branch: the member is told to use the front desk', async () => {
+    const owner = await h.ownerWithGym('Off Gym');
+    const mem = await join(owner, owner.gym.gymCode, 'Off Member');
+    const qr = (await h.api.get('/gym/checkin-qr', owner.token)).body;
+    expect(qr.appCheckin).toBe(true);
+    expect((await h.api.put('/gym/checkin-mode', { on: false }, mem.token)).status).toBe(403);
+    expect((await h.api.put('/gym/checkin-mode', { on: false }, owner.token)).status).toBe(200);
+    expect((await h.api.get('/me/gyms', mem.token)).body.memberships[0].gym.appCheckin).toBe(false);
+    const r = await h.api.post('/me/checkin', { code: qr.text }, mem.token);
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe('CHECKIN_OFF');
+    await h.api.put('/gym/checkin-mode', { on: true }, owner.token);
+    expect((await h.api.post('/me/checkin', { code: qr.text }, mem.token)).status).toBe(201);
+    // the member sees each check-in; the desk gets an Excel (CSV)
+    const mid = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].memberId;
+    expect((await h.api.get(`/me/memberships/${mid}/checkins`, mem.token)).body.length).toBe(1);
+    const csv = await h.app.request('/api/v1/attendance/export?kind=members', { headers: { authorization: `Bearer ${owner.token}` } });
+    expect(csv.status).toBe(200);
+    expect(await csv.text()).toContain('Off Member');
+    const staffCsv = await h.app.request('/api/v1/attendance/export?kind=staff', { headers: { authorization: `Bearer ${owner.token}` } });
+    expect(staffCsv.status).toBe(200);
+  });
+
+  it('staff with "Branch moves" can move a member; without it they cannot', async () => {
+    const owner = await h.ownerWithGym('Move Gym');
+    const second = (await h.api.post('/gym/branches', { name: 'Second' }, owner.token)).body;
+    const m = (await h.api.post('/members', { name: 'Mover', phone: h.nextPhone() }, owner.token)).body;
+    const desk = await h.signup('Desk Person');
+    await h.api.post('/gym/staff', { phone: desk.phone, role: 'FRONT_DESK', tempPassword: 'secret123', name: 'Desk Person' }, owner.token);
+    const staff = (await h.api.get('/gym/staff', owner.token)).body.find((s: any) => s.userId === desk.user.id || s.id === desk.user.id);
+    expect(staff).toBeTruthy();
+    await h.api.patch(`/gym/staff/${staff.id}`, { rights: ['members', 'memberEdit'] }, owner.token);
+    expect((await h.api.patch(`/members/${m.id}`, { branchId: second.id }, desk.token)).status).toBe(403);
+    await h.api.patch(`/gym/staff/${staff.id}`, { rights: ['members', 'memberEdit', 'transfers'] }, owner.token);
+    expect((await h.api.patch(`/members/${m.id}`, { branchId: second.id }, desk.token)).status).toBe(200);
+  });
+
+  it('attendance reminder goes only to staff who have not marked Present', async () => {
+    const owner = await h.ownerWithGym('Rem Gym');
+    const desk = await h.signup('Rem Desk');
+    await h.api.post('/gym/staff', { phone: desk.phone, role: 'FRONT_DESK', tempPassword: 'secret123', name: 'Rem Desk' }, owner.token);
+    const { cronAttendanceReminders } = await import('../src/lib/attendrem');
+    const elevenIst = new Date(`${new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10)}T05:45:00Z`);
+    await cronAttendanceReminders(h.deps, null, elevenIst);
+    const notes = (await h.api.get('/me/notifications', desk.token)).body;
+    expect(notes.some((n: any) => n.title === 'Mark your attendance' && n.go === 'attendance')).toBe(true);
+    expect((await h.api.get('/me/notifications', owner.token)).body.some((n: any) => n.title === 'Mark your attendance')).toBe(false);
+  });
+});

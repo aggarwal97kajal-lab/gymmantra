@@ -9,19 +9,19 @@ export type SuperKind = 'tickets' | 'payments' | 'gyms' | 'failed' | 'expired';
 export const SUPER_KINDS: SuperKind[] = ['tickets', 'payments', 'gyms', 'failed', 'expired'];
 export const ADMIN_PUSH = 'settings/adminPush';
 
-export async function notifySuper(deps: Deps, kind: SuperKind, title: string, body: string) {
+export async function notifySuper(deps: Deps, kind: SuperKind, title: string, body: string, go?: string) {
   if (!deps.superAdminEmail) return;
   const [prefs, rows] = await Promise.all([deps.store.get<Record<string, boolean>>(ADMIN_PUSH), deps.store.query<UserDoc>('users', [['email', deps.superAdminEmail]])]);
   if (prefs && prefs[kind] === false) return;
   for (const r of rows.filter((x) => x.data.isSuperAdmin && !x.data.deleted)) {
-    await deps.store.tx((t) => notify(t, r.id, null, title, body));
+    await deps.store.tx((t) => notify(t, r.id, null, title, body, null, go));
   }
 }
 
 /** After the answer: tell the super admin (in the app + phone). Never breaks the request. */
-export function superLater(c: C, kind: SuperKind, title: string, body: string) {
+export function superLater(c: C, kind: SuperKind, title: string, body: string, go?: string) {
   const deps = c.var.deps;
-  const job = notifySuper(deps, kind, title, body)
+  const job = notifySuper(deps, kind, title, body, go)
     .then(() => sendPush(deps.store, deps.serviceAccount ?? null, takePush()))
     .catch(() => {});
   try {

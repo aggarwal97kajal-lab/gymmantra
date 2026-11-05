@@ -9,6 +9,7 @@ import '../photo.dart';
 import '../prefs.dart';
 import '../session.dart';
 import '../theme.dart';
+import 'profile.dart' show NotificationBell;
 import '../ui.dart';
 import 'pt.dart' show MyTrainerCard, myPtProvider;
 import 'billing.dart' show AdsStrip;
@@ -182,7 +183,7 @@ class HomeScreen extends ConsumerWidget {
                   Muted(context.t(line), size: 13.5),
                 ]),
               ),
-              _RoundIcon(icon: Icons.notifications_none_rounded, onTap: () => context.push('/notifications')),
+              const NotificationBell(),
               const SizedBox(width: 10),
               GestureDetector(onTap: () => context.go('/profile'), child: Avatar(name: name, url: u['photoUrl'] as String?, size: 42)),
             ]),
@@ -404,7 +405,7 @@ class _MembershipCard extends StatelessWidget {
                         planName == null
                             ? context.t('Visit the front desk to start one.')
                             : live
-                                ? context.t('Ends {date}', {'date': fmtDate(ends)})
+                                ? context.t('Ends {date}', {'date': fmtDate(ends)}) + ((m['frozenDays'] as int? ?? 0) > 0 ? ' (${context.t('+{n} days freeze', {'n': m['frozenDays']})})' : '')
                                 : context.t('Ended {date}', {'date': fmtDate(ends)}),
                         style: const TextStyle(color: Color(0xFFFFEDE5), fontSize: 13),
                       ),

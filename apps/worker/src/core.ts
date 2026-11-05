@@ -66,6 +66,7 @@ export interface Branch {
   pincode?: string | null;
   gstin?: string | null;
   logoUrl?: string | null; // own logo; null → the gym's logo
+  appCheckin?: boolean; // false: this branch uses its own entry system (no check-in from the app)
 }
 
 export interface TenantDoc {
@@ -380,12 +381,12 @@ const ROLE_LABEL: Record<AppRole, string> = { MEMBER: 'Member', OWNER: 'Gym owne
  * checkin: attendance, scan, gate · requests: join/transfer requests · offers: offers and notices ·
  * reports: money reports and dues · plans: plans and gym settings.
  */
-export const RIGHTS = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'] as const;
+export const RIGHTS = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'] as const;
 export type Right = (typeof RIGHTS)[number];
 export const RIGHT_PRESETS: Record<string, Right[]> = {
   RECEPTION: ['members', 'memberEdit', 'payments', 'checkin', 'requests'],
   CHECKIN: ['members', 'checkin'],
-  MANAGER: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'reports', 'plans'],
+  MANAGER: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'],
 };
 /** Front desk added before rights existed: what they could always do. */
 export const DEFAULT_DESK_RIGHTS: Right[] = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers'];
@@ -459,6 +460,7 @@ export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
     // A branch shows only its own logo; the main (first) branch shows the gym's logo.
     logoUrl: b?.logoUrl || (!b || b.id === t.branches[0]?.id ? t.logoUrl : null) || null,
     state: b?.state || t.state || null,
+    appCheckin: b?.appCheckin !== false,
   };
 }
 export const inBranch = (g: GymCtx, id: string | null | undefined) => branchOf(g.tenant, id) === g.branchId;
@@ -509,6 +511,29 @@ export interface NoteItem {
   body: string;
   createdAt: string;
   readAt: string | null;
+  go?: string | null; // what the app opens on tap ("due", "requests", "ticket:<id>", …)
+}
+
+/** What a notification opens in the app, from its title (the app turns it into a page for the person's role). */
+export function goOf(title: string): string | null {
+  const rules: [RegExp, string][] = [
+    [/^Payment due/, 'due'],
+    [/^(Payment received|Membership (added|updated|frozen))/, 'membership'],
+    [/^(Plan activated|Payment not received)/, 'subscription'],
+    [/^Branch transfer request/, 'requests:move'],
+    [/^PT request to approve/, 'requests:pt'],
+    [/^New (join|trainer) request/, 'requests'],
+    [/^New member added/, 'members'],
+    [/^PT payment received/, 'pt-pay'],
+    [/PT/, 'pt'],
+    [/^Staff attendance/, 'staffdays'],
+    [/^(Mark your attendance|Still not marked)/, 'attendance'],
+    [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
+    [/^(New support ticket|Ticket reply)/, 'tickets'],
+    [/^Plan payment/, 'payments'],
+    [/^New gym registered|gym plans? ended/i, 'gyms'],
+  ];
+  return rules.find(([re]) => re.test(title))?.[1] ?? null;
 }
 
 /** A super admin message to everyone or to some roles (read live, not copied per person). */
@@ -546,11 +571,12 @@ export async function pushStatesOf(r: Reader, u: UserDoc): Promise<string[]> {
 }
 
 /** In-app notification (kept as the last 50 per user in one document). */
-export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string, branchId: string | null = null) {
+export async function notify(t: Tx, userId: string | null | undefined, tenantId: string | null, title: string, body: string, branchId: string | null = null, go?: string | null) {
   if (!userId) return;
+  const to = go ?? goOf(title);
   const doc = (await t.get<{ items: NoteItem[] }>(P.notes(userId))) ?? { items: [] };
-  t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, branchId, title, body, createdAt: nowIso(), readAt: null }, ...doc.items].slice(0, 50) });
-  queuePush({ uid: userId, title, body, data: { kind: 'note', ...(tenantId ? { tenantId } : {}), ...(branchId ? { branchId } : {}) } });
+  t.set(P.notes(userId), { ...doc, items: [{ id: uuid(), tenantId, branchId, title, body, createdAt: nowIso(), readAt: null, go: to }, ...doc.items].slice(0, 50) });
+  queuePush({ uid: userId, title, body, data: { kind: 'note', ...(tenantId ? { tenantId } : {}), ...(branchId ? { branchId } : {}), ...(to ? { go: to } : {}) } });
 }
 
 /**

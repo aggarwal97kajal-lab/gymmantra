@@ -61,3 +61,18 @@ describe('qr token', () => {
     expect(await verifyQrToken('s', token.replace('mem-1', 'mem-2'), t0)).toBeNull();
   });
 });
+
+describe('freeze moves the renewals after it', () => {
+  const base = { id: 'a', replacesId: null, total: 1000, paid: 1000, allowEntryWhileDue: false, freezeDaysAllowed: 30, createdAt: '2026-01-01' };
+  it('a 7-day freeze on this year moves next year too (owner and member see the later date)', () => {
+    const y1 = { ...base, id: 'y1', startDate: '2026-11-04', endDate: '2027-11-03', freezes: [{ id: 'f', startDate: '2026-11-05', days: 7, endedOn: null }] };
+    const y2 = { ...base, id: 'y2', startDate: '2027-11-04', endDate: '2028-11-03', freezes: [] };
+    const st = computeState([y1, y2] as SubLike[], '2026-11-05');
+    expect(st.status).toBe('FROZEN');
+    expect(st.endsOn).toBe('2028-11-10');
+    expect(st.frozenDays).toBe(7);
+    // a year later, on the (moved) renewal, the end stays moved
+    expect(computeState([y1, y2] as SubLike[], '2027-11-08').endsOn).toBe('2028-11-10');
+    expect(computeState([y1, y2] as SubLike[], '2028-11-05').status).toBe('ENDING_SOON');
+  });
+});

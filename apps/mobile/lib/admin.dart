@@ -15,7 +15,7 @@ import 'screens/person.dart' show BusyCover;
 import 'admin_extra.dart';
 import 'screens/help.dart' show TicketScreen, TicketTile, ticketStatuses, ticketStatusLabel, ticketStatusColor, ticketStatusOf;
 import 'screens/home.dart' show openUrl;
-import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, ProfileDetailsScreen, ChangePasswordScreen;
+import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, NotificationBell, ProfileDetailsScreen, ChangePasswordScreen;
 import 'session.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -270,7 +270,7 @@ class AdminHome extends ConsumerWidget {
               const AdminLogo(size: 40),
               const SizedBox(width: 10),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(context.t('Platform'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)), Muted(context.t('Super admin'), size: 12.5)])),
-              IconButton(onPressed: () => context.push('/notifications'), icon: const Icon(Icons.notifications_none_rounded)),
+              const NotificationBell(size: 40),
             ]),
             const SizedBox(height: 16),
             AsyncBody(

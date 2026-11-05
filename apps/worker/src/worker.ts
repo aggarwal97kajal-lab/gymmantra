@@ -1,3 +1,4 @@
+import { cronAttendanceReminders } from './lib/attendrem';
 import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { cronFanouts } from './lib/push';
 import { cronReminders } from './lib/superpush';
@@ -148,6 +149,7 @@ export default {
       const d = depsFor(env, new URL('https://cron.gymmantra.internal/'));
       ctx.waitUntil(cronFanouts(d.store, d.serviceAccount ?? null).catch(() => {}));
       ctx.waitUntil(cronReminders(d, d.serviceAccount ?? null).catch(() => {}));
+      ctx.waitUntil(cronAttendanceReminders(d, d.serviceAccount ?? null).catch(() => {}));
     } catch {
       /* settings missing: nothing to do */
     }

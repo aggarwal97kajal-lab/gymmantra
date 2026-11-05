@@ -328,6 +328,33 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
             value: qr,
             onRetry: () => ref.invalidate(gymQrProvider),
             builder: (d) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              // Owner chooses: members check in with the app (this QR), or the branch uses its own system.
+              Panel(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                child: SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: d['appCheckin'] != false,
+                  onChanged: !owner || busy
+                      ? null
+                      : (on) async {
+                          try {
+                            await Api.instance.put('/gym/checkin-mode', {'on': on});
+                            ref.invalidate(gymQrProvider);
+                          } catch (e) {
+                            if (context.mounted) toastError(context, e);
+                          }
+                        },
+                  title: Text(context.t('Check-in from the app'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                  subtitle: Text(
+                    d['appCheckin'] != false
+                        ? context.t('ON: members scan this QR in the gym to check in.')
+                        : context.t('OFF: this branch uses its own entry system (punch-in, biometric, register). Members see "check in at the front desk".'),
+                    style: TextStyle(color: context.c.mut, fontSize: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (d['appCheckin'] != false) ...[
               poster(CheckinPoster(gym: name, qr: d['text'] as String), checkinKey),
               const SizedBox(height: 14),
               actions([
@@ -350,6 +377,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                 ]),
               ),
               const SizedBox(height: 12),
+              ],
               Panel(
                 child: Row(children: [
                   IconTile(Icons.place_rounded, color: d['locationSet'] == true ? C.ok : C.warn),
@@ -368,10 +396,11 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                   if (owner) TextButton(onPressed: busy ? null : setLocation, child: Text(context.t(d['locationSet'] == true ? 'Update' : 'Set'))),
                 ]),
               ),
-              if (owner) ...[
+              if (owner && d['appCheckin'] != false) ...[
                 const SizedBox(height: 6),
                 TextButton.icon(onPressed: rotate, icon: const Icon(Icons.refresh_rounded, size: 18), label: Text(context.t('Make a new check-in QR'))),
               ],
+              if (d['appCheckin'] == false) Padding(padding: const EdgeInsets.only(top: 8), child: Muted(context.t('The gym location is still used for staff and trainer attendance.'), size: 12)),
             ]),
           ),
       ]),
@@ -501,6 +530,12 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
   Widget build(BuildContext context) {
     final r = result;
     if (r != null) return _ResultView(r: r, onDone: widget.standalone ? () => context.pop() : again, standalone: widget.standalone);
+    // The gym turned off check-in from the app at the member's branch: say so instead of opening the camera.
+    final gymsData = ref.watch(gymsProvider).valueOrNull;
+    final ms = ((gymsData is Map ? gymsData['memberships'] : null) as List?)?.whereType<Map>().toList() ?? const <Map>[];
+    if (ms.isNotEmpty && ms.every((m) => (m['gym'] as Map?)?['appCheckin'] == false)) {
+      return _CheckinOff(gym: (ms.first['gym'] as Map?) ?? const {}, standalone: widget.standalone);
+    }
     final camOk = camError == null;
     return Scaffold(
       backgroundColor: const Color(0xFF0B0D10),
@@ -735,4 +770,44 @@ class _Num extends StatelessWidget {
   final String l;
   @override
   Widget build(BuildContext context) => Column(children: [Text(v, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)), Muted(l, size: 12)]);
+}
+
+
+/// The member's branch uses its own entry system (the owner turned off check-in from the app).
+class _CheckinOff extends StatelessWidget {
+  const _CheckinOff({required this.gym, required this.standalone});
+  final Map gym;
+  final bool standalone;
+  @override
+  Widget build(BuildContext context) {
+    final phone = gym['phone'] as String?;
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Check-in')), automaticallyImplyLeading: standalone),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(color: C.warn.withAlpha(40), borderRadius: BorderRadius.circular(26)),
+              child: const Icon(Icons.door_front_door_rounded, size: 44, color: C.warn),
+            ),
+            const SizedBox(height: 16),
+            Text(context.t('App check-in is off'), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 6),
+            Text(
+              context.t('{gym} uses its own entry system. Please check in at the front desk.', {'gym': gym['name'] ?? context.t('Your gym')}),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: context.c.mut, height: 1.4),
+            ),
+            if (phone != null) ...[
+              const SizedBox(height: 18),
+              OutlinedButton.icon(onPressed: () => openUrl('tel:$phone'), icon: const Icon(Icons.call_rounded, size: 18), label: Text(context.t('Call gym'))),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
 }

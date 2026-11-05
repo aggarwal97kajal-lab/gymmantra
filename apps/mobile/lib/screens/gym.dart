@@ -225,6 +225,7 @@ class MembershipScreen extends ConsumerWidget {
               const SizedBox(height: 10),
               OutlinedButton(onPressed: () => context.push('/plans/${gym['id']}'), child: Text(context.t("See gym's plans"))),
               const SizedBox(height: 20),
+              _MyCheckins(memberId: memberId),
               if (history.length > 1) ...[
                 SectionTitle(context.t('History')),
                 const SizedBox(height: 8),
@@ -362,4 +363,51 @@ class _PlanTag extends StatelessWidget {
           Text(text, style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 12)),
         ]),
       );
+}
+
+
+final myCheckinsProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, id) => Api.instance.cachedGet('/me/memberships/$id/checkins'));
+
+/// Every check-in of the member, grouped by day ("6:10 AM · 7:54 PM").
+class _MyCheckins extends ConsumerWidget {
+  const _MyCheckins({required this.memberId});
+  final String memberId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final v = ref.watch(myCheckinsProvider(memberId)).valueOrNull;
+    final list = (v is List ? v : const []).whereType<Map>().toList();
+    if (list.isEmpty) return const SizedBox.shrink();
+    final byDay = <String, List<Map>>{};
+    for (final c in list) {
+      final t = DateTime.tryParse(c['at'] as String? ?? '')?.toUtc().add(const Duration(hours: 5, minutes: 30));
+      if (t == null) continue;
+      final d = '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}';
+      (byDay[d] ??= []).add(c);
+    }
+    String time(Map c) {
+      final d = DateTime.tryParse(c['at'] as String? ?? '')?.toLocal();
+      if (d == null) return '';
+      final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
+      return '$h:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'AM' : 'PM'}';
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      SectionTitle(context.t('My check-ins')),
+      const SizedBox(height: 8),
+      Panel(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(children: [
+          for (final e in byDay.entries.take(14))
+            ListTile(
+              dense: true,
+              leading: Icon(e.value.any((c) => c['result'] != 'BLOCKED') ? Icons.check_circle_rounded : Icons.block_rounded, color: e.value.any((c) => c['result'] != 'BLOCKED') ? C.ok : C.red),
+              title: Text(fmtDate(e.key), style: const TextStyle(fontWeight: FontWeight.w700)),
+              subtitle: Text(
+                [e.value.reversed.map((c) => c['result'] == 'BLOCKED' ? '${time(c)} (${context.t('stopped')})' : time(c)).join(' · '), if (e.value.length > 1) context.t('{n} times', {'n': e.value.length})].join('  ·  '),
+              ),
+            ),
+        ]),
+      ),
+      const SizedBox(height: 20),
+    ]);
+  }
 }

@@ -98,7 +98,8 @@ function MembershipForm({ memberId, correcting, onClose, onSaved }: { memberId: 
         note: f.note || undefined,
       };
       const r = await api<{ whatsappReceipt: string }>(correcting ? `/memberships/${correcting.id}/correct` : `/members/${memberId}/memberships`, { body });
-      onSaved(f.whatsapp ? r.whatsappReceipt : null);
+      void r; // no WhatsApp receipt any more: the member gets the receipt as a notification in the app
+      onSaved('saved');
     });
   };
 
@@ -173,9 +174,6 @@ function MembershipForm({ memberId, correcting, onClose, onSaved }: { memberId: 
             <Field label="Note (optional)">
               <input className="inp" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="e.g. Diwali offer" />
             </Field>
-            <label className="chk">
-              <input type="checkbox" checked={f.whatsapp} onChange={(e) => setF({ ...f, whatsapp: e.target.checked })} /> Send WhatsApp receipt from the gym number
-            </label>
             <div className="small mut">The member app updates as soon as you save, and the member gets a notification.</div>
           </>
         )}
@@ -401,9 +399,6 @@ function MemberPage() {
       {receipt && (
         <div className="alert okk" style={{ marginBottom: 14, alignItems: 'center' }}>
           <span className="grow">Membership saved. The member app is updated.</span>
-          <a className="btn wa sm" href={receipt} target="_blank" rel="noreferrer" onClick={() => setReceipt(null)}>
-            Send WhatsApp receipt
-          </a>
         </div>
       )}
       <ErrorBox error={act.error} />

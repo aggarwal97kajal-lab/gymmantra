@@ -342,9 +342,9 @@ class Api {
 
   /// Downloads a file the app shows (profile photo) with the login attached.
   Future<Uint8List> bytes(String path) async {
-    final r = await _dio.get<List<int>>(url(path), options: Options(responseType: ResponseType.bytes, headers: authHeaders));
+    final r = await _dio.get<List<int>>(url(path), options: Options(responseType: ResponseType.bytes, headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!}));
     final data = r.data;
-    if (r.statusCode != 200 || data == null) throw ApiException(r.statusCode ?? 0, 'Photo not available');
+    if (r.statusCode != 200 || data == null) throw ApiException(r.statusCode ?? 0, 'File not available');
     return Uint8List.fromList(data);
   }
 

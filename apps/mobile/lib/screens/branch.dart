@@ -9,7 +9,15 @@ import '../ui.dart';
 
 // ---------- Branches: switcher for the owner, transfers for owner and member ----------
 
-List<Map> branchesOf(Map? g) => ((g?['branches'] as List?) ?? const []).whereType<Map>().toList();
+/// The gym's branches; the main (first) branch is shown with the gym's name (not "Main").
+List<Map> branchesOf(Map? g) {
+  final list = ((g?['branches'] as List?) ?? const []).whereType<Map>().toList();
+  if (list.isEmpty || g?['name'] == null) return list;
+  return [
+    {...list.first, 'name': g!['name']},
+    ...list.skip(1),
+  ];
+}
 
 /// Owner home: "📍 Dwarka ▾" — the whole owner app shows this branch.
 class BranchChip extends ConsumerWidget {
@@ -18,7 +26,8 @@ class BranchChip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final g = ref.watch(gymProvider).valueOrNull as Map?;
     final list = branchesOf(g);
-    if (list.length < 2) return const SizedBox.shrink();
+    // Staff work in one branch only: no switching.
+    if (list.length < 2 || ref.watch(sessionProvider).isStaffDesk) return const SizedBox.shrink();
     final cur = list.firstWhere((b) => b['id'] == (Api.instance.branchId ?? g?['currentBranchId']), orElse: () => list.first);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -49,6 +58,7 @@ class BranchChip extends ConsumerWidget {
 }
 
 Future<void> pickBranch(BuildContext context, WidgetRef ref) async {
+  if (ref.read(sessionProvider).isStaffDesk) return; // staff stay in their own branch
   final g = ref.read(gymProvider).valueOrNull as Map?;
   final list = branchesOf(g);
   final curId = Api.instance.branchId ?? g?['currentBranchId'] ?? (list.isEmpty ? null : list.first['id']);
@@ -188,6 +198,7 @@ class _TransferRequestsState extends ConsumerState<TransferRequests> {
   Widget build(BuildContext context) {
     final v = ref.watch(transfersProvider);
     final owner = ref.watch(sessionProvider).myGym?['role'] == 'OWNER';
+    final canMove = ref.watch(sessionProvider).can('transfers'); // owner, or staff with "Branch moves"
     return AsyncBody(
       value: v,
       onRetry: () => ref.invalidate(transfersProvider),
@@ -236,7 +247,7 @@ class _TransferRequestsState extends ConsumerState<TransferRequests> {
                     Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.arrow_forward_rounded, size: 18, color: context.c.mut)),
                     Flexible(child: _BranchPill('${r['toBranch']}')),
                   ]),
-                  if (owner) ...[
+                  if (canMove) ...[
                     const SizedBox(height: 12),
                     Row(children: [
                       Expanded(
@@ -248,7 +259,7 @@ class _TransferRequestsState extends ConsumerState<TransferRequests> {
                       ),
                     ]),
                   ] else
-                    Padding(padding: const EdgeInsets.only(top: 8), child: Muted(context.t('Only the gym owner can approve.'), size: 12)),
+                    Padding(padding: const EdgeInsets.only(top: 8), child: Muted(context.t('Only the gym owner (or staff with Branch moves) can approve.'), size: 12)),
                 ]),
               ),
             ),
