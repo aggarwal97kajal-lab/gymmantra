@@ -413,14 +413,36 @@ class Api {
     final key = _k(path);
     final old = cached(path);
     if (old != null) yield old;
-    if (_isFresh(key)) return; // just loaded a moment ago
-    try {
-      final fresh = await get(path);
-      _remember(key, fresh);
-      yield fresh;
-    } catch (e) {
-      if (old == null) rethrow;
+    if (!_isFresh(key)) {
+      try {
+        final fresh = await get(path);
+        _remember(key, fresh);
+        yield fresh;
+      } catch (e) {
+        if (old == null) rethrow;
+      }
     }
+    // Live updates: while this screen is open, load again whenever something may have changed
+    // (a phone notification arrived, or the app came back to the front).
+    await for (final _ in _refresh.stream) {
+      try {
+        final fresh = await get(path);
+        _remember(_k(path), fresh);
+        yield fresh;
+      } catch (_) {}
+    }
+  }
+
+  final _refresh = StreamController<void>.broadcast();
+  DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Every open screen loads its data again (at most once every 2 seconds).
+  void refreshOpenScreens() {
+    final now = DateTime.now();
+    if (now.difference(_lastRefresh) < const Duration(seconds: 2)) return;
+    _lastRefresh = now;
+    _fetchedAt.clear();
+    _refresh.add(null);
   }
 }
 

@@ -54,12 +54,41 @@ class GymMantraApp extends ConsumerStatefulWidget {
 
 class _AppState extends ConsumerState<GymMantraApp> {
   late final GoRouter router;
+  AppLifecycleListener? _life;
+  DateTime? _hiddenAt;
+
+  /// Back to the app (for example after changing something in GM Admin): open screens load again.
+  void _liveRefresh() {
+    final session = ref.read(sessionProvider);
+    if (session.user == null) return;
+    Api.instance.refreshOpenScreens();
+    session.refreshUser().catchError((_) {});
+  }
+
+  @override
+  void dispose() {
+    _life?.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
     final session = ref.read(sessionProvider);
     session.start();
+    _life = AppLifecycleListener(
+      onHide: () => _hiddenAt = DateTime.now(),
+      onShow: () {
+        final away = _hiddenAt == null ? Duration.zero : DateTime.now().difference(_hiddenAt!);
+        if (away > const Duration(seconds: 2)) _liveRefresh();
+      },
+    );
+    // A notification means something changed: load now, and once more a little later
+    // (the server may answer from an 8-second memory for a moment).
+    Push.onChange = () {
+      _liveRefresh();
+      Future.delayed(const Duration(seconds: 9), _liveRefresh);
+    };
     if (adminApp) {
       router = adminRouter(session, splashDone, const SplashScreen(), () => splashDone.value);
       return;

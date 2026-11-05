@@ -23,6 +23,9 @@ class Push {
   static bool _ready = false;
   static StreamSubscription<String>? _refresh;
 
+  /// Called when a notification arrives (the session reloads the account: plan, roles, gyms).
+  static void Function()? onChange;
+
   /// At app start. Never stops the app from opening.
   static Future<void> init() async {
     try {
@@ -32,6 +35,14 @@ class Push {
       FirebaseMessaging.onMessage.listen((m) {
         final n = m.notification;
         if (n != null) Drip.showLater([n.title, n.body].whereType<String>().join(' — '), kind: DripKind.info);
+        // Something changed for this person: the open screens load again (live update).
+        Api.instance.refreshOpenScreens();
+        onChange?.call();
+      });
+      // Tapping a notification opens the app: show fresh data.
+      FirebaseMessaging.onMessageOpenedApp.listen((_) {
+        Api.instance.refreshOpenScreens();
+        onChange?.call();
       });
     } catch (_) {
       _ready = false;
