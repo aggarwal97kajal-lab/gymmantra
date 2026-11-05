@@ -22,12 +22,14 @@ def post(path, body):
     for attempt in range(6):
         try:
             req = urllib.request.Request(API + path, data=json.dumps(body).encode(), method='POST',
-                                         headers={'content-type': 'application/json', 'authorization': 'Bearer ' + github_token()})
+                                         headers={'content-type': 'application/json', 'user-agent': 'gymmantra-backup/1',
+                                                  'authorization': 'Bearer ' + github_token()})
             return json.load(urllib.request.urlopen(req, timeout=60))
         except Exception as e:  # noqa: BLE001 - retry anything, then give up
             if attempt == 5:
                 raise
-            print(f'retry {attempt + 1}: {getattr(e, "code", "")} {e}', flush=True)
+            body = e.read().decode(errors='replace')[:300] if hasattr(e, 'read') else ''
+            print(f'retry {attempt + 1}: {e} {body}', flush=True)
             time.sleep(2 ** attempt)
 
 
