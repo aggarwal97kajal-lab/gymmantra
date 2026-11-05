@@ -1,4 +1,5 @@
 import { googleAccessToken, parseServiceAccount } from './lib/gauth';
+import { cronFanouts } from './lib/push';
 import { setEdgeKv } from './lib/edge';
 import { createApp } from './app';
 import { loadSecrets, type Deps } from './core';
@@ -140,6 +141,15 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
 let appInst: ReturnType<typeof createApp> | null = null;
 
 export default {
+  /** Every minute: send the rest of large notification jobs (lib/push.ts). */
+  async scheduled(_ev: unknown, env: WorkerEnv, ctx: ExecutionContext) {
+    try {
+      const d = depsFor(env, new URL('https://cron.gymmantra.internal/'));
+      ctx.waitUntil(cronFanouts(d.store, d.serviceAccount ?? null).catch(() => {}));
+    } catch {
+      /* settings missing: nothing to do */
+    }
+  },
   async fetch(req: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     if (url.pathname === '/api/setup-check') return setupCheck(env);

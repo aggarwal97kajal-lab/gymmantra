@@ -1277,6 +1277,16 @@ describe('phone notifications', () => {
       const topics = await h.api.get('/me/push-topics', mem.token);
       expect(topics.body.topics).toContain('all');
       expect(topics.body.topics.some((t: string) => t.startsWith('g_'))).toBe(true);
+      // A notice only for expired members: this member has no plan (counts as not active) → gets it on the phone.
+      sent.length = 0;
+      expect((await h.api.post('/notices', { title: 'Come back', message: 'Renew this week', memberFilter: 'EXPIRED' }, owner.token)).status).toBe(201);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sent.some((m) => m.message.token === 'phone-token-1234567890' && m.message.notification.body === 'Renew this week')).toBe(true);
+      // Only for active members: not sent to them.
+      sent.length = 0;
+      await h.api.post('/notices', { title: 'Active only', message: 'Yoga class', memberFilter: 'ACTIVE' }, owner.token);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(sent.some((m) => m.message.token === 'phone-token-1234567890')).toBe(false);
     } finally {
       (global as any).fetch = real;
       h.deps.serviceAccount = null;

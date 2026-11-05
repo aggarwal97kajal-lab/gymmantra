@@ -1,4 +1,4 @@
-import { gymTopic, queuePush } from '../lib/push';
+import { createFanout, gymTopic, queuePush, runFanouts } from '../lib/push';
 import { App, audit, authenticate, branchOf, gymOf, NoteItem, P, readRoster, stateOf, TenantDoc, UserDoc, need } from '../core';
 import { addDays, isYmd, todayIST } from '../lib/dates';
 import { bad, isUuid, notFound, nowIso, uuid } from '../lib/http';
@@ -165,6 +165,25 @@ export function noticeRoutes(app: App) {
       ...(forTrainers ? bids.map((bid) => gymTopic(g.tenantId, bid, 'T')) : []),
     ].slice(0, 5);
     if (topics.length) queuePush({ topicCondition: topics.map((x) => `'${x}' in topics`).join(' || '), title: `${g.tenant.name}: ${title}`, body: message, data: { kind: 'notice' } });
+    // Only some members (active, expired, ending, due): reach each matching member's phone.
+    if (forMembers && memberFilter !== 'ALL' && c.var.deps.serviceAccount) {
+      const roster = await readRoster(c.var.deps.store, g.tenantId);
+      const today = todayIST();
+      const uids = Object.values(roster.members)
+        .filter((e) => e.userId && !e.archived && !e.gone && (!branchIds || branchIds.includes(branchOf(g.tenant, e.branchId))))
+        .filter((e) => {
+          const st = stateOf(e, today);
+          return matches(n, 'MEMBER', st.status, st.due);
+        })
+        .map((e) => e.userId!);
+      await createFanout(c.var.deps.store, uids, `${g.tenant.name}: ${title}`, message, { kind: 'notice' });
+      const job = runFanouts(c.var.deps.store, c.var.deps.serviceAccount);
+      try {
+        c.executionCtx.waitUntil(job);
+      } catch {
+        await job;
+      }
+    }
     return c.json(n, 201);
   });
 
