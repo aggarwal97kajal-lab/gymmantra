@@ -1,3 +1,4 @@
+import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { setEdgeKv } from './lib/edge';
 import { createApp } from './app';
 import { loadSecrets, type Deps } from './core';
@@ -14,6 +15,7 @@ export interface WorkerEnv {
   SUPER_ADMIN_EMAIL?: string;
   GOOGLE_CLIENT_IDS?: string;
   GM_KV?: unknown; // Cloudflare KV: shares the database sign-in between Worker instances
+  FIREBASE_SERVICE_ACCOUNT?: string; // secret: service account JSON, for phone notifications
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -117,7 +119,21 @@ async function setupCheck(env: WorkerEnv): Promise<Response> {
     }
   }
   const allOk = steps.every((s) => s.ok);
-  return new Response(JSON.stringify({ allOk, steps }, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
+  // Phone notifications (optional): is the service account key there, and does Google accept it?
+  let push: { step: string; ok: boolean; fix?: string };
+  const sa = parseServiceAccount(env.FIREBASE_SERVICE_ACCOUNT);
+  if (!env.FIREBASE_SERVICE_ACCOUNT) push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: false, fix: 'Not added yet. Cloudflare → gymmantra → Settings → Variables and Secrets → Add → Secret FIREBASE_SERVICE_ACCOUNT = the whole service account file text' };
+  else if (!sa) push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: false, fix: 'Added, but the text is not a complete service account file. Copy the whole file again (from { to })' };
+  else if (env.FIREBASE_PROJECT_ID && sa.project_id !== env.FIREBASE_PROJECT_ID) push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: false, fix: `Key is for project ${sa.project_id}, but FIREBASE_PROJECT_ID is ${env.FIREBASE_PROJECT_ID}` };
+  else {
+    try {
+      await googleAccessToken(sa);
+      push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: true };
+    } catch (e) {
+      push = { step: 'Phone notifications key (FIREBASE_SERVICE_ACCOUNT)', ok: false, fix: `Google did not accept the key: ${String((e as Error)?.message ?? e).slice(0, 160)}. Make a new key and paste it again` };
+    }
+  }
+  return new Response(JSON.stringify({ allOk, steps, push }, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' } });
 }
 
 let appInst: ReturnType<typeof createApp> | null = null;
