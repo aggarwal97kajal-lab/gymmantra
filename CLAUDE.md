@@ -72,6 +72,7 @@ One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serve
 - Settings and secrets live in Cloudflare variables (`FIREBASE_API_KEY`, `FIREBASE_PROJECT_ID`, `SERVER_PASSWORD` as a secret, `SUPER_ADMIN_EMAIL`, optional `GOOGLE_CLIENT_IDS`). Never commit them.
 - Workers free plan: 10 ms CPU and 50 sub-requests per request. Keep Firestore calls per request small (batch reads with `getMany`).
 - Every change to memberships, plans, staff and SaaS plans writes `audit_logs`.
+- **Security guard (Nov 5):** `test/security.test.ts` calls every registered route without login (only the `PUBLIC` list may answer) and tries other gyms' / members' ids from another account. A new route must pass it; add to `PUBLIC` only for data that is truly public. The Cloudflare deploy runs the worker tests first (`build:cf`), so a failing test stops the deploy. `.github/workflows/security-probe.yml` checks the live database is closed to everyone but the server (weekly).
 
 ## Working in this sandbox
 
