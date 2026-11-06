@@ -1,4 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'api.dart';
 import 'festival.dart';
 import 'i18n.dart';
@@ -125,6 +128,25 @@ class _FestivalEditState extends State<FestivalEditScreen> {
   late bool every = widget.fest?['every'] == true;
   late bool active = widget.fest?['active'] != false;
   bool busy = false;
+  Uint8List? newPic; // picked now, sent on Save
+  late bool hasPic = widget.fest?['imageV'] != null;
+  bool dropPic = false;
+
+  String? get _picUrl => hasPic && !dropPic ? Api.instance.url('/api/v1/festivals/${widget.fest!['id']}/image?v=${widget.fest!['imageV']}') : null;
+
+  Future<void> pickPic() async {
+    final f = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 1000);
+    if (f == null) return;
+    final b = await f.readAsBytes();
+    if (b.length > 500 * 1024) {
+      if (mounted) toast(context, context.t('Picture is too big (max 500 KB). Use a smaller PNG or JPEG.'));
+      return;
+    }
+    setState(() {
+      newPic = b;
+      dropPic = false;
+    });
+  }
 
   Future<void> pick(bool start) async {
     final cur = start ? from : to;
@@ -171,6 +193,7 @@ class _FestivalEditState extends State<FestivalEditScreen> {
         kind: kind,
         title: title.text.trim().isEmpty ? festSpecs[kind]!.greet : title.text.trim(),
         sound: sound,
+        picture: newPic != null ? MemoryImage(newPic!) : (_picUrl != null ? NetworkImage(_picUrl!) as ImageProvider : null),
         onDone: () => Navigator.of(ctx).maybePop(),
       ),
     ));
@@ -179,7 +202,7 @@ class _FestivalEditState extends State<FestivalEditScreen> {
   Future<void> save() async {
     setState(() => busy = true);
     try {
-      await Api.instance.put('/super/festivals/${widget.fest?['id'] ?? 'new'}', {
+      final saved = await Api.instance.put('/super/festivals/${widget.fest?['id'] ?? 'new'}', {
         'kind': kind,
         'title': title.text.trim(),
         'sub': sub.text.trim(),
@@ -191,6 +214,13 @@ class _FestivalEditState extends State<FestivalEditScreen> {
         'every': every,
         'active': active,
       });
+      final id = (saved as Map)['id'];
+      if (newPic != null) {
+        final png = newPic!.length > 3 && newPic![0] == 0x89 && newPic![1] == 0x50;
+        await Api.instance.put('/super/festivals/$id/image', {'mime': png ? 'image/png' : 'image/jpeg', 'base64': base64Encode(newPic!)});
+      } else if (dropPic && hasPic) {
+        await Api.instance.delete('/super/festivals/$id/image');
+      }
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) toastError(context, e);
@@ -263,6 +293,30 @@ class _FestivalEditState extends State<FestivalEditScreen> {
               ),
           ]),
         ),
+        label('Picture (optional)'),
+        Muted(context.t('Shown in the middle of the opening screen and on the Home banner. No picture = animation only. PNG with a clear background looks best (max 500 KB).'), size: 12),
+        const SizedBox(height: 8),
+        Row(children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(gradient: LinearGradient(colors: festSpecs[kind]!.bg), borderRadius: BorderRadius.circular(14)),
+            child: newPic != null
+                ? Image.memory(newPic!, fit: BoxFit.contain)
+                : (_picUrl != null ? Image.network(_picUrl!, fit: BoxFit.contain) : Icon(Icons.image_outlined, color: Colors.white.withAlpha(150), size: 36)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              OutlinedButton.icon(onPressed: pickPic, icon: const Icon(Icons.upload_rounded), label: Text(context.t(newPic != null || _picUrl != null ? 'Change picture' : 'Upload picture'))),
+              if (newPic != null || _picUrl != null)
+                TextButton(onPressed: () => setState(() {
+                      newPic = null;
+                      dropPic = true;
+                    }), child: Text(context.t('Remove picture'), style: const TextStyle(color: C.red))),
+            ]),
+          ),
+        ]),
         label('Banner heading'),
         TextField(controller: title, maxLength: 60),
         label('Banner line (optional)'),

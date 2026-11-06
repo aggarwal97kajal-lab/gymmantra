@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
+import 'package:dio/dio.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'api.dart';
@@ -21,11 +24,13 @@ class Fest {
         roles = ((m['roles'] as List?) ?? const []).map((e) => '$e').toList(),
         states = ((m['states'] as List?) ?? const []).map((e) => '$e').toList(),
         sound = m['sound'] != false,
-        every = m['every'] == true;
+        every = m['every'] == true,
+        imageV = (m['imageV'] as num?)?.toInt();
   final String id, kind, title, sub;
   final DateTime from, to;
   final List<String> roles, states;
   final bool sound, every;
+  final int? imageV; // a picture the super admin uploaded (null = animation only)
   FestSpec get spec => festSpecs[kind] ?? festSpecs['diwali']!;
 }
 
@@ -47,8 +52,42 @@ class Festivals {
       } catch (_) {}
       f = forSplash();
     }
-    if (f != null) overlay.value = f;
+    if (f != null) {
+      try {
+        await ensureImage(f).timeout(wait);
+      } catch (_) {}
+      overlay.value = f;
+    }
     return f;
+  }
+
+  // ---- the uploaded picture, kept on the phone so the opening shows it at once (also offline)
+  static final Map<String, File> _images = {};
+  static File? cachedImage(Fest f) => f.imageV == null ? null : _images['${f.id}_${f.imageV}'];
+
+  static Future<File?> ensureImage(Fest f) async {
+    if (f.imageV == null) return null;
+    final key = '${f.id}_${f.imageV}';
+    if (_images[key] != null) return _images[key];
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final file = File('${dir.path}/fest_$key.img');
+      if (!await file.exists()) {
+        final r = await Dio().get<List<int>>(Api.instance.url('/api/v1/festivals/${f.id}/image?v=${f.imageV}'), options: Options(responseType: ResponseType.bytes));
+        final data = r.data;
+        if (data == null || data.isEmpty) return null;
+        await file.writeAsBytes(data, flush: true);
+      }
+      return _images[key] = file;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void _warmImages() {
+    for (final f in _all) {
+      if (f.imageV != null) ensureImage(f);
+    }
   }
   static List<Fest> _all = [];
   static Map? _user;
@@ -67,6 +106,7 @@ class Festivals {
     final u = Prefs.getJson('u:me');
     _user = u is Map ? u : null;
     _pick();
+    _warmImages();
     _tick ??= Timer.periodic(const Duration(minutes: 5), (_) => _pick());
   }
 
@@ -79,6 +119,7 @@ class Festivals {
       _all = r.whereType<Map>().map(Fest.fromJson).toList();
       await Prefs.setJson('fest:list', r);
       _pick();
+      _warmImages();
     } catch (_) {}
   }
 
@@ -676,13 +717,14 @@ class FestPainter extends CustomPainter {
 
 /// The festival's opening animation (instead of the normal splash). [preview] = GM Admin preview.
 class FestivalSplash extends StatefulWidget {
-  const FestivalSplash({super.key, required this.fest, required this.onDone, this.preview = false, this.kind, this.title, this.sound});
+  const FestivalSplash({super.key, required this.fest, required this.onDone, this.preview = false, this.kind, this.title, this.sound, this.picture});
   final Fest? fest;
   final VoidCallback onDone;
   final bool preview;
   final String? kind; // preview without a saved festival
   final String? title;
   final bool? sound;
+  final ImageProvider? picture; // GM Admin preview of a picture not saved yet
   @override
   State<FestivalSplash> createState() => _FestivalSplashState();
 }
@@ -711,6 +753,8 @@ class _FestivalSplashState extends State<FestivalSplash> with SingleTickerProvid
   @override
   Widget build(BuildContext context) {
     final title = widget.title ?? widget.fest?.title ?? spec.greet;
+    final file = widget.fest == null ? null : Festivals.cachedImage(widget.fest!);
+    final pic = widget.picture ?? (file == null ? null : FileImage(file));
     return Material(
       color: spec.bg.last,
       child: AnimatedBuilder(
@@ -730,11 +774,20 @@ class _FestivalSplashState extends State<FestivalSplash> with SingleTickerProvid
                 Align(
                   alignment: const Alignment(0, 0.25),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Transform.scale(
-                      scale: 0.3 + 0.7 * hero + 0.05 * sin(s * 6) * hero,
-                      child: Opacity(opacity: _clamp01(hero), child: Text(spec.hero, style: const TextStyle(fontSize: 84, height: 1))),
-                    ),
-                    const SizedBox(height: 14),
+                    // Only a picture the super admin uploaded; no picture = animation only.
+                    if (pic != null) ...[
+                      Transform.scale(
+                        scale: 0.6 + 0.4 * hero + 0.015 * sin(s * 3) * hero,
+                        child: Opacity(
+                          opacity: _clamp01(hero),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.42, maxWidth: MediaQuery.of(context).size.width * 0.86),
+                            child: Image(image: pic, fit: BoxFit.contain, gaplessPlayback: true),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     Opacity(
                       opacity: words,
                       child: Transform.translate(
@@ -869,8 +922,10 @@ class _FestBannerState extends State<FestBanner> with SingleTickerProviderStateM
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Row(children: [
-                      Text(sp.hero, style: const TextStyle(fontSize: 40, height: 1)),
-                      const SizedBox(width: 12),
+                      if (Festivals.cachedImage(f) != null) ...[
+                        Image.file(Festivals.cachedImage(f)!, height: 72, fit: BoxFit.contain),
+                        const SizedBox(width: 12),
+                      ],
                       Expanded(
                         child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
                           Text(f.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800, shadows: [Shadow(color: Colors.black54, blurRadius: 6)])),

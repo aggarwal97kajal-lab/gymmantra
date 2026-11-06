@@ -1,6 +1,6 @@
 import { App, audit, authenticate, P, requireSuper } from '../core';
 import { bad, notFound, nowIso, uuid } from '../lib/http';
-import { body, oneOf, optBool, optStr, str, strList } from '../lib/validate';
+import { body, isImage, oneOf, optBool, optStr, str, strList } from '../lib/validate';
 
 /**
  * Festival looks (GM Admin → Festivals): on the chosen days the apps show the festival's opening
@@ -26,8 +26,11 @@ export interface Festival {
   sound: boolean;
   every: boolean; // opening animation every time the app opens (else once a day)
   active: boolean;
+  imageV?: number; // the picture the super admin uploaded (none = animation only)
   updatedAt: string;
 }
+
+const imgPath = (id: string) => `festivalImages/${id}`;
 
 export function festivalRoutes(app: App) {
   /** For the apps (also before log-in): what is on now or in the next 2 weeks. */
@@ -74,6 +77,7 @@ export function festivalRoutes(app: App) {
       const cur = (await t.get<{ items: Festival[] }>(P.festivals)) ?? { items: [] };
       const old = cur.items.find((x) => x.id === id) ?? null;
       if (!old && c.req.param('id') !== 'new') throw notFound('Not found');
+      if (old?.imageV) f.imageV = old.imageV;
       t.set(P.festivals, { items: [f, ...cur.items.filter((x) => x.id !== id)].slice(0, 60) });
       audit(t, null, u.id, old ? 'festival.update' : 'festival.create', 'festival', id, old, f);
     });
@@ -87,8 +91,57 @@ export function festivalRoutes(app: App) {
     await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<{ items: Festival[] }>(P.festivals)) ?? { items: [] };
       t.set(P.festivals, { items: cur.items.filter((x) => x.id !== id) });
+      t.delete(imgPath(id));
       audit(t, null, u.id, 'festival.delete', 'festival', id);
     });
     return c.json({ ok: true });
+  });
+
+  /** The festival's picture (PNG or JPEG, up to ~500 KB). Only an uploaded picture is shown. */
+  app.put('/api/v1/super/festivals/:id/image', async (c) => {
+    const u = await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    const b = body(await c.req.json().catch(() => null));
+    const mime = oneOf(b, 'mime', ['image/png', 'image/jpeg'] as const)!;
+    const b64 = str(b, 'base64', { max: 700_000, label: 'the picture' });
+    if (!isImage(mime, b64)) throw bad('This file is not a PNG or JPEG picture');
+    const f = await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<{ items: Festival[] }>(P.festivals)) ?? { items: [] };
+      const it = cur.items.find((x) => x.id === id);
+      if (!it) throw notFound('Not found');
+      const next = { ...it, imageV: (it.imageV ?? 0) + 1, updatedAt: nowIso() };
+      t.set(P.festivals, { items: cur.items.map((x) => (x.id === id ? next : x)) });
+      t.set(imgPath(id), { mime, b64 });
+      audit(t, null, u.id, 'festival.image', 'festival', id);
+      return next;
+    });
+    return c.json(f);
+  });
+  app.delete('/api/v1/super/festivals/:id/image', async (c) => {
+    const u = await authenticate(c);
+    requireSuper(c);
+    const id = c.req.param('id');
+    const f = await c.var.deps.store.tx(async (t) => {
+      const cur = (await t.get<{ items: Festival[] }>(P.festivals)) ?? { items: [] };
+      const it = cur.items.find((x) => x.id === id);
+      if (!it) throw notFound('Not found');
+      const { imageV, ...next } = it;
+      t.set(P.festivals, { items: cur.items.map((x) => (x.id === id ? next : x)) });
+      t.delete(imgPath(id));
+      audit(t, null, u.id, 'festival.image.remove', 'festival', id);
+      return next;
+    });
+    return c.json(f);
+  });
+
+  /** For the apps (public, like the list): the picture bytes. */
+  app.get('/api/v1/festivals/:id/image', async (c) => {
+    const img = await c.var.deps.store.get<{ mime: string; b64: string }>(imgPath(c.req.param('id')));
+    if (!img) throw notFound('No picture');
+    const bin = atob(img.b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Response(bytes, { headers: { 'content-type': img.mime, 'cache-control': 'public, max-age=31536000, immutable' } });
   });
 }

@@ -8,6 +8,7 @@ beforeEach(() => {
 
 describe('festivals', () => {
   it('super admin schedules a festival; apps see it while it is on or coming soon', async () => {
+    const u0 = (await h.signup()).token;
     const boss = (await h.api.post('/auth/signup', { name: 'Boss', email: 'boss@gymmantra.app', phone: h.nextPhone(), password: 'secret123' })).body.token;
     const day = 86400_000;
     const on = { kind: 'diwali', title: 'Happy Diwali!', sub: 'Shubh Deepavali', from: new Date(Date.now() - day).toISOString(), to: new Date(Date.now() + day).toISOString(), roles: ['MEMBER', 'X'], states: [], sound: true };
@@ -21,6 +22,19 @@ describe('festivals', () => {
     // apps (no login): only the one that is on
     const pub = await h.api.get('/festivals');
     expect(pub.body.map((f: any) => f.kind)).toEqual(['diwali']);
+    // picture: only after the super admin uploads one
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    expect((await h.api.get(`/festivals/${r.body.id}/image`)).status).toBe(404);
+    expect((await h.api.put(`/super/festivals/${r.body.id}/image`, { mime: 'image/png', base64: 'aGVsbG8gd29ybGQ=' }, boss)).status).toBe(400);
+    const up = await h.api.put(`/super/festivals/${r.body.id}/image`, { mime: 'image/png', base64: png }, boss);
+    expect(up.body.imageV).toBe(1);
+    expect((await h.api.get('/festivals')).body[0].imageV).toBe(1);
+    const img = await h.app.request(`/api/v1/festivals/${r.body.id}/image`);
+    expect([img.status, img.headers.get('content-type')]).toEqual([200, 'image/png']);
+    expect((await h.api.put(`/super/festivals/${r.body.id}`, on, boss)).body.imageV).toBe(1); // editing keeps it
+    expect((await h.api.put(`/super/festivals/${r.body.id}/image`, { mime: 'image/png', base64: png }, u0)).status).toBe(403);
+    expect((await h.api.del(`/super/festivals/${r.body.id}/image`, boss)).body.imageV).toBeUndefined();
+    expect((await h.api.get(`/festivals/${r.body.id}/image`)).status).toBe(404);
     // turned off → gone for the apps
     await h.api.put(`/super/festivals/${r.body.id}`, { ...on, active: false }, boss);
     expect((await h.api.get('/festivals')).body).toEqual([]);

@@ -1575,4 +1575,10 @@ const hindi = <String, String>{
   "On": "चालू",
   "Preview on my phone": "मेरे फ़ोन पर देखें",
   "Delete this festival look?": "यह त्योहार लुक हटाएँ?",
+  "Picture (optional)": "तस्वीर (ज़रूरी नहीं)",
+  "Shown in the middle of the opening screen and on the Home banner. No picture = animation only. PNG with a clear background looks best (max 500 KB).": "खुलने वाली स्क्रीन के बीच में और Home बैनर पर दिखेगी। तस्वीर नहीं = सिर्फ़ एनिमेशन। साफ़ बैकग्राउंड वाली PNG सबसे अच्छी लगती है (500 KB तक)।",
+  "Upload picture": "तस्वीर डालें",
+  "Change picture": "तस्वीर बदलें",
+  "Remove picture": "तस्वीर हटाएँ",
+  "Picture is too big (max 500 KB). Use a smaller PNG or JPEG.": "तस्वीर बहुत बड़ी है (500 KB तक)। छोटी PNG या JPEG डालें।",
 };

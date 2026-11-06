@@ -27,6 +27,7 @@ const PUBLIC = new Set([
   'GET /api/v1/health', // server is up
   'GET /api/v1/saas-plans', // GymMantra prices for the sign-up page
   'GET /api/v1/festivals', // festival looks (public: which animation on which days)
+  'GET /api/v1/festivals/:id/image', // the festival picture shown on the opening screen
   'POST /api/v1/punch/:id', // fingerprint / face machines (secret random id; unknown → 404)
 ]);
 const OK = (s: number) => s >= 200 && s < 300;
