@@ -335,10 +335,22 @@ class NotificationsScreen extends ConsumerStatefulWidget {
 }
 
 class _NotificationsState extends ConsumerState<NotificationsScreen> {
+  late final Future<void> _read;
+  late final ProviderContainer _box;
+
   @override
   void initState() {
     super.initState();
-    Api.instance.post('/me/notifications/read').catchError((_) => null);
+    _box = ProviderScope.containerOf(context, listen: false);
+    _read = Api.instance.post('/me/notifications/read').then((_) {}).catchError((_) {});
+  }
+
+  @override
+  void dispose() {
+    // Back on the home screen the bell number goes away (reload once the "read" is saved).
+    final box = _box;
+    _read.whenComplete(() => box.invalidate(notificationsProvider));
+    super.dispose();
   }
 
   @override
@@ -967,7 +979,7 @@ class _LoginDevicesState extends ConsumerState<LoginDevicesScreen> {
                             child: Text(context.t('This phone'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
                           )
                         : OutlinedButton(
-                            style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red), visualDensity: VisualDensity.compact),
+                            style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red), visualDensity: VisualDensity.compact, minimumSize: const Size(0, 36), padding: const EdgeInsets.symmetric(horizontal: 14)),
                             onPressed: () => logoutOne(d),
                             child: Text(context.t('Log out')),
                           ),
