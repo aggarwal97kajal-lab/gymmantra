@@ -57,7 +57,7 @@ class MainActivity : FlutterActivity() {
                 "device" -> {
                     val maker = android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
                     val model = android.os.Build.MODEL
-                    result.success(if (model.lowercase().startsWith(maker.lowercase())) model else "$maker $model")
+                    result.success(if (model.lowercase().startsWith(maker.lowercase())) model else maker + " " + model)
                 }
                 else -> result.notImplemented()
             }
