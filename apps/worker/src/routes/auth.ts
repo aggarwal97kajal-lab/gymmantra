@@ -87,6 +87,28 @@ export function aliasEmail(email: string) {
   return `${local.split('+')[0]}+gm${Math.floor(1000 + Math.random() * 9000)}@${domain}`;
 }
 
+/**
+ * Gives an account with no password (Google, or gym-made) its first email/password login.
+ * An old login with the same email that no live account uses (a deleted account, an unfinished
+ * sign-up) is not a reason to refuse: same password → reuse it, else a "name+gm1234@…" login.
+ */
+async function addPasswordLogin(c: C, uid: string, authEmail: string, password: string) {
+  const { store, identity } = c.var.deps;
+  try {
+    return { authEmail, fbUid: (await identity.changePassword(authEmail, null, password)).uid };
+  } catch (e) {
+    if (!(e instanceof HttpError && e.message === 'EMAIL_EXISTS')) throw e;
+  }
+  const owner = (await store.query<UserDoc>('users', [['authEmail', authEmail]])).find((r) => r.id !== uid && !r.data.deleted);
+  if (owner) throw conflict('Another GymMantra account already logs in with this email. Log in to that account, or use another email in your profile');
+  try {
+    return { authEmail, fbUid: (await identity.signIn(authEmail, password)).uid };
+  } catch {
+    const alias = aliasEmail(authEmail);
+    return { authEmail: alias, fbUid: (await identity.signUp(alias, password)).uid };
+  }
+}
+
 export async function createPasswordUser(c: C, input: { name: string; email: string | null; phone: string; password: string; appRole?: AppRole | null; details?: Partial<UserDoc> }) {
   const { store, identity, superAdminEmail } = c.var.deps;
   // The email and the mobile number must be free. Records of removed accounts do not count.
@@ -358,8 +380,7 @@ export function authRoutes(app: App) {
     else {
       const authEmail = cur.email ?? (cur.phone ? phoneAuthEmail(cur.phone) : null);
       if (!authEmail) throw bad('Add an email first');
-      await identity.changePassword(authEmail, null, next);
-      cur.authEmail = authEmail;
+      cur.authEmail = (await addPasswordLogin(c, u.id, authEmail, next)).authEmail;
     }
     const after = await store.tx(async (t) => {
       const x = (await t.get<UserDoc>(P.user(u.id)))!;
@@ -450,13 +471,10 @@ export function authRoutes(app: App) {
       // Google account adding a password: create the Firebase password account.
       const authEmail = u.email ?? (u.phone ? phoneAuthEmail(u.phone) : null);
       if (!authEmail) throw bad('Add an email or mobile number first');
-      const fb = await identity.changePassword(authEmail, null, next).catch((e) => {
-        if (e instanceof HttpError && e.message === 'EMAIL_EXISTS') throw conflict('This email already has a password account');
-        throw e;
-      });
+      const fb = await addPasswordLogin(c, u.id, authEmail, next);
       await store.tx(async (t) => {
         const cur = (await t.get<UserDoc>(P.user(u.id)))!;
-        t.set(P.user(u.id), { ...cur, authEmail, fbUid: fb.uid });
+        t.set(P.user(u.id), { ...cur, authEmail: fb.authEmail, fbUid: fb.fbUid });
       });
     }
     // Every other phone / browser is logged out; this one gets a fresh login.

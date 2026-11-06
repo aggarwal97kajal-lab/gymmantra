@@ -153,6 +153,15 @@ describe('auth', () => {
     expect((await h.api.post('/auth/google/login', { idToken: 'google:g-3:' })).status).toBe(404);
   });
 
+  it('a Google account can add a password even if an old dead login used the same email', async () => {
+    await h.identity.signUp('g5@test.in', 'oldpass123'); // e.g. a deleted account or an unfinished sign-up
+    const g = await h.api.post('/auth/google/signup', { idToken: 'google:g-5:g5@test.in' });
+    const token = g.body.token;
+    const r = await h.api.post('/auth/change-password', { next: 'mynewpass1' }, token);
+    expect(r.status).toBe(200);
+    expect((await h.api.post('/auth/login', { identifier: 'g5@test.in', password: 'mynewpass1' })).status).toBe(200);
+  });
+
   it('cookie sessions need the client header for writes', async () => {
     const u = await h.signup();
     const cookie = { cookie: `gm_session=${u.token}` };
