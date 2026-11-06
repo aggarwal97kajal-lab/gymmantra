@@ -1662,7 +1662,7 @@ class _DevicesState extends ConsumerState<DevicesScreen> {
                   const Divider(height: 20),
                   Text(context.t('Who opens the door?'), style: const TextStyle(fontWeight: FontWeight.w700)),
                   Material(
-                    type: MaterialType.transparency,
+                    color: Colors.transparent, // a Material of its own for the ink (a transparency one does not count)
                     child: RadioListTile<bool>(
                     contentPadding: EdgeInsets.zero,
                     value: false,
@@ -1672,7 +1672,7 @@ class _DevicesState extends ConsumerState<DevicesScreen> {
                     subtitle: Text(context.t('Staff or the machine opens the door. The desk is told if someone with no valid plan comes in.')),
                   )),
                   Material(
-                    type: MaterialType.transparency,
+                    color: Colors.transparent, // a Material of its own for the ink (a transparency one does not count)
                     child: RadioListTile<bool>(
                     contentPadding: EdgeInsets.zero,
                     value: true,
