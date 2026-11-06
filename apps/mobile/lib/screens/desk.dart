@@ -496,7 +496,6 @@ class AttendanceHubScreen extends ConsumerWidget {
             () => context.push('/o/attendance'),
           ),
         if (owner) card(Icons.badge_rounded, C.blue, context.t('Staff & trainers'), context.t('Present days, month by month · Excel'), () => context.push('/o/staff-attendance')),
-        if (owner) card(Icons.fingerprint_rounded, C.orange, context.t('Fingerprint machines'), context.t('eSSL, ZKTeco, Hikvision, any machine · pen drive'), () => context.push('/o/devices')),
         if (s.isStaffDesk) card(Icons.event_available_rounded, C.ok, context.t('My attendance'), context.t('Mark Present at the gym every day'), () => context.push('/o/my-attendance')),
       ]),
     );

@@ -1541,8 +1541,11 @@ const hindi = <String, String>{
   "Attendance is marked by the fingerprint machine": "हाज़िरी फ़िंगरप्रिंट मशीन से लगती है",
   "Put your finger on the machine at the gym. The \"Present\" button is off.": "जिम में मशीन पर उँगली लगाएँ। \"Present\" बटन बंद है।",
   "Put your finger on the fingerprint machine at the gym": "जिम में फ़िंगरप्रिंट मशीन पर उँगली लगाएँ",
-  "The check-in QR is hidden at this branch. Members and staff use the fingerprint machine. Change it in Attendance → Fingerprint machines.": "इस ब्रांच में चेक-इन QR छुपा है। मेंबर और स्टाफ़ फ़िंगरप्रिंट मशीन इस्तेमाल करते हैं। बदलने के लिए Attendance → Fingerprint machines।",
+  "The check-in QR is hidden at this branch. Members and staff use the fingerprint machine. Change it in More → Fingerprint machines.": "इस ब्रांच में चेक-इन QR छुपा है। मेंबर और स्टाफ़ फ़िंगरप्रिंट मशीन इस्तेमाल करते हैं। बदलने के लिए More → Fingerprint machines।",
   "Please check in via fingerprint machine at gate": "कृपया गेट पर फ़िंगरप्रिंट मशीन से चेक-इन करें",
   "Put your finger on the machine at the gate. Your attendance is marked by itself.": "गेट पर मशीन पर उँगली लगाएँ। आपकी हाज़िरी अपने आप लग जाएगी।",
   "Check in via fingerprint machine at gate": "गेट पर फ़िंगरप्रिंट मशीन से चेक-इन करें",
+  "Link members or staff": "मेंबर या स्टाफ़ जोड़ें",
+  "User ID given to this person on the machine (Menu → User Mgt)": "मशीन में इस व्यक्ति को दिया गया User ID (Menu → User Mgt)",
+  "Link": "जोड़ें",
 };

@@ -336,7 +336,7 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
                       const SizedBox(height: 8),
                       Text(context.t('Attendance only by fingerprint machine'), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
                       const SizedBox(height: 4),
-                      Muted(context.t('The check-in QR is hidden at this branch. Members and staff use the fingerprint machine. Change it in Attendance → Fingerprint machines.'), size: 12.5, align: TextAlign.center),
+                      Muted(context.t('The check-in QR is hidden at this branch. Members and staff use the fingerprint machine. Change it in More → Fingerprint machines.'), size: 12.5, align: TextAlign.center),
                       if (owner) ...[
                         const SizedBox(height: 10),
                         OutlinedButton(onPressed: () => context.push('/o/devices'), child: Text(context.t('Fingerprint machines'))),

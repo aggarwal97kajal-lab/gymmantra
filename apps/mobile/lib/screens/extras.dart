@@ -1581,7 +1581,7 @@ String _seen(BuildContext context, Map d) {
   return kind == 'adms' ? context.t('Last contact {t}', {'t': fmtDateTime(d['lastSeen'] as String)}) : context.t('Last punch {t}', {'t': fmtDateTime(d['lastSeen'] as String)});
 }
 
-/// Attendance → Fingerprint machines: the branch's switch, door option and its machines.
+/// More → Fingerprint machines: the branch's switch, door option and its machines.
 class DevicesScreen extends ConsumerStatefulWidget {
   const DevicesScreen({super.key});
   @override
@@ -1783,7 +1783,7 @@ class _MachineState extends ConsumerState<MachineScreen> {
   bool uploading = false;
   String? progress;
 
-  Future<void> link(String pin) async {
+  Future<void> link([String? pin]) async {
     final kind = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -1808,6 +1808,24 @@ class _MachineState extends ConsumerState<MachineScreen> {
       );
     }
     if (who == null || !mounted) return;
+    if (pin == null) {
+      // Number the person was given on the machine. For a member, the Member ID digits (LF-1023 → 1023).
+      final c = TextEditingController(text: kind == 'member' ? (RegExp(r'(\d+)$').firstMatch('${who['memberCode'] ?? ''}')?.group(1) ?? '') : '');
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('${who!['name']}'),
+          content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Muted(ctx.t('User ID given to this person on the machine (Menu → User Mgt)'), size: 12.5),
+            const SizedBox(height: 8),
+            TextField(controller: c, keyboardType: TextInputType.number, autofocus: true),
+          ]),
+          actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Link')))],
+        ),
+      );
+      if (ok != true || c.text.trim().isEmpty || !mounted) return;
+      pin = c.text.trim();
+    }
     await _run(context, () => Api.instance.put('/gym/devices/${widget.serial}/pins/$pin', {'kind': kind, 'id': who!['id']}), done: context.t('Linked'));
     ref.invalidate(devicesProvider);
   }
@@ -1943,20 +1961,9 @@ class _MachineState extends ConsumerState<MachineScreen> {
                 ),
               ),
             TextButton.icon(
-              onPressed: () async {
-                final pin = TextEditingController();
-                final ok = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: Text(ctx.t('Machine user number')),
-                    content: TextField(controller: pin, keyboardType: TextInputType.number, autofocus: true),
-                    actions: [TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))), FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(ctx.t('Next')))],
-                  ),
-                );
-                if (ok == true && pin.text.trim().isNotEmpty && mounted) await link(pin.text.trim());
-              },
+              onPressed: () => link(),
               icon: const Icon(Icons.add_link_rounded),
-              label: Text(context.t('Link a machine number')),
+              label: Text(context.t('Link members or staff')),
             ),
             const SizedBox(height: 10),
             TextButton(

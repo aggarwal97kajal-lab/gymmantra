@@ -1332,6 +1332,7 @@ class OwnerMoreScreen extends ConsumerWidget {
             if (s.can('memberEdit')) row(Icons.upload_file_rounded, context.t('Import members'), () => context.push('/o/import'), sub: context.t('From an Excel / CSV file')),
             if (s.can('checkin')) row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
             if (s.can('checkin')) row(Icons.door_sliding_rounded, context.t('Gate'), () => context.push('/o/gate'), sub: context.t('Opens after a check-in')),
+            if (gym['role'] == 'OWNER') row(Icons.fingerprint_rounded, context.t('Fingerprint machines'), () => context.push('/o/devices'), sub: context.t('eSSL, ZKTeco, Hikvision, any machine · pen drive')),
             if (s.can('offers')) row(Icons.campaign_rounded, context.t('Notices'), () => context.push('/o/notices'), sub: context.t('Gym closed, timing change… to members or trainers')),
             row(Icons.sports_rounded, context.t('Trainers'), () => context.push('/o/trainers'), sub: context.t('PT packages and prices'), lock: 'pt'),
             row(Icons.groups_2_rounded, context.t('PT clients'), () => context.push('/o/pt'), sub: context.t('Sessions and calendar of every trainer'), lock: 'pt'),
