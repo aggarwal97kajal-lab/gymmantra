@@ -32,6 +32,11 @@ Future<void> loadFonts() async {
     roboto.addFont(Future.value(ByteData.sublistView(f.readAsBytesSync())));
   }
   await roboto.load();
+  // Hindi and emoji (downloaded by the workflow), so no empty boxes.
+  for (final (family, file) in [('Noto Sans Devanagari', 'NotoSansDevanagari.ttf'), ('Noto Emoji', 'NotoEmoji.ttf')]) {
+    final f = File('${Platform.environment['GUIDE_FONTS'] ?? '/tmp/guide-fonts'}/$file');
+    if (f.existsSync()) await (FontLoader(family)..addFont(Future.value(ByteData.sublistView(f.readAsBytesSync())))).load();
+  }
 }
 
 Future<void> settle(WidgetTester t, [int rounds = 10]) async {
@@ -83,6 +88,7 @@ Future<void> finish(WidgetTester t) async {
 Future<dynamic> get(WidgetTester t, String path) async => (await t.runAsync(() => Api.instance.get(path)));
 
 void main() {
+  setUp(() => FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTouch);
   setUpAll(() async {
     HttpOverrides.global = null; // talk to the local demo server for real
     TestWidgetsFlutterBinding.ensureInitialized();
@@ -115,6 +121,7 @@ void main() {
     });
     m.setMockMethodCallHandler(const MethodChannel('gymmantra/secure'), (call) async => call.method == 'device' ? 'Xiaomi Redmi Note 12' : null);
     await loadFonts();
+    FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTouch; // no keyboard focus rings
   });
 
   void phone(WidgetTester t) {
@@ -126,8 +133,9 @@ void main() {
     phone(t);
     await startAs(t, null);
     await shot(t, '01_role');
-    await visit(t, '02_login', '/login');
-    await visit(t, '03_signup', '/signup');
+    await t.tap(find.text('Continue'));
+    await shot(t, '02_login');
+    await visit(t, '03_signup', '/signup', push: true);
     await finish(t);
   });
 

@@ -46,6 +46,7 @@ async function person(name: string, appRole: string) {
   const p = phone();
   const [first, ...rest] = name.split(' ');
   const r = await call('POST', '/auth/signup', { name, email: `${first.toLowerCase()}${n}@demo.in`, phone: p, password: PW, appRole, firstName: first, lastName: rest.join(' '), dob: '1995-05-10', gender: 'male', ...ADDRESS, country: 'India', agree: true });
+  await call('PATCH', '/me/profile', { appRole }, r.token).catch(() => {});
   return { token: r.token as string, id: r.user.id as string, phone: p };
 }
 

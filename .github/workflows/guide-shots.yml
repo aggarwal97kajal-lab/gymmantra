@@ -26,6 +26,10 @@ jobs:
         working-directory: apps/mobile
         continue-on-error: true
         run: |
+          mkdir -p /tmp/guide-fonts
+          curl -sSL -o /tmp/guide-fonts/NotoSansDevanagari.ttf "https://github.com/google/fonts/raw/main/ofl/notosansdevanagari/NotoSansDevanagari%5Bwdth,wght%5D.ttf" || true
+          curl -sSL -o /tmp/guide-fonts/NotoEmoji.ttf "https://github.com/google/fonts/raw/main/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf" || true
+          ls -la /tmp/guide-fonts
           flutter pub get
           GUIDE_LOGINS=/tmp/guide-logins.json flutter test test_guide/guide_shots_test.dart --update-goldens --reporter expanded > /tmp/shots.log 2>&1 || true
           mkdir -p test_guide/shots && cp /tmp/shots.log test_guide/shots/log.txt
