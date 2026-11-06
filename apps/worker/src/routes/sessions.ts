@@ -3,6 +3,7 @@ import { jwtVerify } from 'jose';
 import { bad, notFound, nowIso, unauthorized } from '../lib/http';
 import { rateLimit } from '../lib/ratelimit';
 import { superLater } from '../lib/superpush';
+import { kickPhones } from '../lib/push';
 import { body, str } from '../lib/validate';
 
 /**
@@ -25,6 +26,7 @@ async function logoutOthers(c: C, u: UserDoc & { id: string }) {
   const all = await store.query<SessionDoc>(P.sessions, [['uid', u.id]]);
   const others = all.filter((s) => s.id !== mine);
   if (others.length) await store.tx(async (t) => others.forEach((s) => t.delete(P.session(s.id))));
+  await kickPhones(store, u.id, { keep: mine }, 'This account was logged out from this phone by its owner.');
   return issueSession(c, u.id, v, { sid: mine && all.some((s) => s.id === mine) ? mine : undefined });
 }
 
@@ -127,6 +129,7 @@ export function sessionRoutes(app: App) {
       if (!s || s.uid !== u.id) throw notFound('Not found');
       revokeSid(t, cur, u.id, sid);
     });
+    await kickPhones(c.var.deps.store, u.id, { only: sid }, 'This account was logged out from this phone by its owner.');
     return c.json({ ok: true });
   });
 

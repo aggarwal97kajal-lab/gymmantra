@@ -1,5 +1,6 @@
 // Logged-in devices, logout everywhere, new-phone alert and the quiet 1-day login renewal (boards 96-98).
 import { P } from '../src/core';
+import { pushTokensPath } from '../src/lib/push';
 import { setup } from './helpers';
 
 let h: ReturnType<typeof setup>;
@@ -36,6 +37,22 @@ describe('sessions', () => {
     // another person cannot end my login
     const x = await h.signup('Other');
     expect((await h.api.del(`/me/sessions/${list[0].id}`, x.token)).status).toBe(404);
+  });
+
+  it('phones whose login ended stop getting push and are told to log out live', async () => {
+    const u = await h.signup('Live User');
+    const a = await login(u.phone, phone('Redmi', 'dev-a'));
+    const b = await login(u.phone, phone('Samsung', 'dev-b'));
+    const c2 = await login(u.phone, phone('Oppo', 'dev-c'));
+    for (const [x, tok] of [[a, 'tok-a'], [b, 'tok-b'], [c2, 'tok-c']] as const) expect((await h.api.post('/me/push-token', { token: tok.padEnd(30, 'x') }, x.token)).status).toBe(200);
+    const tokens = async () => ((await h.store.get<any>(pushTokensPath(u.user.id)))?.tokens ?? []).map((t: any) => t.token.slice(0, 5)).sort();
+    // one phone logged out: only its token goes
+    const list = (await h.api.get('/me/sessions', a.token)).body;
+    await h.api.del(`/me/sessions/${list.find((s: any) => s.device === 'Oppo').id}`, a.token);
+    expect(await tokens()).toEqual(['tok-a', 'tok-b']);
+    // password changed on the Redmi: the Samsung goes, the Redmi stays
+    expect((await h.api.post('/auth/change-password', { current: 'secret123', next: 'newsecret1' }, a.token)).status).toBe(200);
+    expect(await tokens()).toEqual(['tok-a']);
   });
 
   it('refresh: new key every time; a lost answer is forgiven; an old key later means theft', async () => {

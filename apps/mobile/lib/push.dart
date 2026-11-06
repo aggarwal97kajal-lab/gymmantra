@@ -30,6 +30,10 @@ class Push {
   /// A notification was tapped: open the page it is about ("go" from the server).
   static void Function(String? go, String? tenantId)? onOpen;
 
+  /// The server ended a login of this person (password changed / logged out from another phone):
+  /// the app checks its own login and, if it was this phone, logs out live.
+  static void Function(String? note)? onLogout;
+
   /// Tapped while the app was closed: waits here until the app is ready to open it.
   static String? pendingGo;
   static String? pendingTenant;
@@ -41,6 +45,10 @@ class Push {
       _ready = true;
       // App open: show the message as a drip instead of a system notification.
       FirebaseMessaging.onMessage.listen((m) {
+        if (m.data['kind'] == 'logout') {
+          onLogout?.call(m.data['note'] as String?);
+          return;
+        }
         final n = m.notification;
         if (n != null) Drip.showLater([n.title, n.body].whereType<String>().join(' — '), kind: DripKind.info);
         // Something changed for this person: the open screens load again (live update).
@@ -49,6 +57,10 @@ class Push {
       });
       // Tapping a notification opens the app: show fresh data.
       FirebaseMessaging.onMessageOpenedApp.listen((m) {
+        if (m.data['kind'] == 'logout') {
+          onLogout?.call(m.data['note'] as String?);
+          return;
+        }
         Api.instance.refreshOpenScreens();
         onChange?.call();
         _open(m);

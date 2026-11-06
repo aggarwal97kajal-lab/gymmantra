@@ -18,11 +18,13 @@ export interface PushItem {
   data?: Record<string, string>;
   /** No visible notification: only tells an open app to reload (live update). */
   silent?: boolean;
+  /** Send to these phones only (instead of all phones of `uid`). */
+  tokens?: string[];
 }
 
 const queue = new Map<string, PushItem>();
 export function queuePush(p: PushItem) {
-  queue.set(`${p.uid ?? p.topicCondition}|${p.title}|${p.body}|${p.silent ? 's' : ''}`, p); // a re-run transaction does not send twice
+  queue.set(`${p.tokens?.join(',') ?? p.uid ?? p.topicCondition}|${p.title}|${p.body}|${p.silent ? 's' : ''}`, p); // a re-run transaction does not send twice
 }
 export function takePush(): PushItem[] {
   const out = [...queue.values()];
@@ -32,7 +34,7 @@ export function takePush(): PushItem[] {
 
 export const pushTokensPath = (uid: string) => `pushTokens/${uid}`;
 export interface PushTokensDoc {
-  tokens: { token: string; at: string; app: string }[];
+  tokens: { token: string; at: string; app: string; sid?: string }[]; // sid: the login on that phone
 }
 
 /** Topic names may only use letters, numbers and - _ . ~ % */
@@ -56,7 +58,7 @@ export async function sendPush(store: Store, sa: ServiceAccount | null, items: P
   const dead = new Map<string, string[]>();
   let sent = 0;
   for (const it of items) {
-    const targets: Record<string, string>[] = it.topicCondition ? [{ condition: it.topicCondition }] : (tokensOf.get(it.uid ?? '') ?? []).map((token) => ({ token }));
+    const targets: Record<string, string>[] = it.topicCondition ? [{ condition: it.topicCondition }] : (it.tokens ?? tokensOf.get(it.uid ?? '') ?? []).map((token) => ({ token }));
     for (const target of targets) {
       if (sent >= 40) return; // keep inside the Worker's sub-request budget (50)
       sent++;
@@ -67,8 +69,8 @@ export async function sendPush(store: Store, sa: ServiceAccount | null, items: P
           message: {
             ...target,
             ...(it.silent ? {} : { notification: { title: it.title, body: it.body } }),
-            data: { ...(it.data ?? {}), ...(it.silent ? { kind: 'refresh' } : {}) },
-            android: it.silent ? { priority: 'NORMAL' } : { priority: 'HIGH', notification: { sound: 'default' } },
+            data: { ...(it.silent ? { kind: 'refresh' } : {}), ...(it.data ?? {}) },
+            android: it.silent ? { priority: it.data?.kind === 'logout' ? 'HIGH' : 'NORMAL' } : { priority: 'HIGH', notification: { sound: 'default' } },
           },
         }),
       }).catch(() => null);
@@ -139,4 +141,25 @@ export async function runFanouts(store: Store, sa: ServiceAccount | null, people
       })
       .catch(() => {});
   }
+}
+
+/**
+ * Some logins of this person were ended on the server (password changed, "log out everywhere else",
+ * one phone logged out). Those phones are told at once, so an open app logs out live instead of on its
+ * next refresh, and they stop getting this person's notifications.
+ * keep = the login that stays (this phone); only = end just this login.
+ * Phones registered before logins were remembered per phone get a silent check (the app asks the
+ * server and logs out only if its login really ended), so the phone in hand is never shown the note.
+ */
+export async function kickPhones(store: Store, uid: string, opt: { keep?: string | null; only?: string }, note: string) {
+  const hit = await store
+    .tx(async (t) => {
+      const d = await t.get<PushTokensDoc>(pushTokensPath(uid));
+      if (!d) return [];
+      const out = d.tokens.filter((x) => (opt.only ? x.sid === opt.only : !x.sid || x.sid !== opt.keep));
+      if (out.length) t.set(pushTokensPath(uid), { tokens: d.tokens.filter((x) => !out.includes(x)) });
+      return out;
+    })
+    .catch(() => [] as PushTokensDoc['tokens']);
+  for (const x of hit) queuePush({ tokens: [x.token], title: 'You were logged out', body: note, data: { kind: 'logout', note }, silent: !x.sid });
 }

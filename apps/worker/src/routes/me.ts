@@ -522,7 +522,7 @@ export function meRoutes(app: App) {
     const appName = optStr(b, 'app', { max: 20 }) ?? 'main';
     await c.var.deps.store.tx(async (t) => {
       const cur = (await t.get<PushTokensDoc>(pushTokensPath(u.id))) ?? { tokens: [] };
-      t.set(pushTokensPath(u.id), { tokens: [{ token, at: nowIso(), app: appName }, ...cur.tokens.filter((x) => x.token !== token)].slice(0, 5) });
+      t.set(pushTokensPath(u.id), { tokens: [{ token, at: nowIso(), app: appName, ...(c.var.sid ? { sid: c.var.sid } : {}) }, ...cur.tokens.filter((x) => x.token !== token)].slice(0, 5) });
     });
     return c.json({ ok: true });
   });

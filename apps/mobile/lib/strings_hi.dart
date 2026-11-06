@@ -1548,4 +1548,9 @@ const hindi = <String, String>{
   "Link members or staff": "मेंबर या स्टाफ़ जोड़ें",
   "User ID given to this person on the machine (Menu → User Mgt)": "मशीन में इस व्यक्ति को दिया गया User ID (Menu → User Mgt)",
   "Link": "जोड़ें",
+  "Logging out…": "लॉग आउट हो रहे हैं…",
+  "You were logged out": "आप लॉग आउट हो गए",
+  "The password of this account was changed. Log in again with the new password.": "इस अकाउंट का पासवर्ड बदल दिया गया है। नए पासवर्ड से फिर लॉगिन करें।",
+  "This account was logged out from this phone by its owner.": "अकाउंट के मालिक ने इस फ़ोन से लॉग आउट कर दिया है।",
+  "You were logged out from this phone. Please log in again": "आप इस फ़ोन से लॉग आउट हो गए। कृपया फिर लॉगिन करें",
 };

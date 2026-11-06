@@ -3,6 +3,7 @@ import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } f
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optStr, str } from '../lib/validate';
 import { AlreadyExists } from '../store/store';
+import { kickPhones } from '../lib/push';
 import { hasDetails, personDetails } from '../lib/person';
 import { bumpCounter, clearCounter, ipOf, rateLimit, readCounter } from '../lib/ratelimit';
 import { cleanRights, RIGHTS, accountRole, ADMIN_ONLY_MESSAGE, AppRole, isAdminApp, isDeskStaff, isTrainer, wrongRoleMessage } from '../core';
@@ -388,6 +389,7 @@ export function authRoutes(app: App) {
       t.set(P.user(u.id), n);
       return n;
     });
+    await kickPhones(store, u.id, { keep: c.var.sid }, 'The password of this account was changed. Log in again with the new password.');
     return c.json({ ok: true, user: publicUser(u.id, after), token: await issueSession(c, u.id, after.sessionV) });
   });
 
@@ -437,6 +439,7 @@ export function authRoutes(app: App) {
         const u = await t.get<UserDoc>(P.user(row.id));
         if (u) t.set(P.user(row.id), { ...u, failed: 0, lockedUntil: null, mustSetPassword: false, initPw: null, sessionV: (u.sessionV ?? 0) + 1 });
       });
+      await kickPhones(store, row.id, {}, 'The password of this account was changed. Log in again with the new password.');
     }
     return c.json({ ok: true });
   });
@@ -479,6 +482,7 @@ export function authRoutes(app: App) {
     }
     // Every other phone / browser is logged out; this one gets a fresh login.
     const v = await bumpSession(store, u.id);
+    await kickPhones(store, u.id, { keep: c.var.sid }, 'The password of this account was changed. Log in again with the new password.');
     return c.json({ ok: true, token: await issueSession(c, u.id, v) });
   });
 }

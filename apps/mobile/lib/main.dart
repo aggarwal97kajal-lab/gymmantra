@@ -63,7 +63,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
     final session = ref.read(sessionProvider);
     if (session.user == null) return;
     Api.instance.refreshOpenScreens();
-    session.refreshUser().catchError((_) {});
+    session.checkStillLoggedIn();
   }
 
   void _openGo(String? go, int tries) {
@@ -117,6 +117,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
       _liveRefresh();
       Future.delayed(const Duration(seconds: 9), _liveRefresh);
     };
+    // A login of this person was ended on the server: log out live if it was this phone.
+    Push.onLogout = (note) => ref.read(sessionProvider).checkStillLoggedIn(note ?? 'You were logged out');
     // Tapping a phone notification opens the page it is about (after the app has started).
     Push.onOpen = (go, tenantId) {
       _pushTenant = tenantId;
@@ -306,6 +308,13 @@ class _AppState extends ConsumerState<GymMantraApp> {
           themeMode: settings.themeMode,
           themeAnimationDuration: const Duration(milliseconds: 250),
           routerConfig: router,
+          builder: (context, child) {
+            final session = ref.read(sessionProvider);
+            return ListenableBuilder(
+              listenable: session,
+              builder: (context, _) => Stack(children: [child ?? const SizedBox(), if (session.ending) LoggingOutCover(note: session.endedNote)]),
+            );
+          },
         ),
       ),
     );
@@ -513,4 +522,30 @@ class _SparksPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SparksPainter o) => o.t != t;
+}
+
+/// Over the whole app for a moment when the server ended this phone's login.
+class LoggingOutCover extends StatelessWidget {
+  const LoggingOutCover({super.key, this.note});
+  final String? note;
+  @override
+  Widget build(BuildContext context) => Positioned.fill(
+        child: Material(
+          color: Colors.black.withAlpha(225),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 36),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const SizedBox(width: 46, height: 46, child: CircularProgressIndicator(strokeWidth: 4.5, color: C.orange)),
+                const SizedBox(height: 22),
+                Text(context.t('Logging out…'), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+                if (note != null) ...[
+                  const SizedBox(height: 8),
+                  Text(context.t(note!), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 13.5)),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      );
 }

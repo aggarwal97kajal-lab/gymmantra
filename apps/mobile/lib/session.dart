@@ -70,6 +70,7 @@ class Session extends ChangeNotifier {
 
   void _setUser(Map<String, dynamic> u) {
     user = u;
+    endedNote = null;
     Prefs.setJson('u:me', u);
   }
 
@@ -132,6 +133,31 @@ class Session extends ChangeNotifier {
       ..._roleBody,
       if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
     }));
+  }
+
+  /// "Logging out…" spinner over the whole app, and the reason shown on the login screen.
+  bool ending = false;
+  String? endedNote;
+
+  /// Is this phone's login still good? If the server ended it (password changed, logged out from
+  /// another phone), the app logs out at once with a spinner — not on the next refresh.
+  Future<void> checkStillLoggedIn([String? note]) async {
+    if (user == null || ending) return;
+    try {
+      await refreshUser();
+      if (note != null) Push.register(); // our login is fine: this phone goes back on the push list
+    } on ApiException catch (e) {
+      if (e.status != 401 || user == null) return;
+      ending = true;
+      endedNote = note ?? e.message;
+      notifyListeners();
+      await Future.delayed(const Duration(milliseconds: 1400));
+      await api.setRefresh(null);
+      await api.setToken(null);
+      api.onLoggedOut?.call();
+      ending = false;
+      notifyListeners();
+    } catch (_) {} // no internet: checked again when it is back
   }
 
   Future<void> refreshUser() async {

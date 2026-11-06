@@ -296,6 +296,17 @@ class _LoginState extends ConsumerState<LoginScreen> with _Busy {
       title: context.t('Welcome back 👋'),
       subtitle: context.t('Log in to see your membership'),
       children: [
+        if (s.endedNote != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(color: C.warn.withAlpha(30), borderRadius: BorderRadius.circular(14), border: Border.all(color: C.warn.withAlpha(90))),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Icon(Icons.lock_rounded, color: C.warn, size: 20),
+              const SizedBox(width: 10),
+              Expanded(child: Text('${context.t('You were logged out')}\n${context.t(s.endedNote!)}', style: const TextStyle(fontSize: 13, height: 1.35))),
+            ]),
+          ),
         const RoleBadge(),
         AutofillGroup(
           child: Column(children: [
