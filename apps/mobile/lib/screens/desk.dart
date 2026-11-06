@@ -945,11 +945,6 @@ class _MyAttendanceState extends ConsumerState<MyAttendanceScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(context.t('My attendance'))),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-        if (hasBranches(ref))
-          BranchBack(onBack: () {
-            ref.invalidate(staffDaysBranchesProvider);
-            setState(() => picked = false);
-          }),
         Row(children: [
           IconButton(onPressed: () => setState(() {
                 month = DateTime(month.year, month.month - 1);
