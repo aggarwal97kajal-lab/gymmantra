@@ -1,0 +1,34 @@
+name: guide-shots
+# Real app screens for the user guide: a demo gym on a local server, the app drawn in a Flutter test.
+on:
+  workflow_dispatch:
+jobs:
+  shots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --no-frozen-lockfile
+      - name: Demo server
+        run: |
+          cd apps/worker
+          GUIDE_OUT=/tmp/guide-logins.json PORT=8787 nohup npx tsx scripts/guide.ts > /tmp/guide-server.log 2>&1 &
+          for i in $(seq 1 60); do test -f /tmp/guide-logins.json && break; sleep 1; done
+          cat /tmp/guide-server.log
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - name: Draw the screens
+        working-directory: apps/mobile
+        continue-on-error: true
+        run: |
+          flutter pub get
+          GUIDE_LOGINS=/tmp/guide-logins.json flutter test test_guide/guide_shots_test.dart --update-goldens --reporter expanded 2>&1 | tail -n 300
+      - run: ls -la apps/mobile/test_guide/shots || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: guide-shots
+          path: apps/mobile/test_guide/shots
+          retention-days: 7
