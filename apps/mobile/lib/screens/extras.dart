@@ -1661,22 +1661,26 @@ class _DevicesState extends ConsumerState<DevicesScreen> {
                   ]),
                   const Divider(height: 20),
                   Text(context.t('Who opens the door?'), style: const TextStyle(fontWeight: FontWeight.w700)),
-                  RadioListTile<bool>(
+                  Material(
+                    type: MaterialType.transparency,
+                    child: RadioListTile<bool>(
                     contentPadding: EdgeInsets.zero,
                     value: false,
                     groupValue: gate,
                     onChanged: (x) => setMode(gate: false),
                     title: Text(context.t('A. Attendance only')),
                     subtitle: Text(context.t('Staff or the machine opens the door. The desk is told if someone with no valid plan comes in.')),
-                  ),
-                  RadioListTile<bool>(
+                  )),
+                  Material(
+                    type: MaterialType.transparency,
+                    child: RadioListTile<bool>(
                     contentPadding: EdgeInsets.zero,
                     value: true,
                     groupValue: gate,
                     onChanged: (x) => setMode(gate: true),
                     title: Text(context.t('B. GymMantra opens the gate')),
                     subtitle: Text(context.t('The door lock is on the WiFi relay (More → Gate). It opens only for members who may enter.')),
-                  ),
+                  )),
                 ]),
               ),
               const SizedBox(height: 14),
