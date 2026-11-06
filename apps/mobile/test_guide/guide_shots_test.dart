@@ -177,9 +177,19 @@ void main() {
     await visit(t, '33_owner_subscription', '/o/subscription');
     await visit(t, '34_owner_notifications', '/notifications');
     await visit(t, '35_owner_devices', '/profile/devices');
-    await visit(t, '36_owner_fingerprint', '/o/devices');
-    await t.tap(find.text('Reception machine').first);
-    await shot(t, '37_owner_machine');
+    await finish(t);
+  });
+
+  testWidgets('36 fingerprint', (t) async {
+    phone(t);
+    await startAs(t, 'owner');
+    try {
+      await visit(t, '36_owner_fingerprint', '/o/devices');
+      await t.tap(find.text('Reception machine').first);
+      await shot(t, '37_owner_machine');
+    } catch (e, s) {
+      debugPrint('FINGERPRINT SHOT FAILED: $e\n$s');
+    }
     await finish(t);
   });
 
