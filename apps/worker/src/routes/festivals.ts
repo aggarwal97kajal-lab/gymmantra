@@ -36,7 +36,6 @@ export function festivalRoutes(app: App) {
     const now = nowIso();
     const soon = new Date(Date.now() + 14 * 86400_000).toISOString();
     const items = (d?.items ?? []).filter((f) => f.active && f.to > now && f.from < soon);
-    c.header('cache-control', 'public, max-age=300');
     return c.json(items.map(({ updatedAt, ...f }) => f));
   });
 
