@@ -273,6 +273,7 @@ class _ProfileState extends ConsumerState<ProfileScreen> {
             _Row(Icons.badge_outlined, context.t('Personal details'), () => context.push('/profile/details')),
             _Row(Icons.notifications_none_rounded, context.t('Notifications'), () => context.push('/notifications')),
             _Row(Icons.key_outlined, u['hasPassword'] == true ? context.t('Change password') : context.t('Set a password'), () => context.push('/profile/password')),
+            _Row(Icons.devices_rounded, context.t('Logged-in devices'), () => context.push('/profile/devices')),
             if (s.mode == 'trainer') _Row(Icons.badge_outlined, context.t('About me'), () => context.push('/t/about')),
             if (!adminApp) ...[
               _Row(Icons.help_outline_rounded, context.t('FAQ & Support'), () => s.mode == 'member' ? context.go('/help') : context.push('/support')),
@@ -852,4 +853,147 @@ class _PhotoViewState extends State<PhotoViewScreen> {
             ),
         ]),
       );
+}
+
+
+// ============================================================ logged-in devices (boards 96-97)
+
+/// Where this account is logged in; log one phone out, or everywhere else; "It was not me".
+class DevicesScreen extends ConsumerStatefulWidget {
+  const DevicesScreen({super.key});
+  @override
+  ConsumerState<DevicesScreen> createState() => _DevicesState();
+}
+
+class _DevicesState extends ConsumerState<DevicesScreen> {
+  List<Map>? rows;
+  String? error;
+  bool busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    try {
+      final r = await Api.instance.get('/me/sessions');
+      if (mounted) setState(() => rows = (r as List).cast<Map>());
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
+  Future<bool> sure(String title, String body, String yes) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: Text(body),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(ctx.t('Cancel'))),
+            FilledButton(style: FilledButton.styleFrom(backgroundColor: C.red), onPressed: () => Navigator.pop(ctx, true), child: Text(yes)),
+          ],
+        ),
+      ) ==
+      true;
+
+  Future<void> everywhere({required bool notMe}) async {
+    final ok = notMe
+        ? await sure(context.t('It was not me'), context.t('Every other phone and browser will be logged out. Then make a new password.'), context.t('Secure my account'))
+        : await sure(context.t('Log out everywhere else?'), context.t('Every other phone and browser will be logged out. This phone stays logged in.'), context.t('Log out'));
+    if (!ok || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final r = await Api.instance.post(notMe ? '/me/sessions/not-me' : '/me/sessions/logout-others');
+      final t = (r as Map)['token'];
+      if (t is String) await Api.instance.setToken(t);
+      if (!mounted) return;
+      toast(context, context.t('Logged out everywhere else'), kind: DripKind.ok);
+      await load();
+      if (notMe && mounted) context.push('/profile/password');
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
+  Future<void> logoutOne(Map d) async {
+    if (!await sure(context.t('Log out {d}?', {'d': d['device']}), context.t('The app on that phone closes at once and asks for the password again.'), context.t('Log out'))) return;
+    try {
+      await Api.instance.delete('/me/sessions/${d['id']}');
+      await load();
+    } catch (e) {
+      if (mounted) toastError(context, e);
+    }
+  }
+
+  String when(String? iso) {
+    if (iso == null) return '';
+    final d = DateTime.parse(iso).toLocal();
+    final mins = DateTime.now().difference(d).inMinutes;
+    if (mins < 60) return context.t('active now');
+    if (mins < 60 * 24) return context.t('{h} hours ago', {'h': mins ~/ 60});
+    return fmtDateTime(iso);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = rows ?? const <Map>[];
+    return Scaffold(
+      appBar: AppBar(title: Text(context.t('Logged-in devices'))),
+      body: RefreshIndicator(
+        color: context.c.primary,
+        onRefresh: load,
+        child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+          Muted(context.t('Your account is open on:'), size: 13),
+          const SizedBox(height: 8),
+          if (rows == null && error == null) const ListSkeleton(first: 60, rows: 3),
+          if (error != null) ErrorText(error),
+          if (list.isNotEmpty)
+            Panel(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Column(children: [
+                for (final d in list)
+                  ListTile(
+                    leading: IconTile(d['app'] == 'web' ? Icons.laptop_rounded : Icons.smartphone_rounded, size: 40),
+                    title: Text('${d['device']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    subtitle: Text([if (d['city'] != null) '${d['city']}', d['current'] == true ? context.t('this phone') : when(d['lastSeenAt'] as String?)].join(' · ')),
+                    trailing: d['current'] == true
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(color: context.c.primary, borderRadius: BorderRadius.circular(99)),
+                            child: Text(context.t('This phone'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
+                          )
+                        : OutlinedButton(
+                            style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red), visualDensity: VisualDensity.compact),
+                            onPressed: () => logoutOne(d),
+                            child: Text(context.t('Log out')),
+                          ),
+                  ),
+              ]),
+            ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: C.red),
+            onPressed: busy || list.length < 2 ? null : () => everywhere(notMe: false),
+            icon: const Icon(Icons.logout_rounded),
+            label: Text(context.t('Log out everywhere else')),
+          ),
+          const SizedBox(height: 6),
+          Muted(context.t('No need to change your password.'), size: 12, align: TextAlign.center),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(foregroundColor: C.red, side: const BorderSide(color: C.red)),
+            onPressed: busy ? null : () => everywhere(notMe: true),
+            icon: const Icon(Icons.gpp_maybe_rounded),
+            label: Text(context.t('A login was not me')),
+          ),
+          const SizedBox(height: 6),
+          Muted(context.t('Logs out every other phone, then asks you to make a new password.'), size: 12, align: TextAlign.center),
+        ]),
+      ),
+    );
+  }
 }

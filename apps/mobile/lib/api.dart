@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'prefs.dart';
 import 'theme.dart' show adminApp;
@@ -31,6 +32,13 @@ class Api {
   final storage = const FlutterSecureStorage();
   String base = defaultApiBase;
   String? token;
+
+  /// Key for a quiet new login (boards 96-98): the server gives a 1-day login and this key, which
+  /// changes every time it is used. Kept in secure storage like the login.
+  String? refresh;
+  /// This phone's name and a random id (so "Logged-in devices" can show it and spot new phones).
+  String deviceName = 'Phone';
+  String deviceId = '';
 
   /// Branch the gym owner / staff is looking at (sent as x-branch-id). Lists, dashboard,
   /// offers, notices, QR codes and notifications follow it.
@@ -176,7 +184,7 @@ class Api {
     sendTimeout: const Duration(seconds: 25),
     receiveTimeout: const Duration(seconds: 20),
     validateStatus: (_) => true,
-    headers: {'x-gm-client': adminApp ? 'admin-app' : 'mobile'},
+    headers: {'x-gm-client': adminApp ? 'admin-app' : 'mobile', 'x-gm-refresh': '1'},
   ))
     ..httpClientAdapter = IOHttpClientAdapter(createHttpClient: _client);
 
@@ -185,6 +193,17 @@ class Api {
     // Old test builds pointed at a server that no longer exists.
     base = (saved == null || saved.contains('onrender.com')) ? defaultApiBase : saved;
     token = await storage.read(key: 'token');
+    refresh = await storage.read(key: 'refresh');
+    deviceId = await storage.read(key: 'device_id') ?? '';
+    if (deviceId.isEmpty) {
+      final r = math.Random.secure();
+      deviceId = List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      await storage.write(key: 'device_id', value: deviceId);
+    }
+    try {
+      deviceName = (await const MethodChannel('gymmantra/secure').invokeMethod<String>('device')) ?? 'Phone';
+    } catch (_) {}
+    _dio.options.headers.addAll({'x-gm-device': deviceName.replaceAll(RegExp(r'[^\w .()+-]'), ''), 'x-gm-device-id': deviceId});
     unawaited(warmConnection());
     _watchFreezes();
     branchId = Prefs.getString('u:branch');
@@ -199,10 +218,43 @@ class Api {
     token = t;
     if (t == null) {
       await storage.delete(key: 'token');
+      await setRefresh(null);
     } else {
       await storage.write(key: 'token', value: t);
     }
   }
+
+  Future<void> setRefresh(String? r) async {
+    refresh = r;
+    if (r == null) {
+      await storage.delete(key: 'refresh');
+    } else {
+      await storage.write(key: 'refresh', value: r);
+    }
+  }
+
+  /// A new 1-day login with the refresh key. Only one at a time (all waiting screens share it).
+  Future<bool>? _refreshing;
+  Future<bool> refreshNow() => _refreshing ??= () async {
+        try {
+          final key = refresh;
+          if (key == null) return false;
+          final r = await _dio.post('$base/api/v1/auth/refresh', data: {'refresh': key}, options: Options(contentType: 'application/json'));
+          if (r.statusCode == 200 && r.data is Map && r.data['token'] is String) {
+            final next = r.headers.value('x-gm-refresh');
+            if (next != null) await setRefresh(next);
+            await setToken(r.data['token'] as String);
+            return true;
+          }
+          // The key is no longer good (logged out from another phone, password changed, stolen).
+          if (r.statusCode == 401) await setRefresh(null);
+          return false;
+        } catch (_) {
+          return false; // no internet: keep the key, try again later
+        } finally {
+          _refreshing = null;
+        }
+      }();
 
   String url(String path) => path.startsWith('http') ? path : '$base$path';
   Map<String, String> get authHeaders => token == null ? {} : {'Authorization': 'Bearer $token'};
@@ -286,8 +338,9 @@ class Api {
     }
   }
 
-  Future<dynamic> _send0(String method, String path, [Object? body, void Function(int, int)? onSendProgress]) async {
+  Future<dynamic> _send0(String method, String path, [Object? body, void Function(int, int)? onSendProgress, bool renewed = false]) async {
     late Response res;
+    final sentToken = token;
     // With a progress meter the body goes as bytes so the total size is known.
     final raw = onSendProgress != null && body != null ? utf8.encode(jsonEncode(body)) : null;
     final retry = _retryable(method, path, body) && !path.startsWith('/auth/');
@@ -321,6 +374,13 @@ class Api {
       break;
     }
     final code = res.statusCode ?? 0;
+    // A new refresh key comes with logins (and "log out everywhere else"): keep it.
+    final nextKey = res.headers.value('x-gm-refresh');
+    if (nextKey != null && code >= 200 && code < 300) await setRefresh(nextKey);
+    // The 1-day login ran out: get a new one quietly and send the same request again.
+    if (code == 401 && !renewed && sentToken != null && refresh != null && path != '/auth/refresh' && path != '/auth/logout') {
+      if (token != sentToken || await refreshNow()) return _send0(method, path, body, onSendProgress, true);
+    }
     if (code >= 200 && code < 300) {
       // Something changed on the server: screens must load fresh data next time.
       if (method != 'GET') _fetchedAt.clear();
@@ -342,7 +402,9 @@ class Api {
 
   /// Downloads a file the app shows (profile photo) with the login attached.
   Future<Uint8List> bytes(String path) async {
-    final r = await _dio.get<List<int>>(url(path), options: Options(responseType: ResponseType.bytes, headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!}));
+    Future<Response<List<int>>> get() => _dio.get<List<int>>(url(path), options: Options(responseType: ResponseType.bytes, headers: {...authHeaders, if (branchId != null) 'x-branch-id': branchId!}));
+    var r = await get();
+    if (r.statusCode == 401 && refresh != null && await refreshNow()) r = await get();
     final data = r.data;
     if (r.statusCode != 200 || data == null) throw ApiException(r.statusCode ?? 0, 'File not available');
     return Uint8List.fromList(data);

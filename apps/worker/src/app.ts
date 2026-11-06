@@ -4,6 +4,7 @@ import { deviceRoutes } from './routes/devices';
 import { enquiryRoutes } from './routes/enquiries';
 import { lockerRoutes } from './routes/lockers';
 import { ratingRoutes } from './routes/ratings';
+import { sessionRoutes } from './routes/sessions';
 import { salaryRoutes } from './routes/salary';
 import { gateRoutes } from './routes/gate';
 import { logoRoutes } from './routes/logos';
@@ -160,6 +161,7 @@ export function createApp(getDeps: () => Deps) {
   });
 
   authRoutes(app);
+  sessionRoutes(app);
   gymRoutes(app);
   memberRoutes(app);
   attendanceRoutes(app);

@@ -42,6 +42,7 @@ const INDEXED: [coll: string, field: string][] = [
   ['trainerRatings', 'trainerId'],
   ['devices', 'tenantId'],
   ['scheduled', 'day'],
+  ['sessions', 'uid'],
 ];
 
 const SCHEMA = [

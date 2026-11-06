@@ -279,8 +279,11 @@ class Session extends ChangeNotifier {
   /// Instant: the phone forgets the login at once; the server is told in the background.
   Future<void> logout() async {
     final old = api.token;
+    final oldKey = api.refresh;
     Push.unregisterLater(old);
-    if (old != null) api.postAs(old, '/auth/logout');
+    // The server ends this login (and its refresh key) too.
+    if (old != null) api.postAs(old, '/auth/logout', {if (oldKey != null) 'refresh': oldKey});
+    api.refresh = null;
     // Screen changes first; the saved login and the phone copies are wiped right after (secure
     // storage can take a second on some phones, which made log-out feel slow).
     api.token = null;
@@ -355,6 +358,7 @@ final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.ins
 /// Same list as the server (core.ts GO_RULES): notifications saved before "go" existed still open
 /// the right page, worked out from their title.
 final _goRules = <(RegExp, String)>[
+  (RegExp(r'^(New login on your account|Suspicious login stopped)'), 'security'),
   (RegExp(r'^Payment due'), 'due'),
   (RegExp(r'^(Payment received|Membership (added|updated|frozen)|Branch changed|Transfer not approved)'), 'membership'),
   (RegExp(r'^(Plan activated|Payment not received)$'), 'subscription'),
@@ -392,6 +396,7 @@ String? goOfNote(Map n) => (n['go'] as String?) ?? (n['kind'] == 'DUE' ? 'due' :
   if (go == null || go.isEmpty) return null;
   if (go.startsWith('staff-invite:')) return (path: '@invite:${go.substring(13)}', tab: false); // asks Accept / Decline
   final ticket = go.startsWith('ticket:') ? go.substring(7) : null;
+  if (go == 'security') return (path: '/profile/devices', tab: false); // new login / stolen login alerts
   if (adminApp) {
     if (ticket != null) return (path: '/a/ticket/$ticket', tab: false);
     return switch (go) {

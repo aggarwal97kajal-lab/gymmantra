@@ -19,6 +19,8 @@ export const DESK_ROLES: Role[] = ['OWNER', 'FRONT_DESK'];
 export interface UserDoc {
   name: string;
   sessionV?: number; // goes up when the password changes: older logins on other phones stop working
+  revokedSids?: { sid: string; until: string }[]; // phones logged out one by one (their logins stop at once)
+  knownDevices?: string[]; // phones / browsers seen before (a new one gets a "New login" alert)
   email: string | null;
   authEmail: string | null; // email used for the Firebase password account
   fbUid: string | null;
@@ -243,6 +245,8 @@ export const P = {
   offerImage: (t: string, id: string) => `tenants/${t}/offerImages/${id}`,
   logo: (t: string, key: string) => `tenants/${t}/logos/${key}`, // key = 'gym' or a branch id
   notes: (uid: string) => `notifications/${uid}`,
+  sessions: 'sessions',
+  session: (sid: string) => `sessions/${sid}`,
   photo: (uid: string) => `photos/${uid}`,
   saasPlans: 'saasPlans',
   bills: (t: string) => `tenants/${t}/bills`,
@@ -303,7 +307,7 @@ export interface Secrets {
 }
 
 export type AuthUser = UserDoc & { id: string };
-export type Env = { Variables: { deps: Deps; secrets: Secrets; user: AuthUser } };
+export type Env = { Variables: { deps: Deps; secrets: Secrets; user: AuthUser; sid?: string } };
 export type C = Context<Env>;
 export type App = Hono<Env>;
 
@@ -346,11 +350,105 @@ export const SESSION_COOKIE = 'gm_session';
 export const SESSION_DAYS = 30;
 const key = (s: string) => new TextEncoder().encode(s);
 
-export async function issueSession(c: C, uid: string, sessionV?: number) {
-  const v = sessionV ?? (await c.var.deps.store.get<UserDoc>(P.user(uid)))?.sessionV ?? 0;
-  const token = await new SignJWT({ v }).setProtectedHeader({ alg: 'HS256' }).setSubject(uid).setIssuedAt().setExpirationTime(`${SESSION_DAYS}d`).sign(key(c.var.secrets.jwt));
+/**
+ * One login on one phone / browser (boards 96-98). The app keeps a refresh key (`{sid}.{secret}`, only
+ * its hash is stored) and gets a new 1-day login with it; the key changes every time, and an old key
+ * used again means it was stolen. The website and older apps get a 30-day login (still listed and
+ * revocable one by one through `users.revokedSids`).
+ */
+export interface SessionDoc {
+  uid: string;
+  v: number; // users.sessionV when made; a password change ends every older session
+  app: 'mobile' | 'admin-app' | 'web';
+  device: string;
+  devId: string | null;
+  city: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  rt: string | null; // hash of the current refresh key
+  prevRt: string | null; // hash of the one before (kept to spot a stolen key)
+  rotatedAt: string | null;
+  expiresAt: string; // 30 days after last use
+}
+export const ACCESS_HOURS = 24;
+export const sha256 = async (s: string) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', key(s)))].map((b) => b.toString(16).padStart(2, '0')).join('');
+export const randomKey = () => btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replace(/[+/=]/g, (x) => (x === '+' ? '-' : x === '/' ? '_' : ''));
+const daysFromNow = (d: number) => new Date(Date.now() + d * 86400000).toISOString();
+
+/** Name of the phone / browser making the request. */
+export function deviceOf(c: C) {
+  const named = (c.req.header('x-gm-device') ?? '').replace(/[^\w .()+-]/g, '').trim().slice(0, 60);
+  const devId = (c.req.header('x-gm-device-id') ?? '').replace(/[^\w-]/g, '').slice(0, 64) || null;
+  const ua = c.req.header('user-agent') ?? '';
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+  const web = !isMobile(c) && !isAdminApp(c);
+  return {
+    device: named || (web ? `${browser} (website)` : 'Phone'),
+    devId: devId ?? (web && ua ? `web-${ua.length}-${browser}` : null),
+    city: ((c.req.raw as unknown as { cf?: { city?: string } }).cf?.city ?? null) as string | null,
+  };
+}
+
+/** A login token for a session. */
+export async function signAccess(c: C, uid: string, v: number, sid: string, short: boolean) {
+  return new SignJWT({ v, sid }).setProtectedHeader({ alg: 'HS256' }).setSubject(uid).setIssuedAt().setExpirationTime(short ? `${ACCESS_HOURS}h` : `${SESSION_DAYS}d`).sign(key(c.var.secrets.jwt));
+}
+
+/**
+ * Logs a person in on this phone / browser: a new session (or, with `sid`, the same session after a
+ * "log out everywhere else"). Apps that send `x-gm-refresh: 1` get a 1-day login and a refresh key
+ * in the `x-gm-refresh` answer header.
+ */
+export async function issueSession(c: C, uid: string, sessionV?: number, opts: { sid?: string } = {}) {
+  const { store } = c.var.deps;
+  const u = await store.get<UserDoc>(P.user(uid));
+  const v = sessionV ?? u?.sessionV ?? 0;
+  const app: SessionDoc['app'] = isAdminApp(c) ? 'admin-app' : isMobile(c) ? 'mobile' : 'web';
+  const rotating = app !== 'web' && c.req.header('x-gm-refresh') === '1';
+  const secret = rotating ? randomKey() : null;
+  const rt = secret ? await sha256(secret) : null;
+  const now = nowIso();
+  let sid = opts.sid;
+  const same = sid ? await store.get<SessionDoc>(P.session(sid)) : null;
+  if (sid && same) {
+    await store.set(P.session(sid), { ...same, v, lastSeenAt: now, ...(rt ? { rt, prevRt: null, rotatedAt: now } : {}) });
+  } else {
+    sid = uuid();
+    const d = deviceOf(c);
+    const doc: SessionDoc = { uid, v, app, device: d.device, devId: d.devId, city: d.city, createdAt: now, lastSeenAt: now, rt, prevRt: null, rotatedAt: rt ? now : null, expiresAt: daysFromNow(SESSION_DAYS) };
+    await store.set(P.session(sid), doc);
+    await loginAlert(c, uid, sid, doc).catch((e) => console.error('login alert', e));
+  }
+  if (secret) c.header('x-gm-refresh', `${sid}.${secret}`);
+  const token = await signAccess(c, uid, v, sid, rotating);
   setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: 'Lax', secure: c.var.deps.secure, path: '/', maxAge: SESSION_DAYS * 86400 });
   return token;
+}
+
+/** "New login on your account" for a phone / browser never seen before, or 3+ logins within an hour. */
+async function loginAlert(c: C, uid: string, sid: string, s: SessionDoc) {
+  const { store } = c.var.deps;
+  const others = await store.query<SessionDoc>(P.sessions, [['uid', uid]]);
+  const lastHour = others.filter((x) => x.id !== sid && Date.parse(x.data.createdAt) > Date.now() - 3600_000).length;
+  await store.tx(async (t) => {
+    const u = await t.get<UserDoc>(P.user(uid));
+    if (!u) return;
+    const known = u.knownDevices ?? [];
+    const fresh = !!s.devId && !known.includes(s.devId);
+    if (fresh) t.set(P.user(uid), { ...u, knownDevices: [s.devId!, ...known].slice(0, 20) });
+    // The very first phone of an account is not "new".
+    if ((fresh && known.length > 0) || lastHour >= 2) {
+      await notify(t, uid, null, 'New login on your account', `${s.device}${s.city ? ` · ${s.city}` : ''}. Not you? Open Logged-in devices and tap "It was not me".`, null, 'security');
+    }
+  });
+}
+
+/** Ends one session at once (its login stops working even before it expires). */
+export function revokeSid(t: Tx, u: UserDoc, uid: string, sid: string) {
+  const now = new Date().toISOString();
+  const list = [{ sid, until: daysFromNow(SESSION_DAYS) }, ...(u.revokedSids ?? []).filter((r) => r.until > now && r.sid !== sid)].slice(0, 100);
+  t.set(P.user(uid), { ...u, revokedSids: list });
+  t.delete(P.session(sid));
 }
 export function clearSession(c: C) {
   deleteCookie(c, SESSION_COOKIE, { path: '/' });
@@ -370,10 +468,12 @@ export async function authenticate(c: C): Promise<AuthUser> {
   if (viaCookie && !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) && !c.req.header('x-gm-client')) throw forbidden('Missing client header');
   let uid: string;
   let v = 0;
+  let sid: string | undefined;
   try {
     const { payload } = await jwtVerify(token, key(c.var.secrets.jwt));
     uid = String(payload.sub);
     v = typeof payload.v === 'number' ? payload.v : 0;
+    sid = typeof payload.sid === 'string' ? payload.sid : undefined;
   } catch {
     throw unauthorized('Session expired. Please log in again');
   }
@@ -381,7 +481,10 @@ export async function authenticate(c: C): Promise<AuthUser> {
   if (!u || u.deleted) throw unauthorized();
   // The password was changed after this login: this phone has to log in again.
   if ((u.sessionV ?? 0) !== v) throw unauthorized('Your password was changed. Please log in again');
+  // This phone was logged out from another phone ("Logged-in devices").
+  if (sid && u.revokedSids?.some((r) => r.sid === sid)) throw unauthorized('You were logged out from this phone. Please log in again');
   const user = { ...u, id: uid };
+  c.set('sid', sid);
   // Owner decision: the GymMantra admin uses the website (and later the admin app), not the gym app.
   if (isMobile(c) && isWebOnly(user)) throw unauthorized(WEB_ONLY_MESSAGE);
   if (isAdminApp(c) && !user.isSuperAdmin) throw unauthorized(ADMIN_ONLY_MESSAGE);
@@ -564,6 +667,7 @@ export const GO_RULES: [RegExp, string][] = [
   [/^(Locker given|Your locker ends|Your locker has ended)/, 'membership'],
   [/^Locker (ending|ended)/, 'lockers'],
   [/^Staff invite/, 'home'],
+  [/^(New login on your account|Suspicious login stopped|Logged out everywhere else)/, 'security'],
   [/^(Mark your attendance|Still not marked)/, 'attendance'],
   [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
   [/^(New support ticket|Ticket reply|Reply on ticket|Ticket GM-)/, 'tickets'],

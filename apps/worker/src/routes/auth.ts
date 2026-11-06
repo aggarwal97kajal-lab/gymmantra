@@ -1,4 +1,4 @@
-import { App, AuthUser, authenticate, C, clearSession, isMobile, issueSession, isWebOnly, P, UserDoc, WEB_ONLY_MESSAGE } from '../core';
+import { App, AuthUser, authenticate, C, isMobile, issueSession, isWebOnly, P, SessionDoc, UserDoc, WEB_ONLY_MESSAGE } from '../core';
 import { bad, conflict, forbidden, HttpError, notFound, nowIso, unauthorized } from '../lib/http';
 import { normalizeEmail, normalizePhone } from '../lib/phone';
 import { body, oneOf, optStr, str } from '../lib/validate';
@@ -420,13 +420,14 @@ export function authRoutes(app: App) {
     return c.json({ ok: true });
   });
 
-  app.post('/api/v1/auth/logout', (c) => {
-    clearSession(c);
-    return c.json({ ok: true });
-  });
-
   app.get('/api/v1/auth/me', async (c) => {
     const u = await authenticate(c);
+    // "Last used" for Logged-in devices (at most once an hour).
+    if (c.var.sid) {
+      const { store } = c.var.deps;
+      const s = await store.get<SessionDoc>(P.session(c.var.sid));
+      if (s && Date.now() - Date.parse(s.lastSeenAt) > 3600_000) await store.set(P.session(c.var.sid), { ...s, lastSeenAt: nowIso() }).catch(() => {});
+    }
     return c.json(await meResponse(c, u));
   });
 

@@ -53,6 +53,12 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "on" -> { window.addFlags(WindowManager.LayoutParams.FLAG_SECURE); result.success(null) }
                 "off" -> { window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE); result.success(null) }
+                // Phone name for "Logged-in devices" (e.g. "Xiaomi Redmi Note 12").
+                "device" -> {
+                    val maker = android.os.Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+                    val model = android.os.Build.MODEL
+                    result.success(if (model.lowercase().startsWith(maker.lowercase())) model else "$maker $model")
+                }
                 else -> result.notImplemented()
             }
         }
