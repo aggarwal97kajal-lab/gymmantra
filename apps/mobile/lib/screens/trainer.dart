@@ -13,6 +13,7 @@ import '../ui.dart';
 import 'home.dart' show openUrl;
 import 'pt.dart';
 import 'billing.dart' show AdsStrip;
+import 'extras.dart' show TrainerGymExtras;
 
 class TrainerShell extends StatelessWidget {
   const TrainerShell({super.key, required this.child, required this.location});
@@ -120,6 +121,7 @@ class TrainerHomeScreen extends ConsumerWidget {
                       const SizedBox(width: 9),
                       Expanded(child: StatTile(icon: Icons.schedule_rounded, value: '$soon', label: context.t('Ending soon'), color: C.warn)),
                     ]),
+                    TrainerGymExtras(g: g),
                     for (final p in pendingPt) ...[
                       const SizedBox(height: 10),
                       Material(

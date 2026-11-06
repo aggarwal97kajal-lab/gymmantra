@@ -13,6 +13,7 @@ import 'profile.dart' show NotificationBell;
 import '../ui.dart';
 import 'pt.dart' show MyTrainerCard, myPtProvider;
 import 'billing.dart' show AdsStrip;
+import 'extras.dart' show MemberGymExtras;
 
 /// Bottom navigation shell.
 class HomeShell extends StatelessWidget {
@@ -222,7 +223,7 @@ class HomeScreen extends ConsumerWidget {
                           ]),
                         ),
                       )
-                    else ...[_MembershipCard(m), const SizedBox(height: 12)],
+                    else ...[_MembershipCard(m), const SizedBox(height: 12), MemberGymExtras(m: m)],
                   for (final p in ((ref.watch(myPtProvider).valueOrNull as List?) ?? const []).cast<Map>().where((p) => p['state'] == 'ACTIVE'))
                     Padding(padding: const EdgeInsets.only(bottom: 12), child: MyTrainerCard(pt: p, tenantId: (p['gym'] as Map)['id'] as String)),
                   for (final p in pending) ...[

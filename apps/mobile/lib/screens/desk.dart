@@ -22,11 +22,11 @@ import 'person.dart';
 final staffProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/staff'));
 final gateProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/gate'));
 
-const rightKeys = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'];
+const rightKeys = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans', 'enquiries', 'lockers'];
 const presets = {
-  'RECEPTION': ['members', 'memberEdit', 'payments', 'checkin', 'requests'],
+  'RECEPTION': ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'enquiries', 'lockers'],
   'CHECKIN': ['members', 'checkin'],
-  'MANAGER': ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'],
+  'MANAGER': ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans', 'enquiries', 'lockers'],
 };
 
 String rightLabel(BuildContext context, String k) => switch (k) {
@@ -38,6 +38,8 @@ String rightLabel(BuildContext context, String k) => switch (k) {
       'transfers' => context.t('Branch moves'),
       'offers' => context.t('Send offers and notices'),
       'reports' => context.t('Money reports'),
+      'enquiries' => context.t('Enquiries'),
+      'lockers' => context.t('Lockers'),
       _ => context.t('Plans and gym settings'),
     };
 
@@ -50,6 +52,8 @@ String rightSub(BuildContext context, String k) => switch (k) {
       'transfers' => context.t('Move a member to another branch and approve move requests'),
       'offers' => '',
       'reports' => context.t('Collection, dues'),
+      'enquiries' => context.t('Add enquiries, follow-up calls'),
+      'lockers' => context.t('Give, renew and empty lockers'),
       _ => '',
     };
 

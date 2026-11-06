@@ -404,7 +404,8 @@ class _OwnerMembersState extends ConsumerState<OwnerMembersScreen> {
 }
 
 class AddMemberScreen extends ConsumerStatefulWidget {
-  const AddMemberScreen({super.key});
+  const AddMemberScreen({super.key, this.enquiry});
+  final Map? enquiry; // made from an enquiry: name and mobile filled in, linked when saved
   @override
   ConsumerState<AddMemberScreen> createState() => _AddMemberState();
 }
@@ -415,6 +416,18 @@ class _AddMemberState extends ConsumerState<AddMemberScreen> {
   final email = TextEditingController();
   bool busy = false;
   String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.enquiry;
+    if (e != null) {
+      final parts = ((e['name'] as String?) ?? '').trim().split(RegExp(r'\s+'));
+      person.first = parts.first;
+      if (parts.length > 1) person.last = parts.last;
+      phone.text = PhoneField.local(e['phone']);
+    }
+  }
 
   Future<void> save() async {
     final miss = person.missing(context);
@@ -432,6 +445,9 @@ class _AddMemberState extends ConsumerState<AddMemberScreen> {
     try {
       final m = await Api.instance.post('/members', {...person.toJson(), 'phone': phone.text.trim(), 'email': email.text.trim()});
       ref.invalidate(ownerMembersProvider);
+      if (widget.enquiry != null) {
+        await Api.instance.post('/enquiries/${widget.enquiry!['id']}/joined', {'memberId': m['id']}).catchError((_) => null);
+      }
       if (!mounted) return;
       if (m['accountMade'] == true) {
         toast(context, context.t('Member added. {name} can log in with this email — "Forgot password?" sets the password.', {'name': person.first.trim()}), kind: DripKind.ok);
@@ -460,7 +476,7 @@ class _AddMemberState extends ConsumerState<AddMemberScreen> {
               ]),
             ),
           ]),
-          Muted(context.t('The member sees these same details in their profile. If they already use GymMantra, they get linked.'), size: 12),
+          Muted(context.t('The member sees these same details in their profile. If they already use GymMantra, ask them to join with your gym code: they get linked when you approve.'), size: 12),
           ErrorText(error),
           const SizedBox(height: 16),
           FilledButton(onPressed: busy ? null : save, child: Text(context.t('Add member'))),
@@ -1304,8 +1320,14 @@ class OwnerMoreScreen extends ConsumerWidget {
                             : context.t('Trial ended — choose a plan'),
               ),
             if (gym['role'] == 'FRONT_DESK') row(Icons.event_available_rounded, context.t('My attendance'), () => context.push('/o/my-attendance'), sub: context.t('Mark Present at the gym every day')),
+            if (gym['role'] == 'FRONT_DESK') row(Icons.payments_rounded, context.t('My salary'), () => context.push('/my-salary'), sub: context.t('Monthly slips')),
+            if (s.can('enquiries')) row(Icons.contact_phone_rounded, context.t('Enquiries'), () => context.push('/o/enquiries'), sub: context.t('People who asked · who to call today')),
+            if (s.can('lockers')) row(Icons.lock_rounded, context.t('Lockers'), () => context.push('/o/lockers'), sub: context.t('Who has which locker, till when')),
             if (gym['role'] == 'OWNER') row(Icons.badge_rounded, context.t('Staff'), () => context.push('/o/staff'), sub: context.t('Front desk of this branch · rights')),
             if (gym['role'] == 'OWNER') row(Icons.fact_check_rounded, context.t('Attendance'), () => context.push('/o/attendance-hub'), sub: context.t('Members and staff · Excel')),
+            if (gym['role'] == 'OWNER') row(Icons.payments_rounded, context.t('Staff salary'), () => context.push('/o/salary'), sub: context.t('Salary, advance, slips')),
+            if (gym['role'] == 'OWNER') row(Icons.star_rate_rounded, context.t('Ratings & reviews'), () => context.push('/o/ratings'), sub: context.t('Trainer ratings · gym reviews on dashboards')),
+            if (gym['role'] == 'OWNER') row(Icons.fingerprint_rounded, context.t('Fingerprint machine'), () => context.push('/o/devices'), sub: context.t('eSSL / ZKTeco attendance')),
             if (s.can('memberEdit')) row(Icons.upload_file_rounded, context.t('Import members'), () => context.push('/o/import'), sub: context.t('From an Excel / CSV file')),
             if (s.can('checkin')) row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
             if (s.can('checkin')) row(Icons.door_sliding_rounded, context.t('Gate'), () => context.push('/o/gate'), sub: context.t('Opens after a check-in')),

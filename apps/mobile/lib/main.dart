@@ -27,6 +27,7 @@ import 'screens/role.dart';
 import 'screens/trainer.dart';
 import 'screens/workouts.dart';
 import 'screens/branch.dart';
+import 'screens/extras.dart';
 import 'photo.dart';
 import 'session.dart';
 import 'push.dart';
@@ -240,6 +241,17 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/plans', builder: (_, __) => const ManagePlansScreen()),
         GoRoute(path: '/o/settings', builder: (_, __) => const GymSettingsScreen()),
         GoRoute(path: '/o/pt-accounts', builder: (_, __) => const PtAccountsScreen()),
+        GoRoute(path: '/o/enquiries', builder: (_, __) => const EnquiriesScreen()),
+        GoRoute(path: '/o/enquiries/new', builder: (_, s) => EnquiryFormScreen(enquiry: s.extra as Map?)),
+        GoRoute(path: '/o/enquiry/:id', builder: (_, s) => EnquiryScreen(id: s.pathParameters['id']!)),
+        GoRoute(path: '/o/lockers', builder: (_, __) => const LockersScreen()),
+        GoRoute(path: '/o/salary', builder: (_, __) => const SalaryScreen()),
+        GoRoute(path: '/o/salary/setup', builder: (_, s) => SalarySetupScreen(person: s.extra as Map)),
+        GoRoute(path: '/o/salary/person', builder: (_, s) => SalaryPersonScreen(person: s.extra as Map)),
+        GoRoute(path: '/o/ratings', builder: (_, __) => const RatingsScreen()),
+        GoRoute(path: '/o/devices', builder: (_, __) => const DevicesScreen()),
+        GoRoute(path: '/my-salary', builder: (_, __) => const MySalaryScreen()),
+        GoRoute(path: '/rate', builder: (_, s) => RateScreen(args: s.extra as Map)),
         // ---- choosing a role ----
         GoRoute(path: '/role', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen())),
         GoRoute(path: '/start', pageBuilder: (_, __) => const NoTransitionPage(child: RolePickScreen(beforeLogin: true))),
@@ -258,7 +270,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
             GoRoute(path: '/o/desk', pageBuilder: (_, __) => const NoTransitionPage(child: AttendanceHubScreen(tab: true))),
           ],
         ),
-        GoRoute(path: '/o/members/new', builder: (_, __) => const AddMemberScreen()),
+        GoRoute(path: '/o/members/new', builder: (_, s) => AddMemberScreen(enquiry: (s.extra as Map?)?['enquiry'] as Map?)),
         GoRoute(path: '/o/member/:id', builder: (_, s) => OwnerMemberScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/o/offers/new', builder: (_, __) => const NewOfferScreen()),
         GoRoute(path: '/o/trainers', builder: (_, __) => const OwnerTrainersScreen()),

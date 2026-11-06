@@ -414,12 +414,16 @@ String? goOfNote(Map n) => (n['go'] as String?) ?? (n['kind'] == 'DUE' ? 'due' :
         'attendance' => (path: '/o/my-attendance', tab: false),
         'pt' || 'pt-pay' => (path: '/o/pt', tab: false),
         'tickets' => (path: '/help/new', tab: false),
+        'enquiries' => (path: '/o/enquiries', tab: false),
+        'lockers' => (path: '/o/lockers', tab: false),
+        'salary' => (path: '/my-salary', tab: false),
         _ => (path: '/o/home', tab: true),
       };
     case 'trainer' || 'waiting' || 'trainerJoin':
       return switch (go) {
         'pt' || 'program' => (path: '/t/clients', tab: true),
         'attendance' => (path: '/t/my-attendance', tab: false),
+        'salary' => (path: '/my-salary', tab: false),
         _ => (path: '/t/home', tab: true),
       };
     case 'member':
