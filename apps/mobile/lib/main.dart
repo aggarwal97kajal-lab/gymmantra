@@ -250,7 +250,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/salary/setup', builder: (_, s) => SalarySetupScreen(person: s.extra as Map)),
         GoRoute(path: '/o/salary/person', builder: (_, s) => SalaryPersonScreen(person: s.extra as Map)),
         GoRoute(path: '/o/ratings', builder: (_, __) => const RatingsScreen()),
-        GoRoute(path: '/o/devices', builder: (_, __) => const LoginDevicesScreen()),
+        GoRoute(path: '/o/devices', builder: (_, __) => const DevicesScreen()),
         GoRoute(path: '/my-salary', builder: (_, __) => const MySalaryScreen()),
         GoRoute(path: '/rate', builder: (_, s) => RateScreen(args: s.extra as Map)),
         // ---- choosing a role ----
