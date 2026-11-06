@@ -1468,4 +1468,11 @@ const hindi = <String, String>{
   "Salary + trainers' share": "सैलरी + ट्रेनर का हिस्सा",
   "Tap a card to see every entry.": "हर एंट्री देखने के लिए कार्ड दबाएँ।",
   "Nothing in these days": "इन दिनों में कुछ नहीं",
+  "{n} people · {total} · paid {paid}": "{n} लोग · {total} · दिया {paid}",
+  "Each branch has its own staff. Open a branch to pay its staff.": "हर ब्रांच का अपना स्टाफ़ है। उसकी सैलरी देने के लिए ब्रांच खोलें।",
+  "{n} staff & trainers": "{n} स्टाफ़ और ट्रेनर",
+  "{p} present today": "आज {p} हाज़िर",
+  "{n} trainers · {r} ratings": "{n} ट्रेनर · {r} रेटिंग",
+  "No trainers in this branch yet": "इस ब्रांच में अभी कोई ट्रेनर नहीं",
+  "{amt} due": "{amt} बाकी",
 };

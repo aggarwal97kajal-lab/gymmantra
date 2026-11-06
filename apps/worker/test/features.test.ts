@@ -152,13 +152,14 @@ describe('ratings', () => {
     await h.api.put(`/me/gyms/${owner.gym.id}/rating`, { stars: 5, tags: ['Saaf-safai'], comment: 'Machines hamesha theek', allowShow: true }, mem.token);
     const r = (await h.api.get('/gym-ratings', owner.token)).body;
     expect([r.avg, r.count, r.rows[0].comment]).toEqual([5, 1, 'Machines hamesha theek']);
-    expect((await h.api.post(`/gym-ratings/${mem.user.id}/show`, { show: true }, owner.token)).status).toBe(200);
+    const rid = r.rows[0].id;
+    expect((await h.api.post(`/gym-ratings/${rid}/show`, { show: true }, owner.token)).status).toBe(200);
     const t = (await h.api.get(`/gyms/${owner.gym.id}/testimonials`, mem.token)).body;
     expect(t).toEqual({ avg: 5, count: 1, items: [{ name: 'Rahul S.', stars: 5, text: 'Machines hamesha theek', photoUrl: null }] });
     // the member takes back permission: it disappears
     await h.api.put(`/me/gyms/${owner.gym.id}/rating`, { stars: 4, comment: 'Machines hamesha theek', allowShow: false }, mem.token);
     expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials`, mem.token)).body.items).toEqual([]);
-    expect((await h.api.post(`/gym-ratings/${mem.user.id}/show`, { show: true }, owner.token)).status).toBe(400);
+    expect((await h.api.post(`/gym-ratings/${rid}/show`, { show: true }, owner.token)).status).toBe(400);
     const x = await h.signup('Stranger');
     expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials`, x.token)).status).toBe(403);
   });
@@ -180,8 +181,7 @@ describe('ratings per branch (board 93)', () => {
     await h.api.put(`/me/gyms/${owner.gym.id}/rating`, { stars: 5, comment: 'Zumba batch best hai!', allowShow: true }, m2.token);
     const r = (await h.api.get('/gym-ratings', owner.token)).body;
     expect(r.branches.map((b: any) => [b.avg, b.count])).toEqual([[3, 1], [5, 1]]);
-    await h.api.post(`/gym-ratings/${mem.user.id}/show`, { show: true }, owner.token);
-    await h.api.post(`/gym-ratings/${m2.user.id}/show`, { show: true }, owner.token);
+    for (const row of r.rows) await h.api.post(`/gym-ratings/${row.id}/show`, { show: true }, owner.token);
     // each member sees only their own branch
     const t1 = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].testimonials;
     const t2 = (await h.api.get('/me/gyms', m2.token)).body.memberships[0].testimonials;
@@ -197,15 +197,34 @@ describe('ratings per branch (board 93)', () => {
     const look = (await h.api.get(`/me/gym-lookup?code=${br.code}`, x.token)).body;
     expect(look.testimonials.items.map((i: any) => i.text)).toEqual(['Zumba batch best hai!']);
     expect((await h.api.get(look.testimonials.items[0].photoUrl.replace('/api/v1', ''), x.token)).status).toBe(200);
-    // owner moves Rahul to branch 2: his rating goes with him
+    // owner moves Rahul to branch 2: his old review stays with the main branch; he sees branch 2's reviews
     await h.api.call('PATCH', `/members/${memberId}`, { token: owner.token, body: { branchId: br.id } });
     const after = (await h.api.get('/gym-ratings', owner.token)).body;
-    expect(after.branches.map((b: any) => [b.avg, b.count])).toEqual([[null, 0], [4, 2]]);
+    expect(after.branches.map((b: any) => [b.avg, b.count])).toEqual([[3, 1], [5, 1]]);
     const t1b = (await h.api.get('/me/gyms', mem.token)).body.memberships[0].testimonials;
-    expect(t1b.items.map((i: any) => i.text).sort()).toEqual(['Main branch theek', 'Zumba batch best hai!']);
-    // staff of branch 1 sees branch 1 (now empty)
-    expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials`, owner.token)).body.items).toHaveLength(0);
-    expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials?branchId=${br.id}`, owner.token)).body.items).toHaveLength(2);
+    expect(t1b.items.map((i: any) => i.text)).toEqual(['Zumba batch best hai!']);
+    // ...and can rate the new branch afresh
+    expect((await h.api.get(`/me/gyms/${owner.gym.id}/rating`, mem.token)).body).toBeNull();
+    await h.api.put(`/me/gyms/${owner.gym.id}/rating`, { stars: 3, comment: 'Naya branch bhi theek', allowShow: true }, mem.token);
+    const after2 = (await h.api.get('/gym-ratings', owner.token)).body;
+    expect(after2.branches.map((b: any) => [b.avg, b.count])).toEqual([[3, 1], [4, 2]]);
+    expect(after2.rows).toHaveLength(3);
+    // staff / owner of branch 1 still see branch 1's review
+    expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials`, owner.token)).body.items.map((i: any) => i.text)).toEqual(['Main branch theek']);
+    expect((await h.api.get(`/gyms/${owner.gym.id}/testimonials?branchId=${br.id}`, owner.token)).body.items).toHaveLength(1);
+    // trainer ratings: each trainer with their branch; members rate only their branch's trainers
+    const tr2 = await h.signup('Branch Two Trainer');
+    await h.api.post('/me/join', { gymCode: br.code, as: 'TRAINER', speciality: 'Strength', experienceYears: 3 }, tr2.token);
+    const tj = (await h.api.get('/join-requests', owner.token, B)).body.find((x: any) => x.kind === 'TRAINER');
+    await h.api.post(`/join-requests/${tj.id}/approve`, {}, owner.token, B);
+    const tr = (await h.api.get('/trainer-ratings', owner.token)).body;
+    expect(tr.map((x: any) => [x.name, x.branchId])).toEqual([['Branch Two Trainer', br.id]]);
+    // a trainer who renames shows the new name at once
+    await h.api.call('PATCH', '/me/profile', { token: tr2.token, body: { name: 'Rajeev Talwar' } });
+    expect((await h.api.get('/trainer-ratings', owner.token)).body[0].name).toBe('Rajeev Talwar');
+    const tl = (await h.api.get(`/me/gyms/${owner.gym.id}/trainer-ratings`, mem.token)).body;
+    expect(tl.map((x: any) => x.name)).toEqual(['Rajeev Talwar']);
+    expect((await h.api.get(`/me/gyms/${owner.gym.id}/trainer-ratings`, m2.token)).body).toHaveLength(1);
     void m2Id;
   });
 });
@@ -231,6 +250,20 @@ describe('money report (board 94)', () => {
     const d2 = await addDesk(owner, ['reports']);
     const rd = await h.api.get('/reports/money?days=30', d2.token);
     expect([rd.status, rd.body.salary]).toEqual([200, null]);
+  });
+});
+
+describe('branch cards for salary and staff attendance', () => {
+  it('each branch shows its own staff', async () => {
+    const owner = await h.ownerWithGym('Cards Gym');
+    const br = (await h.api.post('/gym/branches', { name: 'Kankarbagh' }, owner.token)).body;
+    const desk = await addDesk(owner);
+    await h.api.put(`/salary/${desk.id}`, { amount: 9000, mode: 'MONTH', workDays: 26, freeLeaves: 2, cutAbsent: false }, owner.token);
+    const s = (await h.api.get('/salary/branches', owner.token)).body;
+    expect(s.branches.map((b: any) => [b.name, b.people, b.total])).toEqual([['Cards Gym', 1, 9000], ['Kankarbagh', 0, 0]]);
+    const a = (await h.api.get('/staff-attendance/branches', owner.token)).body;
+    expect(a.map((b: any) => [b.id, b.staff])).toEqual([[owner.gym.branches?.[0]?.id ?? a[0].id, 1], [br.id, 0]]);
+    expect((await h.api.get('/salary/branches', desk.token)).status).toBe(403);
   });
 });
 

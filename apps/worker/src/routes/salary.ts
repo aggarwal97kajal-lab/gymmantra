@@ -107,6 +107,26 @@ export function salaryRoutes(app: App) {
     });
   });
 
+  /** Owner: one card per branch with that branch's salary for the month (each branch has its own staff). */
+  app.get('/api/v1/salary/branches', async (c) => {
+    await authenticate(c);
+    const g = await gymOf(c, 'OWNER');
+    const month = monthOf(c.req.query('month'));
+    const { store } = c.var.deps;
+    const out = [];
+    for (const [i, b] of g.tenant.branches.entries()) {
+      const { list, byId } = await people(c, g.tenantId, g.tenant, b.id);
+      const set = list.filter((p) => byId.get(p.id));
+      const [months, days] = await Promise.all([
+        store.getMany<SalaryMonth>(set.map((p) => P.salaryMonth(g.tenantId, p.id, month))),
+        store.getMany<StaffDaysDoc>(set.map((p) => `tenants/${g.tenantId}/staffDays/${p.id}_${month}`)),
+      ]);
+      const slips = set.map((p, k) => slip(byId.get(p.id)!, months[k], days[k], month));
+      out.push({ id: b.id, name: i === 0 ? g.tenant.name : b.name, people: list.length, total: slips.reduce((n, x) => n + x.total, 0), paid: slips.reduce((n, x) => n + x.paid, 0), due: slips.reduce((n, x) => n + x.due, 0) });
+    }
+    return c.json({ month, branches: out });
+  });
+
   /** Salary of one person (or a new person without the app: uid "new"). */
   app.put('/api/v1/salary/:uid', async (c) => {
     const u = await authenticate(c);

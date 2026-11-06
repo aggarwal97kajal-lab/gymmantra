@@ -1,4 +1,3 @@
-import { moveGymRating } from './ratings';
 import { App, audit, authenticate, branchOf, gymOf, MemberDoc, memberCodeFor, notify, P, readRoster, rosterEntry, TenantDoc, need, writeRoster } from '../core';
 import { bad, HttpError, notFound, nowIso, uuid } from '../lib/http';
 import { body, oneOf, str } from '../lib/validate';
@@ -152,10 +151,6 @@ export function transferRoutes(app: App) {
       }
       return done;
     });
-    if (out.status === 'APPROVED') {
-      const m = await c.var.deps.store.get<MemberDoc>(P.member(g.tenantId, out.memberId));
-      await moveGymRating(c.var.deps.store, g.tenantId, m?.userId); // their rating follows them
-    }
     return c.json(out);
   });
 }

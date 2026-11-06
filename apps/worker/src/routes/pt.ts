@@ -94,11 +94,13 @@ export async function ownerIds(r: Reader, tenantId: string) {
 
 /** Photos for a list of PT records (member and trainer). */
 async function withPhotos(r: Reader, list: PtDoc[]) {
-  const ids = [...new Set(list.flatMap((p) => [p.memberUserId, p.trainerId]).filter((x): x is string => !!x))];
+  const ids = [...new Set(list.flatMap((p) => [p.memberUserId, p.trainerId, ...Object.values(p.plans ?? {}).map((x) => x.byId)]).filter((x): x is string => !!x))];
   const users = await r.getMany<UserDoc>(ids.map(P.user));
   const map = new Map(ids.map((id, i) => [id, users[i]]));
+  // Names are read live: a trainer or owner who changes their name shows the new one everywhere.
+  const livePlans = (p: PtDoc) => Object.fromEntries(Object.entries(p.plans ?? {}).map(([d, x]) => [d, { ...x, byName: map.get(x.byId)?.name ?? x.byName }]));
   return list.map((p) =>
-    ptView({ ...p, trainerName: map.get(p.trainerId)?.name ?? p.trainerName }, {
+    ptView({ ...p, trainerName: map.get(p.trainerId)?.name ?? p.trainerName, plans: livePlans(p) }, {
       memberPhotoUrl: p.memberUserId ? photoUrlOf(p.memberUserId, map.get(p.memberUserId)) : null,
       memberPhone: p.memberUserId ? map.get(p.memberUserId)?.phone ?? null : null,
       trainerPhotoUrl: photoUrlOf(p.trainerId, map.get(p.trainerId)),
@@ -360,7 +362,7 @@ export function ptRoutes(app: App) {
       const time = optStr(b, 'time', { max: 5 }) ?? null;
       if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw bad('Time is not valid');
       if (mark === 'PLANNED') {
-        const who = role.role === 'TRAINER' ? p.trainerName : (u.name ?? 'Gym owner');
+        const who = u.name ?? (role.role === 'TRAINER' ? p.trainerName : 'Gym owner');
         plans[date] = { time: time ?? plans[date]?.time ?? null, byId: u.id, byName: who, at: nowIso() };
       } else delete plans[date];
       const done = Object.values(log).filter((m) => m === 'DONE').length;

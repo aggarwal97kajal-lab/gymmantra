@@ -1,4 +1,3 @@
-import { moveGymRating } from './ratings';
 import { hasDetails, personDetails } from '../lib/person';
 import {
   App,
@@ -580,7 +579,6 @@ export function memberRoutes(app: App) {
       audit(t, g.tenantId, u.id, 'member.update', 'member', before.id, before, after);
       return after;
     });
-    if (b.branchId !== undefined) await moveGymRating(c.var.deps.store, g.tenantId, out.userId); // their rating follows them
     return c.json(out);
   });
 

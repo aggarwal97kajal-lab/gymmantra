@@ -9,6 +9,7 @@ import '../ui.dart';
 import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
 import '../photo.dart' show Avatar;
+import 'branch.dart' show branchesOf;
 
 // Nov 6: enquiry follow-up, lockers, staff salary, ratings + testimonials, fingerprint machines.
 
@@ -19,6 +20,8 @@ final salaryProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, 
 final mySalaryProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/me/salary'));
 final trainerRatingsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/trainer-ratings'));
 final gymRatingsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym-ratings'));
+final salaryBranchesProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, month) => Api.instance.cachedGet('/salary/branches?month=$month'));
+final staffDaysBranchesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/staff-attendance/branches'));
 final devicesProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/devices'));
 final myTrainerRatingProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/rating'));
 
@@ -730,6 +733,63 @@ String _shiftMonth(String ym, int by) {
   return '${d.year}-${d.month.toString().padLeft(2, '0')}';
 }
 
+/// Owner with several branches: one card per branch (each branch has its own staff). Tapping a card
+/// opens that branch (the app switches to it, like "Switch branch").
+bool hasBranches(WidgetRef ref) => branchesOf(ref.watch(gymProvider).valueOrNull as Map?).length > 1 && !ref.watch(sessionProvider).isStaffDesk;
+
+String currentBranchName(WidgetRef ref) {
+  final g = ref.watch(gymProvider).valueOrNull as Map?;
+  final list = branchesOf(g);
+  final id = Api.instance.branchId ?? g?['currentBranchId'];
+  return (list.firstWhere((b) => b['id'] == id, orElse: () => list.isEmpty ? const {} : list.first)['name'] as String?) ?? '';
+}
+
+void openBranch(WidgetRef ref, String id) {
+  if (Api.instance.branchId != id) ref.read(sessionProvider).setBranch(id);
+}
+
+class BranchCards extends StatelessWidget {
+  const BranchCards({super.key, required this.items, required this.onPick, this.note});
+  final List<({String id, String name, String sub, String? right, Color? rightColor})> items;
+  final void Function(String id) onPick;
+  final String? note;
+  @override
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        for (final b in items) ...[
+          Panel(
+            onTap: () => onPick(b.id),
+            child: Row(children: [
+              const IconTile(Icons.store_mall_directory_rounded, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(b.name, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                  const SizedBox(height: 2),
+                  Muted(b.sub, size: 12),
+                ]),
+              ),
+              if (b.right != null) Text(b.right!, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: b.rightColor)),
+              Icon(Icons.chevron_right_rounded, color: context.c.mut),
+            ]),
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (note != null) Muted(note!, size: 12),
+      ]);
+}
+
+/// "← All branches" + the branch's name, above one branch's page.
+class BranchBack extends ConsumerWidget {
+  const BranchBack({super.key, required this.onBack});
+  final VoidCallback onBack;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) => Row(children: [
+        TextButton.icon(onPressed: onBack, icon: const Icon(Icons.arrow_back_rounded, size: 18), label: Text(context.t('All branches'))),
+        const Spacer(),
+        Flexible(child: Text(currentBranchName(ref), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
+      ]);
+}
+
 class SalaryScreen extends ConsumerStatefulWidget {
   const SalaryScreen({super.key});
   @override
@@ -738,8 +798,49 @@ class SalaryScreen extends ConsumerStatefulWidget {
 
 class _SalaryState extends ConsumerState<SalaryScreen> {
   String month = _thisMonth;
+  bool picked = false;
+  Widget monthBar() => Row(children: [
+        IconButton(onPressed: () => setState(() => month = _shiftMonth(month, -1)), icon: const Icon(Icons.chevron_left_rounded)),
+        Expanded(child: Text(_monthLabel(month), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
+        IconButton(onPressed: month == _thisMonth ? null : () => setState(() => month = _shiftMonth(month, 1)), icon: const Icon(Icons.chevron_right_rounded)),
+      ]);
   @override
   Widget build(BuildContext context) {
+    // Several branches: first one card per branch, then that branch's staff.
+    if (hasBranches(ref) && !picked) {
+      final bv = ref.watch(salaryBranchesProvider(month));
+      return Scaffold(
+        appBar: AppBar(title: Text(context.t('Staff salary'))),
+        body: RefreshIndicator(
+          color: context.c.primary,
+          onRefresh: () async => ref.invalidate(salaryBranchesProvider(month)),
+          child: AsyncBody(
+            value: bv,
+            onRetry: () => ref.invalidate(salaryBranchesProvider(month)),
+            builder: (d) => ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+              monthBar(),
+              BranchCards(
+                items: [
+                  for (final b in ((d['branches'] as List?) ?? const []).cast<Map>())
+                    (
+                      id: b['id'] as String,
+                      name: '${b['name']}',
+                      sub: context.t('{n} people · {total} · paid {paid}', {'n': b['people'] ?? 0, 'total': rupees(b['total'] as num?), 'paid': rupees(b['paid'] as num?)}),
+                      right: ((b['due'] as num?) ?? 0) > 0 ? context.t('{amt} due', {'amt': rupees(b['due'] as num?)}) : null,
+                      rightColor: C.red,
+                    ),
+                ],
+                onPick: (id) {
+                  openBranch(ref, id);
+                  setState(() => picked = true);
+                },
+                note: context.t('Each branch has its own staff. Open a branch to pay its staff.'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     final v = ref.watch(salaryProvider(month));
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Staff salary'))),
@@ -757,11 +858,12 @@ class _SalaryState extends ConsumerState<SalaryScreen> {
           builder: (d) {
             final rows = ((d['rows'] as List?) ?? const []).cast<Map>();
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 96), children: [
-              Row(children: [
-                IconButton(onPressed: () => setState(() => month = _shiftMonth(month, -1)), icon: const Icon(Icons.chevron_left_rounded)),
-                Expanded(child: Text(_monthLabel(month), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
-                IconButton(onPressed: month == _thisMonth ? null : () => setState(() => month = _shiftMonth(month, 1)), icon: const Icon(Icons.chevron_right_rounded)),
-              ]),
+              if (hasBranches(ref))
+                BranchBack(onBack: () {
+                  ref.invalidate(salaryBranchesProvider(month));
+                  setState(() => picked = false);
+                }),
+              monthBar(),
               Row(children: [
                 Expanded(child: StatTile(icon: Icons.payments_rounded, value: rupees(d['total'] as num?), label: context.t('Total salary'))),
                 const SizedBox(width: 9),
@@ -1421,7 +1523,7 @@ class _GymReviewsState extends ConsumerState<_GymReviews> {
                       child: r['shown'] == true
                           ? FilledButton.icon(
                               onPressed: () async {
-                                await _run(context, () => Api.instance.post('/gym-ratings/${r['userId']}/show', {'show': false}));
+                                await _run(context, () => Api.instance.post('/gym-ratings/${r['id'] ?? r['userId']}/show', {'show': false}));
                                 ref.invalidate(gymRatingsProvider);
                               },
                               icon: const Icon(Icons.check_rounded, size: 18),
@@ -1429,7 +1531,7 @@ class _GymReviewsState extends ConsumerState<_GymReviews> {
                             )
                           : OutlinedButton(
                               onPressed: () async {
-                                await _run(context, () => Api.instance.post('/gym-ratings/${r['userId']}/show', {'show': true}), done: context.t('Shown on dashboards'));
+                                await _run(context, () => Api.instance.post('/gym-ratings/${r['id'] ?? r['userId']}/show', {'show': true}), done: context.t('Shown on dashboards'));
                                 ref.invalidate(gymRatingsProvider);
                               },
                               child: Text(context.t('Show on dashboards')),
@@ -1448,18 +1550,54 @@ class _GymReviewsState extends ConsumerState<_GymReviews> {
   }
 }
 
-class _TrainerRatings extends ConsumerWidget {
+/// Trainer ratings, branch wise: one card per branch (each branch has its own trainers).
+class _TrainerRatings extends ConsumerStatefulWidget {
   const _TrainerRatings();
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_TrainerRatings> createState() => _TrainerRatingsState();
+}
+
+class _TrainerRatingsState extends ConsumerState<_TrainerRatings> {
+  String? branch;
+  @override
+  Widget build(BuildContext context) {
     final v = ref.watch(trainerRatingsProvider);
+    final g = ref.watch(gymProvider).valueOrNull as Map?;
+    final branches = branchesOf(g);
     return AsyncBody(
       value: v,
       onRetry: () => ref.invalidate(trainerRatingsProvider),
       builder: (d) {
-        final rows = (d as List).cast<Map>();
-        if (rows.isEmpty) return _empty(context, Icons.sports_outlined, context.t('No trainers yet'), '');
+        final all = (d as List).cast<Map>();
+        if (branches.length > 1 && branch == null) {
+          return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+            BranchCards(
+              items: [
+                for (final b in branches)
+                  () {
+                    final mine = all.where((t) => t['branchId'] == b['id']).toList();
+                    final rated = mine.where((t) => t['avg'] != null).toList();
+                    final avg = rated.isEmpty ? null : (rated.map((t) => (t['avg'] as num) * (t['count'] as num)).reduce((x, y) => x + y) / rated.map((t) => t['count'] as num).reduce((x, y) => x + y));
+                    return (
+                      id: b['id'] as String,
+                      name: '${b['name']}',
+                      sub: context.t('{n} trainers · {r} ratings', {'n': mine.length, 'r': mine.fold<num>(0, (n, t) => n + ((t['count'] as num?) ?? 0))}),
+                      right: avg == null ? null : '★ ${avg.toStringAsFixed(1)}',
+                      rightColor: C.gold,
+                    );
+                  }(),
+              ],
+              onPick: (id) => setState(() => branch = id),
+            ),
+          ]);
+        }
+        final rows = branches.length > 1 ? all.where((t) => t['branchId'] == branch).toList() : all;
         return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+          if (branches.length > 1) ...[
+            Align(alignment: Alignment.centerLeft, child: TextButton.icon(onPressed: () => setState(() => branch = null), icon: const Icon(Icons.arrow_back_rounded, size: 18), label: Text(context.t('All branches')))),
+            Padding(padding: const EdgeInsets.only(bottom: 8), child: Text('${branches.firstWhere((b) => b['id'] == branch, orElse: () => const {})['name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
+          ],
+          if (rows.isEmpty) Padding(padding: const EdgeInsets.only(top: 20), child: Muted(context.t('No trainers in this branch yet'), align: TextAlign.center)),
           for (final t in rows) ...[
             Panel(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

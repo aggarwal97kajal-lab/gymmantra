@@ -1,5 +1,4 @@
 import { App, audit, authenticate, branchOf, gymOf, MemberDoc, P, TenantDoc, UserDoc } from '../core';
-import type { Store } from '../store/store';
 import { todayIST } from '../lib/dates';
 import { bad, forbidden, notFound, nowIso } from '../lib/http';
 import { body, int, optStr, strList } from '../lib/validate';
@@ -72,29 +71,24 @@ export function testimonialsFor(t: TenantDoc, tenantId: string, branchId: string
         name: x.name,
         stars: x.stars,
         text: x.text,
-        photoUrl: x.photoV ? `/api/v1/gyms/${tenantId}/testimonials/${x.userId}/photo?v=${x.photoV}${code ? `&code=${encodeURIComponent(code)}` : ''}` : null,
+        // photoV null = no photo; missing (shown before photos were kept) = try, the app falls back to initials.
+        photoUrl: x.photoV === null ? null : `/api/v1/gyms/${tenantId}/testimonials/${x.userId}/photo?v=${x.photoV ?? 0}${code ? `&code=${encodeURIComponent(code)}` : ''}`,
       })),
   };
 }
 
-/** After a member moves branch, their gym rating (and testimonial) moves with them. */
-export async function moveGymRating(store: Store, tenantId: string, userId: string | null | undefined) {
-  if (!userId) return;
-  await store.tx(async (t) => {
-    const [r, tenant, u] = (await t.getMany<any>([P.gymRating(tenantId, userId), P.tenant(tenantId), P.user(userId)])) as [GymRating | null, TenantDoc | null, UserDoc | null];
-    const mid = u?.memberships?.[tenantId];
-    if (!r || !tenant || !mid) return;
-    const m = await t.get<MemberDoc>(P.member(tenantId, mid));
-    const from = branchOf(tenant, r.branchId);
-    const to = branchOf(tenant, m?.branchId);
-    if (!from || !to || from === to) return;
-    const sums = sumsOf(tenant);
-    addTo(sums, from, r.stars, -1);
-    addTo(sums, to, r.stars, 1);
-    const list = (tenant.testimonials ?? []).map((x) => (x.userId === userId ? { ...x, branchId: to } : x));
-    t.set(P.gymRating(tenantId, userId), { ...r, branchId: to });
-    t.set(P.tenant(tenantId), { ...tenant, ratingSums: sums, testimonials: list });
-  });
+/** A member rates each branch they are in separately (a new branch after a transfer = a new rating). */
+const ratingId = (uid: string, branchId: string) => `${uid}_${branchId}`;
+/** My rating for this branch; ratings made before branch-wise ratings (id = user id) belong to the main branch. */
+async function myGymRating(r: { getMany: <T>(paths: string[]) => Promise<(T | null)[]> }, tenant: TenantDoc, tenantId: string, uid: string, branchId: string) {
+  const [cur, legacy] = await r.getMany<GymRating>([P.gymRating(tenantId, ratingId(uid, branchId)), P.gymRating(tenantId, uid)]);
+  if (cur) return { id: ratingId(uid, branchId), r: cur };
+  if (legacy && branchOf(tenant, legacy.branchId) === branchId) return { id: uid, r: legacy };
+  return null;
+}
+async function memberBranch(r: { get: <T>(path: string) => Promise<T | null> }, tenant: TenantDoc, tenantId: string, u: UserDoc) {
+  const m = await r.get<MemberDoc>(P.member(tenantId, u.memberships![tenantId]));
+  return branchOf(tenant, m?.branchId)!;
 }
 
 const shortName = (n: string) => {
@@ -141,7 +135,11 @@ export function ratingRoutes(app: App) {
     const tenantId = c.req.param('tenantId');
     memberOf(u, tenantId);
     const { store } = c.var.deps;
-    const trainers = (await store.query<TrainerDoc>(P.trainers(tenantId), [['active', true]])).filter((t) => !t.data.gone);
+    const tenant = await store.get<TenantDoc>(P.tenant(tenantId));
+    if (!tenant) throw notFound('Gym not found');
+    const bid = await memberBranch(store, tenant, tenantId, u);
+    // Only the trainers of my own branch.
+    const trainers = (await store.query<TrainerDoc>(P.trainers(tenantId), [['active', true]])).filter((t) => !t.data.gone && branchOf(tenant, t.data.branchId) === bid);
     const month = todayIST().slice(0, 7);
     const mine = await store.getMany<TrainerRating>(trainers.map((t) => P.trainerRating(tenantId, t.id, u.id, month)));
     return c.json(trainers.map((t, i) => ({ trainerId: t.id, name: t.data.name, mine: mine[i] ?? null })));
@@ -153,13 +151,18 @@ export function ratingRoutes(app: App) {
     const g = await gymOf(c, 'OWNER');
     const { store } = c.var.deps;
     const [trainers, all] = await Promise.all([store.query<TrainerDoc>(P.trainers(g.tenantId)), store.query<TrainerRating>(P.trainerRatings(g.tenantId))]);
-    const rows = trainers
-      .filter((t) => !t.data.gone)
-      .map((t) => {
+    const live = trainers.filter((t) => !t.data.gone);
+    const users = await store.getMany<UserDoc>(live.map((t) => P.user(t.id)));
+    const branchName = (id: string | null) => (id === g.tenant.branches[0]?.id ? g.tenant.name : g.tenant.branches.find((b) => b.id === id)?.name ?? '');
+    const rows = live
+      .map((t, i) => {
         const mine = all.map((r) => r.data).filter((r) => r.trainerId === t.id);
+        const bid = branchOf(g.tenant, t.data.branchId);
         return {
           trainerId: t.id,
-          name: t.data.name,
+          name: users[i]?.name ?? t.data.name, // live name (a trainer may rename themselves)
+          branchId: bid,
+          branchName: branchName(bid),
           avg: avg(mine.map((r) => r.stars)),
           count: mine.length,
           tags: tagCounts(mine).slice(0, 8),
@@ -187,7 +190,11 @@ export function ratingRoutes(app: App) {
     const u = await authenticate(c);
     const tenantId = c.req.param('tenantId');
     memberOf(u, tenantId);
-    return c.json((await c.var.deps.store.get<GymRating>(P.gymRating(tenantId, u.id))) ?? null);
+    const { store } = c.var.deps;
+    const tenant = await store.get<TenantDoc>(P.tenant(tenantId));
+    if (!tenant) throw notFound('Gym not found');
+    const mine = await myGymRating(store, tenant, tenantId, u.id, await memberBranch(store, tenant, tenantId, u));
+    return c.json(mine?.r ?? null);
   });
 
   app.put('/api/v1/me/gyms/:tenantId/rating', async (c) => {
@@ -200,18 +207,21 @@ export function ratingRoutes(app: App) {
     const comment = optStr(b, 'comment', { max: 500 }) ?? null;
     const allowShow = b.allowShow === true;
     const out = await c.var.deps.store.tx(async (t) => {
-      const [old, tenant, m] = (await t.getMany<any>([P.gymRating(tenantId, u.id), P.tenant(tenantId), P.member(tenantId, u.memberships![tenantId])])) as [GymRating | null, TenantDoc | null, MemberDoc | null];
+      const [tenant, m] = (await t.getMany<any>([P.tenant(tenantId), P.member(tenantId, u.memberships![tenantId])])) as [TenantDoc | null, MemberDoc | null];
       if (!tenant) throw notFound('Gym not found');
-      const branchId = branchOf(tenant, m?.branchId);
+      // Each branch gets its own rating; after a transfer the member rates the new branch afresh.
+      const branchId = branchOf(tenant, m?.branchId)!;
+      const prev = await myGymRating(t, tenant, tenantId, u.id, branchId);
+      const old = prev?.r ?? null;
       // A shown testimonial changes with the member's new words, or goes away if they no longer allow it.
       const shown = !!old?.shown && allowShow && !!comment;
       const r: GymRating = { userId: u.id, branchId, name: shortName(u.name), stars, tags, comment, allowShow, shown, at: nowIso() };
-      t.set(P.gymRating(tenantId, u.id), r);
-      // Each rating counts in the member's own branch.
+      if (prev && prev.id !== ratingId(u.id, branchId)) t.delete(P.gymRating(tenantId, prev.id)); // old-style id: move to the new one
+      t.set(P.gymRating(tenantId, ratingId(u.id, branchId)), r);
       const sums = sumsOf(tenant);
-      if (old) addTo(sums, branchOf(tenant, old.branchId)!, old.stars, -1);
-      if (branchId) addTo(sums, branchId, stars, 1);
-      const list = (tenant.testimonials ?? []).filter((x) => x.userId !== u.id);
+      if (old) addTo(sums, branchId, old.stars, -1);
+      addTo(sums, branchId, stars, 1);
+      const list = (tenant.testimonials ?? []).filter((x) => !(x.userId === u.id && branchOf(tenant, x.branchId) === branchId));
       if (shown) list.unshift({ userId: u.id, name: r.name, stars, text: comment!, branchId, photoV: u.photoV ?? null });
       t.set(P.tenant(tenantId), { ...tenant, ratingSums: sums, testimonials: list });
       return r;
@@ -224,7 +234,7 @@ export function ratingRoutes(app: App) {
     await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     const rows = (await c.var.deps.store.query<GymRating>(P.gymRatings(g.tenantId)))
-      .map((r) => ({ ...r.data, branchId: branchOf(g.tenant, r.data.branchId) }))
+      .map((r) => ({ ...r.data, id: r.id, branchId: branchOf(g.tenant, r.data.branchId) }))
       .sort((a, b) => (a.at < b.at ? 1 : -1));
     const month = todayIST().slice(0, 7);
     const sum = (list: typeof rows) => ({ avg: avg(list.map((r) => r.stars)), count: list.length, thisMonth: list.filter((r) => r.at.slice(0, 7) === month).length, tags: tagCounts(list).slice(0, 8) });
@@ -237,26 +247,26 @@ export function ratingRoutes(app: App) {
     return c.json({ ...sum(rows), branches, rows: rows.map((r, i) => ({ ...r, photoUrl: withPhoto[i]?.photoV && !withPhoto[i]?.deleted ? `/api/v1/photos/${r.userId}?v=${withPhoto[i]!.photoV}` : null })) });
   });
 
-  /** Owner: show / hide one rating on the dashboards (only if the member allowed it). */
-  app.post('/api/v1/gym-ratings/:userId/show', async (c) => {
+  /** Owner: show / hide one rating on the dashboards (only if the member allowed it). `:id` is the rating's id. */
+  app.post('/api/v1/gym-ratings/:id/show', async (c) => {
     const u = await authenticate(c);
     const g = await gymOf(c, 'OWNER');
     const show = body(await c.req.json().catch(() => null)).show !== false;
-    const uid = c.req.param('userId');
+    const id = c.req.param('id');
     const out = await c.var.deps.store.tx(async (t) => {
-      const [r, tenant] = (await t.getMany<any>([P.gymRating(g.tenantId, uid), P.tenant(g.tenantId)])) as [GymRating | null, TenantDoc];
+      const [r, tenant] = (await t.getMany<any>([P.gymRating(g.tenantId, id), P.tenant(g.tenantId)])) as [GymRating | null, TenantDoc];
       if (!r) throw notFound('Rating not found');
       if (show && (!r.allowShow || !r.comment)) throw bad('This member did not allow showing their rating');
-      const list = (tenant.testimonials ?? []).filter((x) => x.userId !== uid);
       const branchId = branchOf(tenant, r.branchId);
+      const list = (tenant.testimonials ?? []).filter((x) => !(x.userId === r.userId && branchOf(tenant, x.branchId) === branchId));
       if (show) {
         if (list.filter((x) => branchOf(tenant, x.branchId) === branchId).length >= 12) throw bad('Up to 12 can be shown in a branch. Hide one first');
-        const ru = await t.get<UserDoc>(P.user(uid));
-        list.unshift({ userId: uid, name: r.name, stars: r.stars, text: r.comment!, branchId, photoV: ru?.photoV ?? null });
+        const ru = await t.get<UserDoc>(P.user(r.userId));
+        list.unshift({ userId: r.userId, name: r.name, stars: r.stars, text: r.comment!, branchId, photoV: ru?.photoV ?? null });
       }
-      t.set(P.gymRating(g.tenantId, uid), { ...r, shown: show });
+      t.set(P.gymRating(g.tenantId, id), { ...r, shown: show });
       t.set(P.tenant(g.tenantId), { ...tenant, testimonials: list });
-      audit(t, g.tenantId, u.id, show ? 'rating.show' : 'rating.hide', 'gym_rating', uid, null, null);
+      audit(t, g.tenantId, u.id, show ? 'rating.show' : 'rating.hide', 'gym_rating', id, null, null);
       return { ok: true, shown: show };
     });
     return c.json(out);

@@ -724,6 +724,11 @@ export async function syncRosterPhoto(t: Tx, u: Pick<UserDoc, 'memberships'>, ph
     if (!r.members[mid]) continue;
     r.members[mid] = { ...r.members[mid], photoV };
     writeRoster(t, tid, r);
+    // Reviews the gym shows with this person's photo.
+    const tn = await t.get<TenantDoc>(P.tenant(tid));
+    if (tn?.testimonials?.some((x) => x.userId === r.members[mid].userId)) {
+      t.set(P.tenant(tid), { ...tn, testimonials: tn.testimonials.map((x) => (x.userId === r.members[mid].userId ? { ...x, photoV } : x)) });
+    }
   }
 }
 
