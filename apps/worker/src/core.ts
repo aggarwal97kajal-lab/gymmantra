@@ -70,6 +70,8 @@ export interface Branch {
   gstin?: string | null;
   logoUrl?: string | null; // own logo; null → the gym's logo
   appCheckin?: boolean; // false: this branch uses its own entry system (no check-in from the app)
+  fingerprintOnly?: boolean; // attendance only by fingerprint machine: no QR check-in, no app "Present" (routes/devices.ts)
+  fpGate?: boolean; // GymMantra opens the gate (Gate relay) after a fingerprint of a member who may enter
 }
 
 export interface TenantDoc {
@@ -592,6 +594,7 @@ export function gymFace(t: TenantDoc, branchId: string | null | undefined) {
     logoUrl: b?.logoUrl || (!b || b.id === t.branches[0]?.id ? t.logoUrl : null) || null,
     state: b?.state || t.state || null,
     appCheckin: b?.appCheckin !== false,
+    fingerprintOnly: b?.fingerprintOnly === true,
   };
 }
 export const inBranch = (g: GymCtx, id: string | null | undefined) => branchOf(g.tenant, id) === g.branchId;
@@ -668,6 +671,8 @@ export const GO_RULES: [RegExp, string][] = [
   [/^Locker (ending|ended)/, 'lockers'],
   [/^Staff invite/, 'home'],
   [/^(New login on your account|Suspicious login stopped|Logged out everywhere else)/, 'security'],
+  [/^Fingerprint machine offline/, 'devices'],
+  [/^Fingerprint: entry stopped/, 'attendance'],
   [/^(Mark your attendance|Still not marked)/, 'attendance'],
   [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
   [/^(New support ticket|Ticket reply|Reply on ticket|Ticket GM-)/, 'tickets'],

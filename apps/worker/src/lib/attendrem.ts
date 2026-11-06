@@ -53,10 +53,21 @@ export async function cronAttendanceReminders(deps: Deps, sa: ServiceAccount | n
     budget -= missing.length;
     const title = slot === 'am' ? 'Mark your attendance' : 'Still not marked';
     const body = slot === 'am' ? 'You have not marked Present today. Open My attendance at the gym and tap Present.' : 'Your attendance for today is still not marked. Mark Present at the gym before you leave.';
+    // Fingerprint-only branches: the machine marks Present, so the reminder says to use the machine
+    // (and stops once the finger is on the machine, like the app "Present").
+    const tenant = await store.get<TenantDoc>(P.tenant(tid));
+    const trainers = await store.getMany<{ branchId?: string | null }>(missing.map((uid) => P.trainer(tid, uid)));
+    const fpBody = slot === 'am' ? 'You have not marked your attendance today. Put your finger on the fingerprint machine at the gym.' : 'Your attendance for today is still not marked. Put your finger on the fingerprint machine before you leave.';
+    const first = tenant?.branches[0]?.id ?? null;
+    const fpOf = (uid: string, i: number) => {
+      const s = staff.find((x) => x.id === uid) as { data: { branchIds?: string[] } } | undefined;
+      const bid = trainers[i]?.branchId ?? s?.data.branchIds?.[0] ?? first;
+      return !!tenant?.branches.find((b) => b.id === bid)?.fingerprintOnly;
+    };
     await store
       .tx(async (t) => {
         await t.getMany(missing.map(P.notes)); // one read for everyone
-        for (const uid of missing) await notify(t, uid, tid, title, body, null, 'attendance');
+        for (const [i, uid] of missing.entries()) await notify(t, uid, tid, title, fpOf(uid, i) ? fpBody : body, null, 'attendance');
       })
       .catch(() => {});
   }

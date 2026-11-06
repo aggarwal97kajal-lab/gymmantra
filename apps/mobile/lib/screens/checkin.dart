@@ -328,7 +328,22 @@ class _GymQrState extends ConsumerState<GymQrScreen> {
           AsyncBody(
             value: qr,
             onRetry: () => ref.invalidate(gymQrProvider),
-            builder: (d) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            builder: (d) => d['fingerprintOnly'] == true
+                ? Panel(
+                    color: C.orange.withAlpha(22),
+                    child: Column(children: [
+                      const Icon(Icons.fingerprint_rounded, size: 48, color: C.orange),
+                      const SizedBox(height: 8),
+                      Text(context.t('Attendance only by fingerprint machine'), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+                      const SizedBox(height: 4),
+                      Muted(context.t('The check-in QR is hidden at this branch. Members and staff use the fingerprint machine. Change it in Attendance → Fingerprint machines.'), size: 12.5, align: TextAlign.center),
+                      if (owner) ...[
+                        const SizedBox(height: 10),
+                        OutlinedButton(onPressed: () => context.push('/o/devices'), child: Text(context.t('Fingerprint machines'))),
+                      ],
+                    ]),
+                  )
+                : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               // Owner chooses: members check in with the app (this QR), or the branch uses its own system.
               Panel(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -537,6 +552,9 @@ class _ScanState extends ConsumerState<ScanCheckinScreen> {
     // The gym turned off check-in from the app at the member's branch: say so instead of opening the camera.
     final gymsData = ref.watch(gymsProvider).valueOrNull;
     final ms = ((gymsData is Map ? gymsData['memberships'] : null) as List?)?.whereType<Map>().toList() ?? const <Map>[];
+    if (ms.isNotEmpty && ms.every((m) => (m['gym'] as Map?)?['fingerprintOnly'] == true)) {
+      return _FingerprintOnly(standalone: widget.standalone);
+    }
     if (ms.isNotEmpty && ms.every((m) => (m['gym'] as Map?)?['appCheckin'] == false)) {
       return _CheckinOff(gym: (ms.first['gym'] as Map?) ?? const {}, standalone: widget.standalone);
     }
@@ -814,4 +832,32 @@ class _CheckinOff extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// The member's branch takes attendance only by fingerprint machine (board 105).
+class _FingerprintOnly extends StatelessWidget {
+  const _FingerprintOnly({required this.standalone});
+  final bool standalone;
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        appBar: AppBar(title: Text(context.t('Check-in')), automaticallyImplyLeading: standalone),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(color: C.orange.withAlpha(30), borderRadius: BorderRadius.circular(28)),
+                child: const Icon(Icons.fingerprint_rounded, size: 56, color: C.orange),
+              ),
+              const SizedBox(height: 16),
+              Text(context.t('Please check in via fingerprint machine at gate'), textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 6),
+              Text(context.t('Put your finger on the machine at the gate. Your attendance is marked by itself.'), textAlign: TextAlign.center, style: TextStyle(color: context.c.mut, height: 1.4)),
+            ]),
+          ),
+        ),
+      );
 }

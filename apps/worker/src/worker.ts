@@ -1,4 +1,5 @@
 import { cronScheduled } from './lib/scheduled';
+import { cronDevices } from './routes/devices';
 import { cronAttendanceReminders } from './lib/attendrem';
 import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { cronFanouts } from './lib/push';
@@ -186,6 +187,7 @@ export default {
       ctx.waitUntil(cronReminders(d, d.serviceAccount ?? null).catch(() => {}));
       ctx.waitUntil(cronAttendanceReminders(d, d.serviceAccount ?? null).catch(() => {}));
       ctx.waitUntil(cronScheduled(d, d.serviceAccount ?? null).catch(() => {}));
+      ctx.waitUntil(cronDevices(d, d.serviceAccount ?? null).catch(() => {}));
     } catch {
       /* settings missing: nothing to do */
     }

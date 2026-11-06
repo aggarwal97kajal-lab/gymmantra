@@ -496,6 +496,7 @@ class AttendanceHubScreen extends ConsumerWidget {
             () => context.push('/o/attendance'),
           ),
         if (owner) card(Icons.badge_rounded, C.blue, context.t('Staff & trainers'), context.t('Present days, month by month · Excel'), () => context.push('/o/staff-attendance')),
+        if (owner) card(Icons.fingerprint_rounded, C.orange, context.t('Fingerprint machines'), context.t('eSSL, ZKTeco, Hikvision, any machine · pen drive'), () => context.push('/o/devices')),
         if (s.isStaffDesk) card(Icons.event_available_rounded, C.ok, context.t('My attendance'), context.t('Mark Present at the gym every day'), () => context.push('/o/my-attendance')),
       ]),
     );
@@ -965,10 +966,23 @@ class _MyAttendanceState extends ConsumerState<MyAttendanceScreen> {
         const SizedBox(height: 10),
         MonthGrid(month: month, present: present, absent: absent, today: today),
         const SizedBox(height: 14),
-        if (data?['branch'] != null) Muted(context.t('Attendance counts only inside {b} (about 20 m).', {'b': data!['branch']['name']}), size: 12.5, align: TextAlign.center),
+        // Fingerprint-only branch: the machine marks Present; no button here.
+        if (data?['fingerprintOnly'] == true)
+          Panel(
+            color: C.orange.withAlpha(22),
+            child: Column(children: [
+              const Icon(Icons.fingerprint_rounded, size: 44, color: C.orange),
+              const SizedBox(height: 6),
+              Text(context.t('Attendance is marked by the fingerprint machine'), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Muted(marked ? context.t('Present today ✓') : context.t('Put your finger on the machine at the gym. The "Present" button is off.'), size: 12.5, align: TextAlign.center),
+            ]),
+          )
+        else if (data?['branch'] != null)
+          Muted(context.t('Attendance counts only inside {b} (about 20 m).', {'b': data!['branch']['name']}), size: 12.5, align: TextAlign.center),
         ErrorText(error),
         const SizedBox(height: 12),
-        if (isThisMonth)
+        if (isThisMonth && data?['fingerprintOnly'] != true)
           FilledButton.icon(
             style: FilledButton.styleFrom(backgroundColor: marked ? C.ok : null),
             onPressed: marked || marking || loading ? null : mark,

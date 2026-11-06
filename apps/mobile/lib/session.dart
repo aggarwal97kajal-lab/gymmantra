@@ -359,6 +359,7 @@ final trainerHomeProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.ins
 /// the right page, worked out from their title.
 final _goRules = <(RegExp, String)>[
   (RegExp(r'^(New login on your account|Suspicious login stopped)'), 'security'),
+  (RegExp(r'^Fingerprint machine offline'), 'devices'),
   (RegExp(r'^Payment due'), 'due'),
   (RegExp(r'^(Payment received|Membership (added|updated|frozen)|Branch changed|Transfer not approved)'), 'membership'),
   (RegExp(r'^(Plan activated|Payment not received)$'), 'subscription'),
@@ -421,6 +422,7 @@ String? goOfNote(Map n) => (n['go'] as String?) ?? (n['kind'] == 'DUE' ? 'due' :
         'tickets' => (path: '/help/new', tab: false),
         'enquiries' => (path: '/o/enquiries', tab: false),
         'lockers' => (path: '/o/lockers', tab: false),
+        'devices' => (path: '/o/devices', tab: false),
         'salary' => (path: '/my-salary', tab: false),
         _ => (path: '/o/home', tab: true),
       };

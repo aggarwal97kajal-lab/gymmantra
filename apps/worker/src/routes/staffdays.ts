@@ -1,6 +1,6 @@
 import { App, audit, authenticate, GymCtx, gymOf, notifyDesk, P, Role, TenantDoc, UserDoc } from '../core';
 import { todayIST } from '../lib/dates';
-import { bad, forbidden, notFound, nowIso } from '../lib/http';
+import { bad, forbidden, HttpError, notFound, nowIso } from '../lib/http';
 import type { CheckinDoc } from './checkin';
 import { distanceM } from './checkin';
 import type { TrainerDoc } from './trainers';
@@ -57,6 +57,7 @@ export function staffDayRoutes(app: App) {
       present: presentDays(doc),
       absent: Object.entries(doc?.days ?? {}).filter(([, x]) => x.absent).map(([k]) => k).sort(),
       markedToday: !!doc?.days?.[today] && !doc.days[today].absent,
+      fingerprintOnly: !!branch?.fingerprintOnly, // "Present" button hidden: the fingerprint machine marks it
     });
   });
 
@@ -67,6 +68,9 @@ export function staffDayRoutes(app: App) {
     const b = ((await c.req.json().catch(() => null)) ?? {}) as Record<string, unknown>;
     const { store } = c.var.deps;
     const bid = await myBranch(store, g, u.id);
+    if (g.role !== 'OWNER' && g.tenant.branches.find((x) => x.id === bid)?.fingerprintOnly) {
+      throw new HttpError(403, 'Attendance is marked by the fingerprint machine. Put your finger on the machine at the gym', { code: 'FINGERPRINT_ONLY' });
+    }
     const cfg = await store.get<CheckinDoc>(P.checkin(g.tenantId));
     const spot = spotFor(cfg, g.tenant, bid);
     const branchName = g.tenant.branches.find((x) => x.id === bid)?.name ?? g.tenant.name;

@@ -368,6 +368,7 @@ class _MembershipCard extends StatelessWidget {
       if (total > 0) fraction = daysLeft / total;
     }
     final live = daysLeft != null && daysLeft >= 0 && (status == 'ACTIVE' || status == 'ENDING_SOON' || status == 'FROZEN');
+    final fp = (m['gym'] as Map?)?['fingerprintOnly'] == true; // attendance only by fingerprint machine at this branch
     final gradient = live
         ? const LinearGradient(colors: [C.orangeSoft, C.orange, C.orangeDeep], begin: Alignment.topLeft, end: Alignment.bottomRight)
         : const LinearGradient(colors: [Color(0xFF3A4150), Color(0xFF232833)], begin: Alignment.topLeft, end: Alignment.bottomRight);
@@ -443,8 +444,8 @@ class _MembershipCard extends StatelessWidget {
                   child: FilledButton.icon(
                     style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: live ? C.orangeDeep : C.night, minimumSize: const Size.fromHeight(48)),
                     onPressed: () => live ? context.go('/qr') : context.push('/membership/${m['memberId']}'),
-                    icon: Icon(live ? Icons.qr_code_2_rounded : Icons.autorenew_rounded),
-                    label: Text(live ? context.t('Show check-in QR') : context.t('Renew membership')),
+                    icon: Icon(live ? (fp ? Icons.fingerprint_rounded : Icons.qr_code_2_rounded) : Icons.autorenew_rounded),
+                    label: Text(live ? (fp ? context.t('Check in via fingerprint machine at gate') : context.t('Show check-in QR')) : context.t('Renew membership')),
                   ),
                 ),
               ]),

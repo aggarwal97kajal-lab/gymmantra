@@ -297,4 +297,77 @@ describe('fingerprint machine', () => {
     const other = await h.ownerWithGym('Other Two');
     expect((await h.api.call('DELETE', '/gym/devices/CQZ123', { token: other.token })).status).toBe(404);
   });
+
+  const istNow = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+
+  it('member ID number links itself; fingerprint-only switches off QR check-in and app Present', async () => {
+    const { owner, mem, memberId } = await gymWithMember('FP Gym');
+    const desk = await addDesk(owner);
+    const m = (await h.store.get<any>(P.member(owner.gym.id, memberId)))!;
+    const pin = String(Number(/(\d+)$/.exec(m.memberCode)![1]));
+    // cannot turn on before a machine is online
+    expect((await h.api.put('/gym/fingerprint-mode', { on: true }, owner.token)).status).toBe(400);
+    await h.api.post('/gym/devices', { serial: 'ESSL900' }, owner.token);
+    await machine('/iclock/getrequest?SN=ESSL900');
+    expect((await h.api.put('/gym/fingerprint-mode', { on: true }, owner.token)).body).toEqual({ fingerprintOnly: true, fpGate: false });
+    // the member's own Member ID number → linked without the owner doing anything
+    await machine('/iclock/cdata?SN=ESSL900&table=ATTLOG', { method: 'POST', body: `${pin}\t${istNow()}\t0\t1\n` });
+    const d = (await h.api.get('/gym/devices?v=2', owner.token)).body;
+    expect([d.fingerprintOnly, d.machines[0].pins[0]?.id, d.machines[0].online]).toEqual([true, memberId, true]);
+    expect((await h.api.get('/attendance/today', owner.token)).body.events.some((x: any) => x.method === 'DEVICE')).toBe(true);
+    // the member's app knows; QR check-in refused with the message
+    const gyms = (await h.api.get('/me/gyms', mem.token)).body;
+    expect(gyms.memberships[0].gym.fingerprintOnly).toBe(true);
+    const setup = (await h.api.get('/gym/checkin-qr', owner.token)).body;
+    expect(setup.fingerprintOnly).toBe(true);
+    const r = await h.api.post('/me/checkin', { code: setup.text }, mem.token);
+    expect([r.status, r.body.code, r.body.message]).toEqual([403, 'FINGERPRINT_ONLY', 'Please check in via fingerprint machine at gate']);
+    // staff: no "Present" from the app
+    expect((await h.api.get('/me/staff-attendance', desk.token)).body.fingerprintOnly).toBe(true);
+    const p = await h.api.post('/me/staff-attendance', { lat: 28.6, lng: 77.2, accuracy: 5 }, desk.token);
+    expect([p.status, p.body.code]).toEqual([403, 'FINGERPRINT_ONLY']);
+    // off again: back to normal
+    await h.api.put('/gym/fingerprint-mode', { on: false }, owner.token);
+    expect((await h.api.get('/me/staff-attendance', desk.token)).body.fingerprintOnly).toBe(false);
+  });
+
+  it('Hikvision and web-link machines, a member who may not enter, and a pen-drive file', async () => {
+    const { owner, memberId } = await gymWithMember('Link Gym');
+    const desk = await addDesk(owner);
+    const m = (await h.store.get<any>(P.member(owner.gym.id, memberId)))!;
+    const pin = String(Number(/(\d+)$/.exec(m.memberCode)![1]));
+    const hik = (await h.api.post('/gym/devices', { kind: 'hik' }, owner.token)).body;
+    expect(hik.url).toMatch(/\/api\/v1\/punch\/[\w-]{18,}$/);
+    const path = new URL(hik.url).pathname;
+    // Hikvision multipart event
+    const fd = new FormData();
+    fd.append('event_log', JSON.stringify({ dateTime: new Date().toISOString(), eventType: 'AccessControllerEvent', AccessControllerEvent: { majorEventType: 5, subEventType: 75, employeeNoString: pin } }));
+    expect((await (await h.app.request(path, { method: 'POST', body: fd })).json() as any).punch).toBe(true);
+    // heartbeat: no punch
+    expect((await (await h.app.request(path, { method: 'POST', body: JSON.stringify({ eventType: 'heartBeat' }), headers: { 'content-type': 'application/json' } })).json() as any).punch).toBe(false);
+    expect((await h.app.request('/api/v1/punch/NOTAREALMACHINEKEY12345', { method: 'POST', body: '{}' })).status).toBe(404);
+    // a link machine: a member whose plan is over → desk told
+    const lk = (await h.api.post('/gym/devices', { kind: 'link' }, owner.token)).body;
+    const x = await h.signup('No Plan');
+    void x;
+    const noPlan = (await h.api.post('/members', { name: 'Expired Person', phone: '9811100099' }, owner.token)).body;
+    const pin2 = String(Number(/(\d+)$/.exec((await h.store.get<any>(P.member(owner.gym.id, noPlan.id)))!.memberCode)![1]));
+    await h.app.request(new URL(lk.url).pathname, { method: 'POST', body: JSON.stringify({ pin: pin2, time: istNow() }), headers: { 'content-type': 'application/json' } });
+    const notes = (await h.api.get('/me/notifications', owner.token)).body as any[];
+    expect(notes.some((n) => n.title === 'Fingerprint: entry stopped' && n.body.startsWith('Expired Person'))).toBe(true);
+    // pen-drive file: ZKTeco attlog lines over two days + a staff number
+    const file = (await h.api.post('/gym/devices', { kind: 'file' }, owner.token)).body;
+    await h.api.put(`/gym/devices/${file.serial}/pins/9`, { kind: 'staff', id: desk.id }, owner.token);
+    const y = addDays(todayIST(), -1);
+    const text = `  ${pin}\t${y} 07:10:00\t1\t0\n${pin}\t${y} 19:00:00\t1\t0\n9\t${y} 09:00:11\t1\t0\n777\t${y} 10:00:00\t1\t0\n`;
+    const dry = (await h.api.post(`/gym/devices/${file.serial}/import`, { text, dry: true }, owner.token)).body;
+    expect([dry.members, dry.staff, dry.unknown, dry.total]).toEqual([1, 1, 1, 3]);
+    const done = (await h.api.post(`/gym/devices/${file.serial}/import`, { text }, owner.token)).body;
+    expect(done.more).toBe(false);
+    await h.api.post(`/gym/devices/${file.serial}/import`, { text }, owner.token); // same file again: nothing new
+    const hist = (await h.api.get(`/attendance/today?day=${y}`, owner.token)).body.events.filter((e: any) => e.memberId === memberId);
+    expect(hist).toHaveLength(1);
+    const sd = (await h.api.get(`/me/staff-attendance?month=${y.slice(0, 7)}`, desk.token)).body;
+    expect(sd.present).toContain(y);
+  });
 });

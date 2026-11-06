@@ -100,6 +100,7 @@ export function checkinRoutes(app: App) {
       locationSet: spot.lat != null,
       radiusM: RADIUS_M,
       appCheckin: br?.appCheckin !== false,
+      fingerprintOnly: !!br?.fingerprintOnly,
     });
   });
 
@@ -164,6 +165,9 @@ export function checkinRoutes(app: App) {
     if (!tenant || !cfg || !hit) throw bad('This QR is old or not valid. Ask the gym for the new check-in QR');
     const spot = hit.spot;
     const branchName = tenant.branches.find((b) => b.id === hit.branchId)?.name ?? null;
+    if (tenant.branches.find((x) => x.id === branchOf(tenant, hit.branchId))?.fingerprintOnly) {
+      throw new HttpError(403, 'Please check in via fingerprint machine at gate', { code: 'FINGERPRINT_ONLY' });
+    }
     if (tenant.branches.find((x) => x.id === branchOf(tenant, hit.branchId))?.appCheckin === false) {
       const where = hit.branchId && hit.branchId !== tenant.branches[0]?.id ? branchName ?? tenant.name : tenant.name;
       throw new HttpError(403, `App check-in is off at ${where}. Please check in at the front desk.`, { code: 'CHECKIN_OFF' });

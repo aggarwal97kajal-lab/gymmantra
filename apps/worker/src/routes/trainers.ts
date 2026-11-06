@@ -201,7 +201,7 @@ export function trainerRoutes(app: App) {
     ]);
     return c.json({
       gyms: gyms
-        .map((id, i) => (tenants[i] && profiles[i] ? { id, ...(() => { const f = gymFace(tenants[i]!, myBranch[i]); return { name: f.name, branchName: f.branchName, code: f.code, address: f.address, logoUrl: f.logoUrl }; })(), phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i], notices: notices[i], ...(() => { const tm = testimonialsFor(tenants[i]!, id, myBranch[i]); return { testimonials: tm.items, rating: { avg: tm.avg, count: tm.count } }; })() } : null))
+        .map((id, i) => (tenants[i] && profiles[i] ? { id, ...(() => { const f = gymFace(tenants[i]!, myBranch[i]); return { name: f.name, branchName: f.branchName, code: f.code, address: f.address, logoUrl: f.logoUrl, fingerprintOnly: f.fingerprintOnly }; })(), phone: tenants[i]!.phone, profile: trainerView(profiles[i]!, u), offers: offers[i], notices: notices[i], ...(() => { const tm = testimonialsFor(tenants[i]!, id, myBranch[i]); return { testimonials: tm.items, rating: { avg: tm.avg, count: tm.count } }; })() } : null))
         .filter(Boolean),
       pending: pending.map((id, i) => (pendingTenants[i] ? { id, name: pendingTenants[i]!.name } : null)).filter(Boolean),
     });

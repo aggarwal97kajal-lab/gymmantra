@@ -72,7 +72,7 @@ export function meRoutes(app: App) {
           memberCode: e.memberCode,
           gym: (() => {
             const f = gymFace(tn, e.branchId);
-            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: f.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED', appCheckin: f.appCheckin };
+            return { id: tid, name: f.name, gymName: f.gymName, branchName: f.branchName, code: f.code, logoUrl: f.logoUrl, phone: tn.phone, whatsappNumber: tn.whatsappNumber, address: f.address, closed: tn.status === 'CLOSED', appCheckin: f.appCheckin, fingerprintOnly: f.fingerprintOnly };
           })(),
           ...(() => {
             const bid = branchOf(tn, e.branchId);

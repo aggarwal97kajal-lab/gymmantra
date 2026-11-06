@@ -102,12 +102,12 @@ class TrainerHomeScreen extends ConsumerWidget {
                     Panel(
                       onTap: () => context.push('/t/my-attendance'),
                       child: Row(children: [
-                        const IconTile(Icons.event_available_rounded, color: C.ok),
+                        IconTile(g['fingerprintOnly'] == true ? Icons.fingerprint_rounded : Icons.event_available_rounded, color: C.ok),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                             Text(context.t('My attendance'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                            Muted(context.t('Mark Present at the gym every day'), size: 12),
+                            Muted(g['fingerprintOnly'] == true ? context.t('Put your finger on the fingerprint machine at the gym') : context.t('Mark Present at the gym every day'), size: 12),
                           ]),
                         ),
                         Icon(Icons.chevron_right_rounded, color: context.c.mut),
