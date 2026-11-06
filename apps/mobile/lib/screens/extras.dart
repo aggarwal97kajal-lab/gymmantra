@@ -20,8 +20,6 @@ final salaryProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, 
 final mySalaryProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/me/salary'));
 final trainerRatingsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/trainer-ratings'));
 final gymRatingsProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym-ratings'));
-final salaryBranchesProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, month) => Api.instance.cachedGet('/salary/branches?month=$month'));
-final staffDaysBranchesProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/staff-attendance/branches'));
 final devicesProvider = StreamProvider.autoDispose<dynamic>((ref) => branchGet(ref, '/gym/devices'));
 final myTrainerRatingProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.instance.cachedGet('/trainer/rating'));
 
@@ -733,8 +731,7 @@ String _shiftMonth(String ym, int by) {
   return '${d.year}-${d.month.toString().padLeft(2, '0')}';
 }
 
-/// Owner with several branches: one card per branch (each branch has its own staff). Tapping a card
-/// opens that branch (the app switches to it, like "Switch branch").
+/// Owner with several branches (staff stay in one branch).
 bool hasBranches(WidgetRef ref) => branchesOf(ref.watch(gymProvider).valueOrNull as Map?).length > 1 && !ref.watch(sessionProvider).isStaffDesk;
 
 String currentBranchName(WidgetRef ref) {
@@ -744,10 +741,7 @@ String currentBranchName(WidgetRef ref) {
   return (list.firstWhere((b) => b['id'] == id, orElse: () => list.isEmpty ? const {} : list.first)['name'] as String?) ?? '';
 }
 
-void openBranch(WidgetRef ref, String id) {
-  if (Api.instance.branchId != id) ref.read(sessionProvider).setBranch(id);
-}
-
+/// One card per branch (gym reviews, trainer ratings).
 class BranchCards extends StatelessWidget {
   const BranchCards({super.key, required this.items, required this.onPick, this.note});
   final List<({String id, String name, String sub, String? right, Color? rightColor})> items;
@@ -778,18 +772,6 @@ class BranchCards extends StatelessWidget {
       ]);
 }
 
-/// "← All branches" + the branch's name, above one branch's page.
-class BranchBack extends ConsumerWidget {
-  const BranchBack({super.key, required this.onBack});
-  final VoidCallback onBack;
-  @override
-  Widget build(BuildContext context, WidgetRef ref) => Row(children: [
-        TextButton.icon(onPressed: onBack, icon: const Icon(Icons.arrow_back_rounded, size: 18), label: Text(context.t('All branches'))),
-        const Spacer(),
-        Flexible(child: Text(currentBranchName(ref), maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800))),
-      ]);
-}
-
 class SalaryScreen extends ConsumerStatefulWidget {
   const SalaryScreen({super.key});
   @override
@@ -798,7 +780,6 @@ class SalaryScreen extends ConsumerStatefulWidget {
 
 class _SalaryState extends ConsumerState<SalaryScreen> {
   String month = _thisMonth;
-  bool picked = false;
   Widget monthBar() => Row(children: [
         IconButton(onPressed: () => setState(() => month = _shiftMonth(month, -1)), icon: const Icon(Icons.chevron_left_rounded)),
         Expanded(child: Text(_monthLabel(month), textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16))),
@@ -806,41 +787,6 @@ class _SalaryState extends ConsumerState<SalaryScreen> {
       ]);
   @override
   Widget build(BuildContext context) {
-    // Several branches: first one card per branch, then that branch's staff.
-    if (hasBranches(ref) && !picked) {
-      final bv = ref.watch(salaryBranchesProvider(month));
-      return Scaffold(
-        appBar: AppBar(title: Text(context.t('Staff salary'))),
-        body: RefreshIndicator(
-          color: context.c.primary,
-          onRefresh: () async => ref.invalidate(salaryBranchesProvider(month)),
-          child: AsyncBody(
-            value: bv,
-            onRetry: () => ref.invalidate(salaryBranchesProvider(month)),
-            builder: (d) => ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-              monthBar(),
-              BranchCards(
-                items: [
-                  for (final b in ((d['branches'] as List?) ?? const []).cast<Map>())
-                    (
-                      id: b['id'] as String,
-                      name: '${b['name']}',
-                      sub: context.t('{n} people · {total} · paid {paid}', {'n': b['people'] ?? 0, 'total': rupees(b['total'] as num?), 'paid': rupees(b['paid'] as num?)}),
-                      right: ((b['due'] as num?) ?? 0) > 0 ? context.t('{amt} due', {'amt': rupees(b['due'] as num?)}) : null,
-                      rightColor: C.red,
-                    ),
-                ],
-                onPick: (id) {
-                  openBranch(ref, id);
-                  setState(() => picked = true);
-                },
-                note: context.t('Each branch has its own staff. Open a branch to pay its staff.'),
-              ),
-            ]),
-          ),
-        ),
-      );
-    }
     final v = ref.watch(salaryProvider(month));
     return Scaffold(
       appBar: AppBar(title: Text(context.t('Staff salary'))),
@@ -858,11 +804,7 @@ class _SalaryState extends ConsumerState<SalaryScreen> {
           builder: (d) {
             final rows = ((d['rows'] as List?) ?? const []).cast<Map>();
             return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 96), children: [
-              if (hasBranches(ref))
-                BranchBack(onBack: () {
-                  ref.invalidate(salaryBranchesProvider(month));
-                  setState(() => picked = false);
-                }),
+              if (hasBranches(ref)) Padding(padding: const EdgeInsets.only(bottom: 2), child: Muted('📍 ${currentBranchName(ref)} · ${context.t('change branch from Home')}', size: 12.5, align: TextAlign.center)),
               monthBar(),
               Row(children: [
                 Expanded(child: StatTile(icon: Icons.payments_rounded, value: rupees(d['total'] as num?), label: context.t('Total salary'))),

@@ -93,29 +93,6 @@ export function staffDayRoutes(app: App) {
     return c.json({ ok: true, today, present: presentDays(out) }, 201);
   });
 
-  /** Owner: one card per branch (staff count, present today) — each branch has its own staff. */
-  app.get('/api/v1/staff-attendance/branches', async (c) => {
-    await authenticate(c);
-    const g = await gymOf(c, 'OWNER');
-    const { store } = c.var.deps;
-    const [staff, trainers] = await Promise.all([
-      store.query<{ role: Role; branchIds: string[]; active: boolean }>(P.staffCol(g.tenantId), [['active', true]]),
-      store.query<TrainerDoc>(P.trainers(g.tenantId), [['active', true]]),
-    ]);
-    const first = g.tenant.branches[0]?.id ?? '';
-    const people: { id: string; branchId: string }[] = [];
-    for (const s of staff) if (s.data.role === 'FRONT_DESK') people.push({ id: s.id, branchId: s.data.branchIds[0] ?? first });
-    for (const t of trainers) if (!t.data.gone) people.push({ id: t.data.userId, branchId: t.data.branchId ?? first });
-    const today = todayIST();
-    const docs = await store.getMany<StaffDaysDoc>(people.map((p) => path(g.tenantId, p.id, today.slice(0, 7))));
-    return c.json(
-      g.tenant.branches.map((b, i) => {
-        const mine = people.map((p, k) => ({ ...p, d: docs[k] })).filter((p) => p.branchId === b.id);
-        return { id: b.id, name: i === 0 ? g.tenant.name : b.name, staff: mine.length, presentToday: mine.filter((p) => p.d?.days?.[today] && !p.d.days[today].absent).length };
-      }),
-    );
-  });
-
   /** Owner: everyone's month at the branch being looked at (front desk + trainers). */
   app.get('/api/v1/staff-attendance', async (c) => {
     await authenticate(c);

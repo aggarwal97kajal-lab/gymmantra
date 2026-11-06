@@ -16,7 +16,7 @@ import 'auth.dart' show PhoneField;
 import 'branch.dart' show branchesOf;
 import 'reports_kit.dart' show saveAndOffer;
 import 'person.dart';
-import 'extras.dart' show BranchBack, BranchCards, hasBranches, openBranch, staffDaysBranchesProvider;
+import 'extras.dart' show currentBranchName, hasBranches;
 
 // Boards 50–62: staff, attendance, staff attendance, import, gate, transfer gym.
 
@@ -1074,43 +1074,8 @@ class _StaffAttendanceState extends ConsumerState<StaffAttendanceScreen> {
     Share.share(lines.join('\n'));
   }
 
-  bool picked = false;
-
   @override
   Widget build(BuildContext context) {
-    // Several branches: first one card per branch (each has its own staff), then that branch.
-    if (hasBranches(ref) && !picked) {
-      final bv = ref.watch(staffDaysBranchesProvider);
-      return Scaffold(
-        appBar: AppBar(title: Text(context.t('Staff attendance'))),
-        body: AsyncBody(
-          value: bv,
-          onRetry: () => ref.invalidate(staffDaysBranchesProvider),
-          builder: (d) => ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-            BranchCards(
-              items: [
-                for (final b in (d as List).cast<Map>())
-                  (
-                    id: b['id'] as String,
-                    name: '${b['name']}',
-                    sub: context.t('{n} staff & trainers', {'n': b['staff'] ?? 0}),
-                    right: context.t('{p} present today', {'p': b['presentToday'] ?? 0}),
-                    rightColor: C.ok,
-                  ),
-              ],
-              onPick: (id) {
-                openBranch(ref, id);
-                setState(() {
-                  picked = true;
-                  data = null;
-                });
-                load();
-              },
-            ),
-          ]),
-        ),
-      );
-    }
     final rows = ((data?['rows'] as List?) ?? const []).cast<Map>();
     final soFar = (data?['daysSoFar'] as int?) ?? 0;
     return Scaffold(
@@ -1119,11 +1084,8 @@ class _StaffAttendanceState extends ConsumerState<StaffAttendanceScreen> {
         IconButton(onPressed: data == null ? null : share, icon: const Icon(Icons.share_rounded)),
       ]),
       body: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-        if (hasBranches(ref))
-          BranchBack(onBack: () {
-            ref.invalidate(staffDaysBranchesProvider);
-            setState(() => picked = false);
-          }),
+        // Staff of the branch open on Home (each branch has its own staff).
+        if (hasBranches(ref)) Muted('📍 ${currentBranchName(ref)} · ${context.t('change branch from Home')}', size: 12.5, align: TextAlign.center),
         Row(children: [
           IconButton(onPressed: () => setState(() {
                 month = DateTime(month.year, month.month - 1);

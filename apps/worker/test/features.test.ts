@@ -253,17 +253,16 @@ describe('money report (board 94)', () => {
   });
 });
 
-describe('branch cards for salary and staff attendance', () => {
-  it('each branch shows its own staff', async () => {
+describe('salary and staff attendance follow the branch open on Home', () => {
+  it('each branch shows only its own staff', async () => {
     const owner = await h.ownerWithGym('Cards Gym');
     const br = (await h.api.post('/gym/branches', { name: 'Kankarbagh' }, owner.token)).body;
     const desk = await addDesk(owner);
     await h.api.put(`/salary/${desk.id}`, { amount: 9000, mode: 'MONTH', workDays: 26, freeLeaves: 2, cutAbsent: false }, owner.token);
-    const s = (await h.api.get('/salary/branches', owner.token)).body;
-    expect(s.branches.map((b: any) => [b.name, b.people, b.total])).toEqual([['Cards Gym', 1, 9000], ['Kankarbagh', 0, 0]]);
-    const a = (await h.api.get('/staff-attendance/branches', owner.token)).body;
-    expect(a.map((b: any) => [b.id, b.staff])).toEqual([[owner.gym.branches?.[0]?.id ?? a[0].id, 1], [br.id, 0]]);
-    expect((await h.api.get('/salary/branches', desk.token)).status).toBe(403);
+    expect((await h.api.get('/salary', owner.token)).body.rows.map((r: any) => r.id)).toEqual([desk.id]);
+    expect((await h.api.get('/salary', owner.token, { 'x-branch-id': br.id })).body.rows).toEqual([]);
+    expect((await h.api.get('/staff-attendance', owner.token)).body.rows).toHaveLength(1);
+    expect((await h.api.get('/staff-attendance', owner.token, { 'x-branch-id': br.id })).body.rows).toEqual([]);
   });
 });
 
