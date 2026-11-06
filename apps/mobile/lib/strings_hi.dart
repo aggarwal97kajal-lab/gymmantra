@@ -1478,7 +1478,6 @@ const hindi = <String, String>{
   "Secure my account": "मेरा अकाउंट सुरक्षित करें",
   "Log out everywhere else?": "बाकी सब जगह से लॉग-आउट करें?",
   "Every other phone and browser will be logged out. This phone stays logged in.": "बाकी सभी फ़ोन और ब्राउज़र लॉग-आउट हो जाएँगे। यह फ़ोन लॉग-इन रहेगा।",
-  "Log out": "लॉग-आउट",
   "Logged out everywhere else": "बाकी सब जगह से लॉग-आउट हो गया",
   "Log out {d}?": "{d} को लॉग-आउट करें?",
   "The app on that phone closes at once and asks for the password again.": "उस फ़ोन पर ऐप तुरंत बंद होगा और फिर से पासवर्ड माँगेगा।",
@@ -1491,5 +1490,4 @@ const hindi = <String, String>{
   "No need to change your password.": "पासवर्ड बदलने की ज़रूरत नहीं।",
   "A login was not me": "कोई लॉग-इन मेरा नहीं था",
   "Logs out every other phone, then asks you to make a new password.": "बाकी सभी फ़ोन लॉग-आउट करता है, फिर नया पासवर्ड बनवाता है।",
-  "Cancel": "रद्द करें",
 };

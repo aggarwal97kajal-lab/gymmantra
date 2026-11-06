@@ -15,7 +15,7 @@ import 'screens/person.dart' show BusyCover;
 import 'admin_extra.dart';
 import 'screens/help.dart' show TicketScreen, TicketTile, ticketStatuses, ticketStatusLabel, ticketStatusColor, ticketStatusOf;
 import 'screens/home.dart' show openUrl;
-import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, NotificationBell, ProfileDetailsScreen, ChangePasswordScreen, DevicesScreen;
+import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, NotificationBell, ProfileDetailsScreen, ChangePasswordScreen, LoginDevicesScreen;
 import 'session.dart';
 import 'theme.dart';
 import 'ui.dart';
@@ -98,7 +98,7 @@ GoRouter adminRouter(Session session, Listenable splash, Widget splashScreen, bo
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
         GoRoute(path: '/profile/details', builder: (_, __) => const ProfileDetailsScreen()),
         GoRoute(path: '/profile/password', builder: (_, __) => const ChangePasswordScreen()),
-        GoRoute(path: '/profile/devices', builder: (_, __) => const DevicesScreen()),
+        GoRoute(path: '/profile/devices', builder: (_, __) => const LoginDevicesScreen()),
       ],
     );
 

@@ -202,7 +202,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/support', builder: (_, __) => const HelpScreen()),
         GoRoute(path: '/profile/details', builder: (_, __) => const ProfileDetailsScreen()),
         GoRoute(path: '/profile/password', builder: (_, __) => const ChangePasswordScreen()),
-        GoRoute(path: '/profile/devices', builder: (_, __) => const DevicesScreen()),
+        GoRoute(path: '/profile/devices', builder: (_, __) => const LoginDevicesScreen()),
         GoRoute(path: '/trainer-detail', builder: (_, s) => TrainerDetailScreen(trainer: (s.extra as Map)['trainer'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/my-pt', builder: (_, s) => MyPtScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String)),
         GoRoute(path: '/pt-client', builder: (_, s) => PtClientScreen(pt: (s.extra as Map)['pt'] as Map, tenantId: (s.extra as Map)['tenantId'] as String, canMark: (s.extra as Map)['canMark'] == true)),
@@ -250,7 +250,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/o/salary/setup', builder: (_, s) => SalarySetupScreen(person: s.extra as Map)),
         GoRoute(path: '/o/salary/person', builder: (_, s) => SalaryPersonScreen(person: s.extra as Map)),
         GoRoute(path: '/o/ratings', builder: (_, __) => const RatingsScreen()),
-        GoRoute(path: '/o/devices', builder: (_, __) => const DevicesScreen()),
+        GoRoute(path: '/o/devices', builder: (_, __) => const LoginDevicesScreen()),
         GoRoute(path: '/my-salary', builder: (_, __) => const MySalaryScreen()),
         GoRoute(path: '/rate', builder: (_, s) => RateScreen(args: s.extra as Map)),
         // ---- choosing a role ----

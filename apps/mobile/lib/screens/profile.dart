@@ -859,13 +859,13 @@ class _PhotoViewState extends State<PhotoViewScreen> {
 // ============================================================ logged-in devices (boards 96-97)
 
 /// Where this account is logged in; log one phone out, or everywhere else; "It was not me".
-class DevicesScreen extends ConsumerStatefulWidget {
-  const DevicesScreen({super.key});
+class LoginDevicesScreen extends ConsumerStatefulWidget {
+  const LoginDevicesScreen({super.key});
   @override
-  ConsumerState<DevicesScreen> createState() => _DevicesState();
+  ConsumerState<LoginDevicesScreen> createState() => _LoginDevicesState();
 }
 
-class _DevicesState extends ConsumerState<DevicesScreen> {
+class _LoginDevicesState extends ConsumerState<LoginDevicesScreen> {
   List<Map>? rows;
   String? error;
   bool busy = false;
