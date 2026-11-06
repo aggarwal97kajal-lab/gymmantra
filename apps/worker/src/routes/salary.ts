@@ -63,7 +63,7 @@ export function slip(cfg: SalaryCfg, m: SalaryMonth | null, days: StaffDaysDoc |
   return { month, present, absent, expected, base, cut, otherCut, bonus, advance, total, paid, due: Math.max(0, total - paid), adj, pays: m?.pays ?? [], running: elapsed < inMonth };
 }
 
-async function people(c: C, tenantId: string, tenant: TenantDoc, branchId: string) {
+export async function people(c: C, tenantId: string, tenant: TenantDoc, branchId: string) {
   const { store } = c.var.deps;
   const [staff, trainers, cfgs] = await Promise.all([
     store.query<{ role: Role; branchIds: string[]; active: boolean }>(P.staffCol(tenantId), [['active', true]]),

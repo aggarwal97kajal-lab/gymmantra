@@ -9,6 +9,7 @@ import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show PhoneField;
 import 'branch.dart' show showAlreadyMember;
+import 'extras.dart' show TestimonialsSlider;
 
 class JoinScreen extends ConsumerStatefulWidget {
   const JoinScreen({super.key});
@@ -81,6 +82,11 @@ class _JoinState extends ConsumerState<JoinScreen> {
                 Padding(padding: const EdgeInsets.only(top: 6), child: Muted(context.t('Each branch has its own code. Check this is your branch.'), size: 11.5)),
             ]),
           ),
+          // That branch's rating and the reviews its owner chose (board 93).
+          if (gym!['testimonials'] is Map) ...[
+            const SizedBox(height: 12),
+            TestimonialsSlider(items: (((gym!['testimonials'] as Map)['items'] as List?) ?? const []).cast<Map>(), avg: (gym!['testimonials'] as Map)['avg'] as num?, count: (gym!['testimonials'] as Map)['count'] as int?),
+          ],
           if (gym!['already'] is Map) ...[
             const SizedBox(height: 12),
             Builder(builder: (context) {

@@ -22,6 +22,7 @@ import 'person.dart';
 import 'member_tools.dart';
 import 'dues.dart';
 import 'banner.dart';
+import 'extras.dart' show StaffTestimonials;
 
 // ============================================================ shell
 
@@ -181,6 +182,7 @@ class OwnerHomeScreen extends ConsumerWidget {
                   const SizedBox(height: 14),
                   _GymCodeCard(name: (gym['name'] as String?) ?? '', code: (gym['gymCode'] as String?) ?? ''),
                   const SizedBox(height: 14),
+                  if (s.isStaffDesk && s.myGym?['id'] != null) StaffTestimonials(tenantId: s.myGym!['id'] as String),
                   SectionTitle(context.t('Quick actions')),
                   GridView.count(
                     crossAxisCount: 2,
@@ -1327,7 +1329,6 @@ class OwnerMoreScreen extends ConsumerWidget {
             if (gym['role'] == 'OWNER') row(Icons.fact_check_rounded, context.t('Attendance'), () => context.push('/o/attendance-hub'), sub: context.t('Members and staff · Excel')),
             if (gym['role'] == 'OWNER') row(Icons.payments_rounded, context.t('Staff salary'), () => context.push('/o/salary'), sub: context.t('Salary, advance, slips')),
             if (gym['role'] == 'OWNER') row(Icons.star_rate_rounded, context.t('Ratings & reviews'), () => context.push('/o/ratings'), sub: context.t('Trainer ratings · gym reviews on dashboards')),
-            if (gym['role'] == 'OWNER') row(Icons.fingerprint_rounded, context.t('Fingerprint machine'), () => context.push('/o/devices'), sub: context.t('eSSL / ZKTeco attendance')),
             if (s.can('memberEdit')) row(Icons.upload_file_rounded, context.t('Import members'), () => context.push('/o/import'), sub: context.t('From an Excel / CSV file')),
             if (s.can('checkin')) row(Icons.qr_code_2_rounded, context.t('Gym QR'), () => context.push('/o/gym-qr'), sub: context.t('Join QR to share · Check-in QR for the gym')),
             if (s.can('checkin')) row(Icons.door_sliding_rounded, context.t('Gate'), () => context.push('/o/gate'), sub: context.t('Opens after a check-in')),
@@ -1343,7 +1344,6 @@ class OwnerMoreScreen extends ConsumerWidget {
               row(Icons.settings_rounded, context.t('Gym settings · WhatsApp'), () => context.push('/o/settings'), sub: context.t('Name, numbers, branches, join poster')),
               row(Icons.swap_horiz_rounded, context.t('Transfer gym'), () => context.push('/o/transfer-gym'), sub: context.t('Give this gym to a new owner')),
             ],
-            row(Icons.language_rounded, context.t('Full panel on the website'), () => openUrl(Api.instance.base)),
           ]),
         ),
         const SizedBox(height: 12),

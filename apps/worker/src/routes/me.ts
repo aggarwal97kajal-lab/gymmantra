@@ -14,6 +14,7 @@ import { publicUser } from './auth';
 import type { PlanDoc } from './members';
 import type { ScanLog } from './attendance';
 import { offersFor } from './trainers';
+import { testimonialsFor } from './ratings';
 import { noticeNotes, noticesFor } from './notices';
 import { replyTicket, TICKET_TOPICS, Ticket, getTicket, ticketFlags } from './tickets';
 
@@ -95,7 +96,7 @@ export function meRoutes(app: App) {
           offers: offers[i],
           notices: notices[i],
           locker: memberDocs[i]?.locker ?? null,
-          testimonials: { avg: tn.ratingSum?.count ? Math.round((tn.ratingSum.total / tn.ratingSum.count) * 10) / 10 : null, count: tn.ratingSum?.count ?? 0, items: (tn.testimonials ?? []).map(({ name, stars, text }) => ({ name, stars, text })) },
+          testimonials: testimonialsFor(tn, tid, e.branchId),
         };
       })
       .filter(Boolean);
@@ -130,6 +131,7 @@ export function meRoutes(app: App) {
       multiBranch: t.branches.length > 1,
       already,
       branches: t.branches.map((b) => ({ id: b.id, name: b.name, address: b.address })),
+      testimonials: testimonialsFor(t, ref.tenantId, bid, code), // the code's branch (board 93)
     });
   });
 

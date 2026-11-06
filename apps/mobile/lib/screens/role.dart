@@ -12,6 +12,7 @@ import '../session.dart';
 import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show LabeledField, LangSwitch, PhoneField;
+import 'extras.dart' show TestimonialsSlider;
 import 'banner.dart' show LogoPickerRow, pickLogo;
 import 'billing.dart' show Address, AddressFields;
 
@@ -320,6 +321,10 @@ class _TrainerJoinState extends ConsumerState<TrainerJoinScreen> {
                 const Icon(Icons.check_circle_rounded, color: C.ok),
               ]),
             ),
+            if (gym!['testimonials'] is Map) ...[
+              const SizedBox(height: 12),
+              TestimonialsSlider(items: (((gym!['testimonials'] as Map)['items'] as List?) ?? const []).cast<Map>(), avg: (gym!['testimonials'] as Map)['avg'] as num?, count: (gym!['testimonials'] as Map)['count'] as int?),
+            ],
             const SizedBox(height: 16),
             Muted(context.t('What do you teach? (choose one or more)'), size: 13),
             const SizedBox(height: 8),

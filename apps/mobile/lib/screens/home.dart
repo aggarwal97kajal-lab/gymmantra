@@ -318,10 +318,10 @@ class _Stat extends StatelessWidget {
           Row(children: [
             Icon(icon, size: 20, color: color ?? context.c.primary),
             const SizedBox(width: 8),
-            Flexible(child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.1))),
+            Expanded(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, maxLines: 1, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, height: 1.1)))),
           ]),
           const SizedBox(height: 4),
-          Muted(label, size: 12),
+          Muted(label, size: 12, maxLines: 1),
         ]),
       );
 }

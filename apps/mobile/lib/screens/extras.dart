@@ -8,6 +8,7 @@ import '../theme.dart';
 import '../ui.dart';
 import 'auth.dart' show LabeledField, PhoneField;
 import 'home.dart' show openUrl, waLink;
+import '../photo.dart' show Avatar;
 
 // Nov 6: enquiry follow-up, lockers, staff salary, ratings + testimonials, fingerprint machines.
 
@@ -1147,7 +1148,8 @@ class _RateState extends ConsumerState<RateScreen> {
   }
 }
 
-/// Testimonials slider (member and trainer dashboards).
+/// Testimonials slider (member, trainer and staff dashboards): the reviewer's photo, stars and words.
+/// Long words are cut on the card; "Read full" opens the whole review.
 class TestimonialsSlider extends StatelessWidget {
   const TestimonialsSlider({super.key, required this.items, this.avg, this.count});
   final List<Map> items;
@@ -1157,27 +1159,81 @@ class TestimonialsSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SectionTitle(context.t('What members say'), trailing: avg == null ? null : Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star_rounded, color: C.gold, size: 18), Text(' $avg · $count', style: const TextStyle(fontWeight: FontWeight.w700))])),
+      SectionTitle(context.t('What members say'), trailing: avg == null ? null : Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.star_rounded, color: C.gold, size: 18), Text(' $avg · ${count ?? 0}', style: const TextStyle(fontWeight: FontWeight.w700))])),
       SizedBox(
-        height: 128,
-        child: PageView(controller: PageController(viewportFraction: 0.88), padEnds: false, children: [
+        height: 158,
+        child: PageView(controller: PageController(viewportFraction: items.length == 1 ? 1 : 0.88), padEnds: false, children: [
           for (final t in items)
             Padding(
-              padding: const EdgeInsets.only(right: 10),
+              padding: EdgeInsets.only(right: items.length == 1 ? 0 : 10),
               child: Panel(
-                padding: const EdgeInsets.all(14),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Stars((t['stars'] as num?) ?? 5, size: 15),
-                  const SizedBox(height: 6),
-                  Expanded(child: Text('"${t['text']}"', maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(height: 1.3))),
-                  Text('— ${t['name']}', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
-                ]),
+                padding: const EdgeInsets.all(13),
+                onTap: () => _showReview(context, t),
+                child: LayoutBuilder(builder: (context, box) {
+                  final text = '"${t['text']}"';
+                  const style = TextStyle(height: 1.3, fontSize: 13.5);
+                  final tp = TextPainter(text: TextSpan(text: text, style: style), maxLines: 3, textDirection: TextDirection.ltr)..layout(maxWidth: box.maxWidth);
+                  return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Avatar(name: '${t['name']}', url: t['photoUrl'] as String?, size: 34),
+                      const SizedBox(width: 9),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('${t['name']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                          Stars((t['stars'] as num?) ?? 5, size: 14),
+                        ]),
+                      ),
+                    ]),
+                    const SizedBox(height: 7),
+                    Expanded(child: Text(text, maxLines: 3, overflow: TextOverflow.ellipsis, style: style)),
+                    if (tp.didExceedMaxLines) Text('${context.t('Read full')} ›', style: TextStyle(color: context.c.primary, fontWeight: FontWeight.w700, fontSize: 12.5)),
+                  ]);
+                }),
               ),
             ),
         ]),
       ),
       const SizedBox(height: 12),
     ]);
+  }
+}
+
+void _showReview(BuildContext context, Map t) => showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Avatar(name: '${t['name']}', url: t['photoUrl'] as String?, size: 52),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${t['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+                  Stars((t['stars'] as num?) ?? 5, size: 18),
+                ]),
+              ),
+            ]),
+            const SizedBox(height: 14),
+            Text('"${t['text']}"', style: const TextStyle(fontSize: 15.5, height: 1.45)),
+          ]),
+        ),
+      ),
+    );
+
+/// Staff home: the branch's rating and the testimonials the owner chose.
+final _staffTestimonialsProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, tenantId) => branchGet(ref, '/gyms/$tenantId/testimonials'));
+
+class StaffTestimonials extends ConsumerWidget {
+  const StaffTestimonials({super.key, required this.tenantId});
+  final String tenantId;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final d = ref.watch(_staffTestimonialsProvider(tenantId)).valueOrNull as Map?;
+    if (d == null) return const SizedBox.shrink();
+    return TestimonialsSlider(items: ((d['items'] as List?) ?? const []).cast<Map>(), avg: d['avg'] as num?, count: d['count'] as int?);
   }
 }
 
@@ -1253,35 +1309,17 @@ class TrainerGymExtras extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final r = ref.watch(myTrainerRatingProvider).valueOrNull as Map?;
+    final gr = (g['rating'] as Map?) ?? const {};
+    // Same tiles as the three above (same size), side by side.
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      const SizedBox(height: 10),
+      const SizedBox(height: 9),
       Row(children: [
-        Expanded(
-          child: Panel(
-            padding: const EdgeInsets.all(13),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [const Icon(Icons.star_rounded, color: C.gold, size: 20), const SizedBox(width: 4), Text(r?['avg'] == null ? '—' : '${r!['avg']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))]),
-              Muted(context.t('My rating · {n}', {'n': r?['count'] ?? 0}), size: 11.5),
-              if (((r?['tags'] as List?) ?? const []).isNotEmpty) Muted(((r!['tags'] as List).cast<Map>().take(2).map((t) => '${context.t(t['tag'] as String)} ${t['n']}').join(' · ')), size: 11, maxLines: 2),
-            ]),
-          ),
-        ),
+        Expanded(child: StatTile(icon: Icons.star_rounded, color: C.gold, value: r?['avg'] == null ? '—' : '${r!['avg']}', label: context.t('My rating · {n}', {'n': r?['count'] ?? 0}))),
         const SizedBox(width: 9),
-        Expanded(
-          child: Panel(
-            padding: const EdgeInsets.all(13),
-            onTap: () => context.push('/my-salary'),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Icon(Icons.payments_rounded, color: C.ok, size: 20),
-              const SizedBox(height: 4),
-              Text(context.t('My salary'), style: const TextStyle(fontWeight: FontWeight.w800)),
-              Muted(context.t('Monthly slips'), size: 11.5),
-            ]),
-          ),
-        ),
+        Expanded(child: StatTile(icon: Icons.payments_rounded, color: C.ok, value: context.t('Salary'), label: '${context.t('My slips')} ›', onTap: () => context.push('/my-salary'))),
       ]),
       const SizedBox(height: 12),
-      TestimonialsSlider(items: ((g['testimonials'] as List?) ?? const []).cast<Map>()),
+      TestimonialsSlider(items: ((g['testimonials'] as List?) ?? const []).cast<Map>(), avg: gr['avg'] as num?, count: gr['count'] as int?),
     ]);
   }
 }
@@ -1308,10 +1346,18 @@ class _RatingsState extends ConsumerState<RatingsScreen> {
       );
 }
 
-class _GymReviews extends ConsumerWidget {
+/// Gym reviews, branch wise (board 93): one card per branch; open it for that branch's reviews.
+/// A review shown on dashboards is seen only by the people of its own branch.
+class _GymReviews extends ConsumerStatefulWidget {
   const _GymReviews();
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_GymReviews> createState() => _GymReviewsState();
+}
+
+class _GymReviewsState extends ConsumerState<_GymReviews> {
+  String? branch;
+  @override
+  Widget build(BuildContext context) {
     final v = ref.watch(gymRatingsProvider);
     return RefreshIndicator(
       color: context.c.primary,
@@ -1320,19 +1366,52 @@ class _GymReviews extends ConsumerWidget {
         value: v,
         onRetry: () => ref.invalidate(gymRatingsProvider),
         builder: (d) {
-          final rows = ((d['rows'] as List?) ?? const []).cast<Map>();
-          if (rows.isEmpty) return _empty(context, Icons.reviews_outlined, context.t('No reviews yet'), context.t('Members can rate the gym from their home page.'));
+          final all = ((d['rows'] as List?) ?? const []).cast<Map>();
+          final branches = ((d['branches'] as List?) ?? const []).cast<Map>();
+          // One branch: straight to its reviews.
+          if (branches.length > 1 && branch == null) {
+            return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+              for (final b in branches) ...[
+                Panel(
+                  onTap: () => setState(() => branch = b['id'] as String),
+                  child: Row(children: [
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${b['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                        const SizedBox(height: 2),
+                        Muted(context.t('{n} ratings · {s} on dashboards', {'n': b['count'] ?? 0, 's': b['shown'] ?? 0}), size: 12),
+                      ]),
+                    ),
+                    const Icon(Icons.star_rounded, color: C.gold, size: 20),
+                    Text(' ${b['avg'] ?? '—'}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+                    Icon(Icons.chevron_right_rounded, color: context.c.mut),
+                  ]),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Muted(context.t('Reviews you show on dashboards are seen only by members, trainers and staff of that branch.'), size: 12),
+            ]);
+          }
+          final b = branches.length > 1 ? branches.firstWhere((x) => x['id'] == branch, orElse: () => branches.first) : (branches.isEmpty ? d as Map : branches.first);
+          final rows = branches.length > 1 ? all.where((r) => r['branchId'] == b['id']).toList() : all;
           return ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
+            if (branches.length > 1)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(onPressed: () => setState(() => branch = null), icon: const Icon(Icons.arrow_back_rounded, size: 18), label: Text(context.t('All branches'))),
+              ),
+            if (branches.length > 1) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text('${b['name']}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17))),
             Row(children: [
-              Expanded(child: StatTile(icon: Icons.star_rounded, value: '${d['avg'] ?? '—'}', label: context.t('{n} ratings', {'n': d['count']}), color: C.gold)),
+              Expanded(child: StatTile(icon: Icons.star_rounded, value: '${b['avg'] ?? '—'}', label: context.t('{n} ratings', {'n': b['count'] ?? 0}), color: C.gold)),
               const SizedBox(width: 10),
-              Expanded(child: StatTile(icon: Icons.trending_up_rounded, value: '+${d['thisMonth'] ?? 0}', label: context.t('This month'), color: C.ok)),
+              Expanded(child: StatTile(icon: Icons.trending_up_rounded, value: '+${b['thisMonth'] ?? 0}', label: context.t('This month'), color: C.ok)),
             ]),
             const SizedBox(height: 12),
+            if (rows.isEmpty) Padding(padding: const EdgeInsets.only(top: 20), child: Muted(context.t('No reviews yet'), align: TextAlign.center)),
             for (final r in rows) ...[
               Panel(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [Expanded(child: Text('${r['name']}', style: const TextStyle(fontWeight: FontWeight.w800))), Stars(r['stars'] as num, size: 15)]),
+                  Row(children: [Avatar(name: '${r['name']}', url: r['photoUrl'] as String?, size: 32), const SizedBox(width: 9), Expanded(child: Text('${r['name']}', style: const TextStyle(fontWeight: FontWeight.w800))), Stars(r['stars'] as num, size: 15)]),
                   if (r['comment'] != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('"${r['comment']}"', style: const TextStyle(height: 1.3))),
                   if (((r['tags'] as List?) ?? const []).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Muted((r['tags'] as List).map((t) => context.t('$t')).join(' · '), size: 12)),
                   const SizedBox(height: 8),

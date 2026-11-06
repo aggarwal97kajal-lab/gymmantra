@@ -149,7 +149,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         // Google sign-up: DOB, state, city and PIN are still needed.
         if (session.user?['needsDetails'] == true) return loc == '/complete-details' ? null : '/complete-details';
         // Each kind of person has their own part of the app.
-        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/', '/checkin', '/pdf'];
+        const shared = ['/notifications', '/support', '/help/new', '/help/ticket', '/pt-client', '/program-edit', '/profile/', '/checkin', '/pdf', '/my-salary'];
         if (shared.any((p) => loc.startsWith(p))) return null;
         // Staff never open the GymMantra plan page (that is for the owner).
         if (loc.startsWith('/o/subscription') && session.isStaffDesk) return '/o/home';

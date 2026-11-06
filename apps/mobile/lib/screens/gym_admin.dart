@@ -28,6 +28,7 @@ final ownerPlansProvider = StreamProvider.autoDispose<dynamic>((ref) => Api.inst
 
 String _ymdR(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
+final reportMoneyProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, q) => branchGet(ref, '/reports/money?$q'));
 final reportEntriesProvider = StreamProvider.autoDispose.family<dynamic, String>((ref, q) => branchGet(ref, '/reports/entries?$q'));
 
 class ReportsScreen extends ConsumerStatefulWidget {
@@ -37,7 +38,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportsState extends ConsumerState<ReportsScreen> {
-  int view = 0; // 0 entries, 1 summary
+  int view = 0; // 0 entries, 1 summary, 2 money
   ReportRange range = ReportRange.days(30);
   ReportRange get summaryRange => !range.custom && range.days! > 90 ? ReportRange.days(90) : range;
   String tab = 'ALL';
@@ -212,11 +213,26 @@ class _ReportsState extends ConsumerState<ReportsScreen> {
         onRefresh: () async {
           ref.invalidate(reportEntriesProvider(range.query));
           ref.invalidate(reportsProvider(summaryRange.query));
+          ref.invalidate(reportMoneyProvider(summaryRange.query));
         },
         child: ListView(padding: const EdgeInsets.fromLTRB(16, 4, 16, 28), children: [
-          Seg<int>(value: view, items: [(0, context.t('Entries'), Icons.list_alt_rounded), (1, context.t('Summary'), Icons.bar_chart_rounded)], onChanged: (x) => setState(() => view = x)),
+          Seg<int>(value: view, items: [(0, context.t('Entries'), Icons.list_alt_rounded), (1, context.t('Summary'), Icons.bar_chart_rounded), (2, context.t('Money'), Icons.account_balance_wallet_rounded)], onChanged: (x) => setState(() => view = x)),
           const SizedBox(height: 12),
-          if (view == 1) ...[
+          if (view == 2) ...[
+            RangePicker(
+              value: summaryRange,
+              onChanged: (r) {
+                TapHaptics.buzz();
+                setState(() => range = r);
+              },
+            ),
+            const SizedBox(height: 14),
+            AsyncBody(
+              value: ref.watch(reportMoneyProvider(summaryRange.query)),
+              onRetry: () => ref.invalidate(reportMoneyProvider(summaryRange.query)),
+              builder: (d) => _MoneyBody(d: d as Map, query: summaryRange.query),
+            ),
+          ] else if (view == 1) ...[
             RangePicker(
               value: summaryRange,
               onChanged: (r) {
@@ -1675,4 +1691,137 @@ class _SmallBtn extends StatelessWidget {
           ]),
         ),
       );
+}
+
+
+/// Reports → Money (board 94): one card each for memberships, PT, lockers (money in) and staff
+/// salary (money out, owner only), then what is left. Tap a card for its list.
+class _MoneyBody extends StatefulWidget {
+  const _MoneyBody({required this.d, required this.query});
+  final Map d;
+  final String query;
+  @override
+  State<_MoneyBody> createState() => _MoneyBodyState();
+}
+
+class _MoneyBodyState extends State<_MoneyBody> {
+  bool busy = false;
+
+  void _lines(String title, List<Map> lines, {bool out = false}) => showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (ctx) => DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          builder: (ctx, sc) => ListView(controller: sc, padding: const EdgeInsets.fromLTRB(16, 0, 16, 24), children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18)),
+            const SizedBox(height: 8),
+            if (lines.isEmpty) Padding(padding: const EdgeInsets.all(20), child: Muted(ctx.t('Nothing in these days'), align: TextAlign.center)),
+            for (final l in lines)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text('${l['name']}', style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('${fmtDate('${l['date']}')} · ${l['what']}'),
+                trailing: Text('${out ? '− ' : ''}${rupees(l['amount'] as num?)}', style: TextStyle(fontWeight: FontWeight.w800, color: out ? C.red : C.ok)),
+              ),
+          ]),
+        ),
+      );
+
+  Widget _card(IconData icon, String title, num? total, List<(String, num?)> rows, VoidCallback onTap, {bool out = false}) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Panel(
+          onTap: onTap,
+          padding: const EdgeInsets.all(14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Icon(icon, size: 20, color: out ? C.red : context.c.primary),
+              const SizedBox(width: 8),
+              Expanded(child: Text(title, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5))),
+              Text('${out ? '− ' : ''}${rupees(total)}', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: out ? C.red : C.ok)),
+              Icon(Icons.chevron_right_rounded, color: context.c.mut),
+            ]),
+            const SizedBox(height: 6),
+            for (final (k, v) in rows)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(children: [Expanded(child: Muted(k, size: 12.5)), Text(rupees(v), style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13))]),
+              ),
+          ]),
+        ),
+      );
+
+  List<Map> _l(Map? m) => ((m?['lines'] as List?) ?? const []).cast<Map>();
+
+  @override
+  Widget build(BuildContext context) {
+    final d = widget.d;
+    final m = (d['memberships'] as Map?) ?? const {};
+    final pt = (d['pt'] as Map?) ?? const {};
+    final lk = (d['lockers'] as Map?) ?? const {};
+    final sal = d['salary'] as Map?;
+    final net = (d['net'] as Map?) ?? const {};
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _card(Icons.card_membership_rounded, context.t('Memberships'), m['total'] as num?, [
+        (context.t('Received'), m['total'] as num?),
+        (context.t('Sold to new members'), m['fresh'] as num?),
+        (context.t('Renewals sold'), m['renewal'] as num?),
+        (context.t('Still due (dues)'), m['due'] as num?),
+      ], () => _lines(context.t('Memberships'), _l(m))),
+      _card(Icons.fitness_center_rounded, 'PT', pt['total'] as num?, [
+        (context.t('Paid by members'), pt['total'] as num?),
+        (context.t('Trainers\' share'), pt['trainerShare'] as num?),
+        (context.t('Gym keeps'), pt['gymKeeps'] as num?),
+      ], () => _lines('PT', _l(pt))),
+      _card(Icons.lock_rounded, context.t('Lockers'), lk['total'] as num?, [
+        (context.t('Fees'), lk['total'] as num?),
+        (context.t('Deposits held (to give back)'), lk['depositHeld'] as num?),
+      ], () => _lines(context.t('Lockers'), _l(lk))),
+      if (sal != null)
+        _card(Icons.payments_rounded, context.t('Staff salary (expense)'), sal['total'] as num?, [
+          (context.t('Salary for the month(s)'), sal['total'] as num?),
+          (context.t('Paid'), sal['paid'] as num?),
+          (context.t('Due'), sal['due'] as num?),
+          (context.t('Advance given'), sal['advance'] as num?),
+        ], () => _lines(context.t('Staff salary (expense)'), _l(sal), out: true), out: true),
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(18)),
+        child: Column(children: [
+          Row(children: [Expanded(child: Text(context.t('Total income'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700))), Text(rupees(net['income'] as num?), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800))]),
+          const SizedBox(height: 4),
+          Row(children: [
+            Expanded(child: Text(sal != null ? context.t('Salary + trainers\' share') : context.t('Trainers\' share'), style: const TextStyle(color: Colors.white70))),
+            Text('− ${rupees(sal != null ? net['out'] as num? : pt['trainerShare'] as num?)}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+          ]),
+          const Divider(color: Colors.white24, height: 18),
+          Row(children: [
+            Expanded(child: Text(context.t('Left'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16))),
+            Text(rupees(sal != null ? net['left'] as num? : ((net['income'] as num? ?? 0) - (pt['trainerShare'] as num? ?? 0))), style: const TextStyle(color: Color(0xFF4ADE80), fontWeight: FontWeight.w800, fontSize: 18)),
+          ]),
+        ]),
+      ),
+      const SizedBox(height: 12),
+      OutlinedButton.icon(
+        onPressed: busy
+            ? null
+            : () async {
+                setState(() => busy = true);
+                try {
+                  final b = await Api.instance.bytes('/api/v1/reports/money?${widget.query}&csv=1');
+                  if (mounted) await saveAndOffer(context, 'money-report.csv', b, 'text/csv');
+                } catch (e) {
+                  if (mounted) toastError(context, e);
+                }
+                if (mounted) setState(() => busy = false);
+              },
+        icon: const Icon(Icons.table_view_rounded),
+        label: Text(busy ? context.t('Please wait…') : context.t('Download Excel')),
+      ),
+      const SizedBox(height: 6),
+      Muted(context.t('Tap a card to see every entry.'), size: 12, align: TextAlign.center),
+    ]);
+  }
 }

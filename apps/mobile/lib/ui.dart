@@ -676,22 +676,32 @@ class NoticeBanner extends StatelessWidget {
 
 /// Small stat tile (number + label).
 class StatTile extends StatelessWidget {
-  const StatTile({super.key, required this.icon, required this.value, required this.label, this.color});
+  const StatTile({super.key, required this.icon, required this.value, required this.label, this.color, this.onTap});
   final IconData icon;
   final String value;
   final String label;
   final Color? color;
+  final VoidCallback? onTap;
+  // The number shrinks to fit instead of being cut (₹27,000 never becomes ₹27…), and the label
+  // always takes two lines, so tiles in a row are the same height.
   @override
   Widget build(BuildContext context) => Panel(
         padding: const EdgeInsets.fromLTRB(13, 13, 13, 11),
+        onTap: onTap,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Icon(icon, size: 18, color: color ?? context.c.primary),
             const SizedBox(width: 7),
-            Flexible(child: Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, height: 1.1))),
+            Expanded(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(value, maxLines: 1, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, height: 1.1, color: onTap != null ? color : null)),
+              ),
+            ),
           ]),
           const SizedBox(height: 4),
-          Muted(label, size: 11.5, maxLines: 1),
+          SizedBox(height: 30, child: Align(alignment: Alignment.topLeft, child: Muted(label, size: 11.5, maxLines: 2))),
         ]),
       );
 }

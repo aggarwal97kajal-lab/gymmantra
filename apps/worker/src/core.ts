@@ -78,8 +78,9 @@ export interface TenantDoc {
   address: string | null;
   whatsappNumber: string | null;
   status: 'TRIAL' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
-  ratingSum?: { total: number; count: number }; // gym rating by members (routes/ratings.ts)
-  testimonials?: { userId: string; name: string; stars: number; text: string }[]; // ratings the owner chose to show
+  ratingSum?: { total: number; count: number }; // old: whole-gym rating (now ratingSums per branch; this counts for the main branch until then)
+  ratingSums?: Record<string, { total: number; count: number }>; // gym rating per branch (routes/ratings.ts)
+  testimonials?: { userId: string; name: string; stars: number; text: string; branchId?: string | null; photoV?: number | null }[]; // ratings the owner chose to show (each in its branch)
   closedAt?: string | null; // super admin closed the gym (can reopen within 30 days)
   closedStaff?: { uid: string; role: Role; branchIds: string[]; rights?: string[] }[];
   verified: boolean;

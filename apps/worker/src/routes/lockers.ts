@@ -25,7 +25,7 @@ export interface LockerUse {
 export interface LockersDoc {
   count: number;
   lockers: Record<string, LockerUse>; // locker number -> who has it
-  log: { n: number; what: string; name: string; amount: number; mode: string | null; at: string; byId: string }[];
+  log: { n: number; what: string; name: string; amount: number; fee?: number; deposit?: number; mode: string | null; at: string; byId: string }[];
 }
 
 const MODES = ['CASH', 'UPI', 'CARD', 'BANK_TRANSFER'] as const;
@@ -127,7 +127,7 @@ export function lockerRoutes(app: App) {
       if (!m || m.archived) throw notFound('Member not found');
       if (doc.lockers[String(n)]) throw conflict(`Locker ${n} is already given`);
       const use: LockerUse = { memberId, userId: m.userId, name: m.name, phone: m.phone, from, to, fee, deposit, at: nowIso(), byId: u.id };
-      const next: LockersDoc = { ...doc, lockers: { ...doc.lockers, [String(n)]: use }, log: [{ n, what: 'GIVEN', name: m.name, amount: fee + deposit, mode, at: use.at, byId: u.id }, ...doc.log].slice(0, 300) };
+      const next: LockersDoc = { ...doc, lockers: { ...doc.lockers, [String(n)]: use }, log: [{ n, what: 'GIVEN', name: m.name, amount: fee + deposit, fee, deposit, mode, at: use.at, byId: u.id }, ...doc.log].slice(0, 300) };
       t.set(P.lockers(g.tenantId, branchId), next);
       t.set(P.member(g.tenantId, memberId), { ...m, locker: { branchId, n, from, to } });
       remind(t, g.tenantId, branchId, n, to);
@@ -153,7 +153,7 @@ export function lockerRoutes(app: App) {
       if (!l) throw bad(`Locker ${n} is free`);
       if (to <= l.to) throw bad('The new end must be after the current end');
       const use = { ...l, to, fee: l.fee + fee };
-      t.set(P.lockers(g.tenantId, branchId), { ...doc, lockers: { ...doc.lockers, [String(n)]: use }, log: [{ n, what: 'RENEWED', name: l.name, amount: fee, mode, at: nowIso(), byId: u.id }, ...doc.log].slice(0, 300) });
+      t.set(P.lockers(g.tenantId, branchId), { ...doc, lockers: { ...doc.lockers, [String(n)]: use }, log: [{ n, what: 'RENEWED', name: l.name, amount: fee, fee, mode, at: nowIso(), byId: u.id }, ...doc.log].slice(0, 300) });
       const m = await t.get<MemberDoc>(P.member(g.tenantId, l.memberId));
       if (m) t.set(P.member(g.tenantId, l.memberId), { ...m, locker: { branchId, n, from: l.from, to } });
       remind(t, g.tenantId, branchId, n, to);
