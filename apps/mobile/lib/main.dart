@@ -111,7 +111,10 @@ class _AppState extends ConsumerState<GymMantraApp> {
       onHide: () => _hiddenAt = DateTime.now(),
       onShow: () {
         final away = _hiddenAt == null ? Duration.zero : DateTime.now().difference(_hiddenAt!);
-        if (away > const Duration(seconds: 2)) _liveRefresh();
+        if (away > const Duration(seconds: 2)) {
+          _liveRefresh();
+          Festivals.checkOpen(); // a festival put live while the app was in the background
+        }
       },
     );
     // A notification means something changed: load now, and once more a little later
@@ -315,7 +318,16 @@ class _AppState extends ConsumerState<GymMantraApp> {
             final session = ref.read(sessionProvider);
             return ListenableBuilder(
               listenable: session,
-              builder: (context, _) => FestTapLayer(child: Stack(children: [child ?? const SizedBox(), if (session.ending) LoggingOutCover(note: session.endedNote)])),
+              builder: (context, _) => FestTapLayer(
+                child: Stack(fit: StackFit.expand, children: [
+                  child ?? const SizedBox(),
+                  ValueListenableBuilder<Fest?>(
+                    valueListenable: Festivals.overlay,
+                    builder: (_, f, __) => f == null ? const SizedBox.shrink() : FestivalSplash(fest: f, onDone: () => Festivals.overlay.value = null),
+                  ),
+                  if (session.ending) LoggingOutCover(note: session.endedNote),
+                ]),
+              ),
             );
           },
         ),
@@ -358,13 +370,21 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     if (splashDone.value) return;
-    // Festival days: the festival's own opening instead of this one.
-    _fest = adminApp ? null : Festivals.forSplash();
-    if (_fest != null) return;
-    a.forward().whenComplete(() => splashDone.value = true);
+    // The GymMantra animation plays only the first time after install. Later openings go straight
+    // in; on a festival day the festival's opening plays instead (once that day).
+    if (Prefs.getString('splash:seen') == null) {
+      Prefs.setString('splash:seen', '1');
+      a.forward().whenComplete(() {
+        splashDone.value = true;
+        Festivals.checkOpen();
+      });
+      return;
+    }
+    _quick = true;
+    Festivals.checkOpen(wait: const Duration(milliseconds: 1500)).whenComplete(() => splashDone.value = true);
   }
 
-  Fest? _fest;
+  bool _quick = false;
 
   @override
   void dispose() {
@@ -386,7 +406,7 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    if (_fest != null) return FestivalSplash(fest: _fest, onDone: () => splashDone.value = true);
+    if (_quick) return const ColoredBox(color: Color(0xFF0D1015), child: SizedBox.expand());
     final tag = translate(AppLang.current, 'Fitness ka sahi mantra.');
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),

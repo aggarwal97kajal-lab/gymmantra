@@ -32,6 +32,24 @@ class Fest {
 class Festivals {
   Festivals._();
   static final active = ValueNotifier<Fest?>(null);
+
+  /// The festival opening shown over the app (cold start or coming back to the app).
+  static final overlay = ValueNotifier<Fest?>(null);
+
+  /// When the app opens: the first opening on a festival day shows its animation. If the phone
+  /// does not know the festival yet (it was put live just now), it asks the server first.
+  static Future<Fest?> checkOpen({Duration wait = const Duration(seconds: 3)}) async {
+    if (adminApp || overlay.value != null) return null;
+    var f = forSplash();
+    if (f == null) {
+      try {
+        await refresh().timeout(wait);
+      } catch (_) {}
+      f = forSplash();
+    }
+    if (f != null) overlay.value = f;
+    return f;
+  }
   static List<Fest> _all = [];
   static Map? _user;
   static Timer? _tick;
