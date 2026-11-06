@@ -53,10 +53,12 @@ extension PalX on BuildContext {
 }
 
 const fontFamily = 'Jakarta';
+// Emoji and Hindi letters come from these when present (phones use their own system fonts anyway).
+const fontFallback = ['Noto Sans Devanagari', 'Noto Emoji'];
 
 ThemeData buildTheme(Brightness b) {
   final p = b == Brightness.dark ? Pal.darkPal : Pal.lightPal;
-  final base = ThemeData(useMaterial3: true, brightness: b, fontFamily: fontFamily);
+  final base = ThemeData(useMaterial3: true, brightness: b, fontFamily: fontFamily, fontFamilyFallback: fontFallback);
   final radius = BorderRadius.circular(14);
   return base.copyWith(
     scaffoldBackgroundColor: p.bg,
@@ -72,7 +74,7 @@ ThemeData buildTheme(Brightness b) {
       outline: p.line,
       surfaceContainerHighest: p.surf2,
     ),
-    textTheme: base.textTheme.apply(bodyColor: p.fg, displayColor: p.fg, fontFamily: fontFamily),
+    textTheme: base.textTheme.apply(bodyColor: p.fg, displayColor: p.fg, fontFamily: fontFamily, fontFamilyFallback: fontFallback),
     appBarTheme: AppBarTheme(
       backgroundColor: p.bg,
       foregroundColor: p.fg,

@@ -50,6 +50,8 @@ GoRouter routerOf(WidgetTester t) => GoRouter.of(t.element(find.byType(Navigator
 
 Future<void> shot(WidgetTester t, String name) async {
   await settle(t);
+  FocusManager.instance.primaryFocus?.unfocus();
+  await t.pump(const Duration(milliseconds: 300));
   await expectLater(find.byType(GymMantraApp), matchesGoldenFile('shots/$name.png'));
 }
 
@@ -199,7 +201,8 @@ void main() {
     phone(t);
     await startAs(t, 'member');
     await visit(t, '60_member_home', '/home');
-    await visit(t, '61_member_checkin', '/qr');
+    await visit(t, '61_member_myqr', '/my-qr', push: true);
+    await visit(t, '70_member_workouts', '/workouts');
     await visit(t, '62_member_trainers', '/trainers');
     await visit(t, '63_member_plan', '/my-plan');
     await visit(t, '64_member_membership', '/membership/${logins['memberId']}', push: true);

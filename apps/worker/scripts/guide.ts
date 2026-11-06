@@ -94,6 +94,20 @@ async function person(name: string, appRole: string) {
   const pt = await call('POST', '/me/pt', { tenantId: gym.id, trainerId: trainer.id, packageId: pk.packages[0].id }, member.token);
   await call('POST', `/pt/${pt.id}/approve`, { amountReceived: 6000, paymentMode: 'UPI', startDate: addDays(today, -6) }, owner.token);
   for (const [d, m] of [[-2, 'DONE'], [-1, 'DONE'], [0, 'DONE'], [2, 'PLANNED'], [4, 'PLANNED']] as const) await call('POST', `/pt/${pt.id}/session`, { tenantId: gym.id, date: addDays(today, d), mark: m }, trainer.token).catch(() => {});
+  await call('PUT', `/programs/${mem.id}`, {
+    tenantId: gym.id,
+    diet: { kcal: 2200, protein: 120, notes: 'Din mein 3-4 litre paani. Raat 9 ke baad kuch heavy nahi.', meals: [
+      { name: 'Breakfast', time: '8:00 AM', items: '4 egg whites, 2 brown bread, 1 banana' },
+      { name: 'Lunch', time: '1:30 PM', items: '2 roti, 1 bowl dal, sabzi, salad, curd' },
+      { name: 'Pre-workout', time: '5:30 PM', items: 'Black coffee, 1 apple' },
+      { name: 'Dinner', time: '8:30 PM', items: 'Paneer / chicken 150 g, sabzi, 1 roti' },
+    ] },
+    workout: { notes: 'Har exercise se pehle 5 minute warm-up.', days: [
+      { day: 'Mon', title: 'Chest + Triceps', exercises: [{ name: 'Bench press', sets: '4 x 10', weight: '40 kg' }, { name: 'Incline dumbbell press', sets: '3 x 12', weight: '14 kg' }, { name: 'Tricep pushdown', sets: '3 x 15', weight: '20 kg' }] },
+      { day: 'Wed', title: 'Back + Biceps', exercises: [{ name: 'Lat pulldown', sets: '4 x 10', weight: '45 kg' }, { name: 'Seated row', sets: '3 x 12', weight: '40 kg' }, { name: 'Bicep curl', sets: '3 x 12', weight: '10 kg' }] },
+      { day: 'Fri', title: 'Legs + Shoulders', exercises: [{ name: 'Squat', sets: '4 x 10', weight: '50 kg' }, { name: 'Leg press', sets: '3 x 12', weight: '100 kg' }, { name: 'Shoulder press', sets: '3 x 10', weight: '12 kg' }] },
+    ] },
+  }, trainer.token);
   await call('POST', '/pt-payouts', { trainerId: trainer.id, amount: 2000, mode: 'UPI' }, owner.token);
 
   // ---- front desk ----
