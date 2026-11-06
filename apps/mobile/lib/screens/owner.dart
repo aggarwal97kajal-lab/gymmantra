@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import '../festival.dart';
 import '../haptics.dart';
 import '../back.dart';
 import 'package:flutter/services.dart';
@@ -57,16 +58,16 @@ class OwnerShell extends ConsumerWidget {
             context.go(tabs[n]);
           },
           destinations: [
-            NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
-            NavigationDestination(icon: const Icon(Icons.groups_outlined), selectedIcon: const Icon(Icons.groups_rounded), label: context.t('Members')),
-            if (desk) NavigationDestination(icon: const Icon(Icons.fact_check_outlined), selectedIcon: const Icon(Icons.fact_check_rounded), label: context.t('Attendance')),
+            NavigationDestination(icon: FestTab(0, child: const Icon(Icons.home_outlined)), selectedIcon: FestTab(0, selected: true, child: const Icon(Icons.home_rounded)), label: context.t('Home')),
+            NavigationDestination(icon: FestTab(1, child: const Icon(Icons.groups_outlined)), selectedIcon: FestTab(1, selected: true, child: const Icon(Icons.groups_rounded)), label: context.t('Members')),
+            if (desk) NavigationDestination(icon: FestTab(2, child: const Icon(Icons.fact_check_outlined)), selectedIcon: FestTab(2, selected: true, child: const Icon(Icons.fact_check_rounded)), label: context.t('Attendance')),
             NavigationDestination(
-              icon: Badge(isLabelVisible: pending > 0, label: Text('$pending'), child: const Icon(Icons.how_to_reg_outlined)),
-              selectedIcon: const Icon(Icons.how_to_reg_rounded),
+              icon: Badge(isLabelVisible: pending > 0, label: Text('$pending'), child: FestTab(3, child: const Icon(Icons.how_to_reg_outlined))),
+              selectedIcon: FestTab(3, selected: true, child: const Icon(Icons.how_to_reg_rounded)),
               label: context.t('Requests'),
             ),
-            if (!desk) NavigationDestination(icon: const Icon(Icons.local_offer_outlined), selectedIcon: const Icon(Icons.local_offer_rounded), label: context.t('Offers')),
-            NavigationDestination(icon: const Icon(Icons.more_horiz_rounded), label: context.t('More')),
+            if (!desk) NavigationDestination(icon: FestTab(4, child: const Icon(Icons.local_offer_outlined)), selectedIcon: FestTab(4, selected: true, child: const Icon(Icons.local_offer_rounded)), label: context.t('Offers')),
+            NavigationDestination(icon: FestTab(4, child: const Icon(Icons.more_horiz_rounded)), selectedIcon: FestTab(4, selected: true, child: const Icon(Icons.more_horiz_rounded)), label: context.t('More')),
           ],
         ),
       ),
@@ -130,6 +131,7 @@ class OwnerHomeScreen extends ConsumerWidget {
               const NotificationBell(),
             ]),
             const SizedBox(height: 14),
+            const FestBanner(),
             const BranchChip(),
             const _PlanStrip(),
             const AdsStrip(role: 'OWNER'),

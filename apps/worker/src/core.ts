@@ -262,6 +262,7 @@ export const P = {
   stats: 'settings/stats',
   platformAudit: 'platformAudit',
   broadcasts: 'settings/broadcasts',
+  festivals: 'settings/festivals',
   coupons: 'coupons',
   coupon: (id: string) => `coupons/${id}`,
   couponCode: (code: string) => `couponCodes/${code}`,

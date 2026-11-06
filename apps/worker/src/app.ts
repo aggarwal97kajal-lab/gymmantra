@@ -1,6 +1,7 @@
 import { sendPush, takePush } from './lib/push';
 import { backupRoutes } from './routes/backup';
 import { deviceRoutes } from './routes/devices';
+import { festivalRoutes } from './routes/festivals';
 import { enquiryRoutes } from './routes/enquiries';
 import { lockerRoutes } from './routes/lockers';
 import { ratingRoutes } from './routes/ratings';
@@ -189,6 +190,7 @@ export function createApp(getDeps: () => Deps) {
   lockerRoutes(app);
   ratingRoutes(app);
   deviceRoutes(app);
+  festivalRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

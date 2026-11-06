@@ -13,6 +13,7 @@ import 'prefs.dart';
 import 'screens/billing.dart';
 import 'screens/person.dart' show BusyCover;
 import 'admin_extra.dart';
+import 'admin_fest.dart';
 import 'screens/help.dart' show TicketScreen, TicketTile, ticketStatuses, ticketStatusLabel, ticketStatusColor, ticketStatusOf;
 import 'screens/home.dart' show openUrl;
 import 'screens/profile.dart' show ProfileScreen, NotificationsScreen, NotificationBell, ProfileDetailsScreen, ChangePasswordScreen, LoginDevicesScreen;
@@ -89,6 +90,7 @@ GoRouter adminRouter(Session session, Listenable splash, Widget splashScreen, bo
         GoRoute(path: '/a/coupons', builder: (_, __) => const AdminCoupons()),
         GoRoute(path: '/a/people', builder: (_, __) => const AdminPeople()),
         GoRoute(path: '/a/broadcast', builder: (_, __) => const AdminBroadcast()),
+        GoRoute(path: '/a/festivals', builder: (_, __) => const AdminFestivals()),
         GoRoute(path: '/a/push-settings', builder: (_, __) => const AdminPushSettings()),
         GoRoute(path: '/a/coupon', builder: (_, s) => CouponEditScreen(coupon: s.extra as Map?)),
         GoRoute(path: '/a/payments', builder: (_, __) => const AdminPayments()),
@@ -1431,6 +1433,7 @@ class AdminMore extends ConsumerWidget {
             row(Icons.sell_rounded, context.t('Coupons'), () => context.push('/a/coupons')),
             row(Icons.manage_accounts_rounded, context.t('People'), () => context.push('/a/people')),
             row(Icons.campaign_rounded, context.t('Send notification'), () => context.push('/a/broadcast')),
+            row(Icons.celebration_rounded, context.t('Festivals'), () => context.push('/a/festivals')),
             row(Icons.notifications_active_rounded, context.t('Notification settings'), () => context.push('/a/push-settings')),
             row(Icons.confirmation_number_rounded, context.t('Support tickets'), () => context.push('/a/tickets')),
             row(Icons.draw_rounded, context.t('Receipt & signature'), () => context.push('/a/receipt')),

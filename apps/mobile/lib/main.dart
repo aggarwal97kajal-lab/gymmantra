@@ -31,6 +31,7 @@ import 'screens/extras.dart';
 import 'photo.dart';
 import 'session.dart';
 import 'push.dart';
+import 'festival.dart';
 import 'theme.dart';
 import 'ui.dart';
 
@@ -40,6 +41,7 @@ Future<void> main() async {
   await Future.wait([Prefs.init(), PhotoCache.init()]);
   unawaited(Push.init());
   AppSettings.instance.load();
+  Festivals.load(); // festival look saved last time (for the splash)
   TapHaptics.install();
   runApp(const ProviderScope(child: GymMantraApp()));
 }
@@ -103,7 +105,8 @@ class _AppState extends ConsumerState<GymMantraApp> {
   void initState() {
     super.initState();
     final session = ref.read(sessionProvider);
-    session.start();
+    session.start().then((_) => Festivals.refresh());
+    session.addListener(() => Festivals.setUser(session.user));
     _life = AppLifecycleListener(
       onHide: () => _hiddenAt = DateTime.now(),
       onShow: () {
@@ -312,7 +315,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
             final session = ref.read(sessionProvider);
             return ListenableBuilder(
               listenable: session,
-              builder: (context, _) => Stack(children: [child ?? const SizedBox(), if (session.ending) LoggingOutCover(note: session.endedNote)]),
+              builder: (context, _) => FestTapLayer(child: Stack(children: [child ?? const SizedBox(), if (session.ending) LoggingOutCover(note: session.endedNote)])),
             );
           },
         ),
@@ -355,8 +358,13 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     if (splashDone.value) return;
+    // Festival days: the festival's own opening instead of this one.
+    _fest = adminApp ? null : Festivals.forSplash();
+    if (_fest != null) return;
     a.forward().whenComplete(() => splashDone.value = true);
   }
+
+  Fest? _fest;
 
   @override
   void dispose() {
@@ -378,6 +386,7 @@ class _SplashState extends State<SplashScreen> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
+    if (_fest != null) return FestivalSplash(fest: _fest, onDone: () => splashDone.value = true);
     final tag = translate(AppLang.current, 'Fitness ka sahi mantra.');
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),

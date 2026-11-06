@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../festival.dart';
 import '../haptics.dart';
 import '../back.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -37,9 +38,9 @@ class TrainerShell extends StatelessWidget {
             context.go(tabs[n]);
           },
           destinations: [
-            NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
-            NavigationDestination(icon: const Icon(Icons.groups_outlined), selectedIcon: const Icon(Icons.groups_rounded), label: context.t('Clients')),
-            NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: context.t('Profile')),
+            NavigationDestination(icon: FestTab(0, child: const Icon(Icons.home_outlined)), selectedIcon: FestTab(0, selected: true, child: const Icon(Icons.home_rounded)), label: context.t('Home')),
+            NavigationDestination(icon: FestTab(1, child: const Icon(Icons.groups_outlined)), selectedIcon: FestTab(1, selected: true, child: const Icon(Icons.groups_rounded)), label: context.t('Clients')),
+            NavigationDestination(icon: FestTab(2, child: const Icon(Icons.person_outline_rounded)), selectedIcon: FestTab(2, selected: true, child: const Icon(Icons.person_rounded)), label: context.t('Profile')),
           ],
         ),
       ),
@@ -79,6 +80,7 @@ class TrainerHomeScreen extends ConsumerWidget {
               GestureDetector(onTap: () => context.go('/t/profile'), child: Avatar(name: (u['name'] as String?) ?? '', url: u['photoUrl'] as String?, size: 42)),
             ]),
             const SizedBox(height: 16),
+            const FestBanner(),
             const AdsStrip(role: 'TRAINER'),
             AsyncBody(
               value: v,

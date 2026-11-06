@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../festival.dart';
 import '../haptics.dart';
 import '../back.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -38,11 +39,11 @@ class HomeShell extends StatelessWidget {
             context.go(tabs[n]);
           },
           destinations: [
-            NavigationDestination(icon: const Icon(Icons.home_outlined), selectedIcon: const Icon(Icons.home_rounded), label: context.t('Home')),
-            NavigationDestination(icon: const Icon(Icons.qr_code_2_rounded), label: context.t('Check-in')),
-            NavigationDestination(icon: const Icon(Icons.sports_outlined), selectedIcon: const Icon(Icons.sports_rounded), label: context.t('Trainers')),
-            NavigationDestination(icon: const Icon(Icons.assignment_outlined), selectedIcon: const Icon(Icons.assignment_rounded), label: context.t('My plan')),
-            NavigationDestination(icon: const Icon(Icons.person_outline_rounded), selectedIcon: const Icon(Icons.person_rounded), label: context.t('Profile')),
+            NavigationDestination(icon: FestTab(0, child: const Icon(Icons.home_outlined)), selectedIcon: FestTab(0, selected: true, child: const Icon(Icons.home_rounded)), label: context.t('Home')),
+            NavigationDestination(icon: FestTab(1, child: const Icon(Icons.qr_code_2_rounded)), selectedIcon: FestTab(1, selected: true, child: const Icon(Icons.qr_code_2_rounded)), label: context.t('Check-in')),
+            NavigationDestination(icon: FestTab(2, child: const Icon(Icons.sports_outlined)), selectedIcon: FestTab(2, selected: true, child: const Icon(Icons.sports_rounded)), label: context.t('Trainers')),
+            NavigationDestination(icon: FestTab(3, child: const Icon(Icons.assignment_outlined)), selectedIcon: FestTab(3, selected: true, child: const Icon(Icons.assignment_rounded)), label: context.t('My plan')),
+            NavigationDestination(icon: FestTab(4, child: const Icon(Icons.person_outline_rounded)), selectedIcon: FestTab(4, selected: true, child: const Icon(Icons.person_rounded)), label: context.t('Profile')),
           ],
         ),
       ),
@@ -189,6 +190,7 @@ class HomeScreen extends ConsumerWidget {
               GestureDetector(onTap: () => context.go('/profile'), child: Avatar(name: name, url: u['photoUrl'] as String?, size: 42)),
             ]),
             const SizedBox(height: 18),
+            const FestBanner(),
             const AdsStrip(role: 'MEMBER'),
             AsyncBody(
               value: gyms,
