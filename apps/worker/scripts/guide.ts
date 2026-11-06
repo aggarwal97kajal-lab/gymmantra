@@ -136,6 +136,13 @@ async function person(name: string, appRole: string) {
   await call('POST', `/salary/${desk.id}/adjust`, { kind: 'ADVANCE', amount: 2000, note: 'Festival advance' }, owner.token).catch(() => {});
   for (const d of [-4, -3, -2, -1]) for (const uid of [desk.id, trainer.id]) await call('PUT', `/staff-attendance/${uid}/${addDays(today, d)}`, { present: true, note: 'Marked at the desk' }, owner.token).catch(() => {});
 
+  // ---- fingerprint machine (eSSL) with a few punches ----
+  await call('POST', '/gym/devices', { kind: 'adms', serial: 'CGXH2034', name: 'Reception machine' }, owner.token);
+  const list = await call('GET', '/members?tab=all', undefined, owner.token);
+  const codes = ((list.rows ?? list) as any[]).map((m) => String(m.memberCode ?? '').match(/(\d+)$/)?.[1]).filter(Boolean).slice(1, 4);
+  const at = (h: string) => `${today} ${h}:00`;
+  await app.request('/iclock/cdata?SN=CGXH2034&table=ATTLOG', { method: 'POST', body: [...codes.map((c, i) => `${c}\t${at(`07:1${i}`)}\t0\t1`), `5\t${at('07:40')}\t0\t1`].join('\n') });
+
   writeFileSync(
     process.env.GUIDE_OUT || '/tmp/guide-logins.json',
     JSON.stringify({
@@ -150,7 +157,9 @@ async function person(name: string, appRole: string) {
       member: member.token,
     }),
   );
-  serve({ fetch: app.fetch, port: PORT });
+  // Machine set-up pages show the live server address, not this demo one.
+  const live = 'gymmantra.aggarwal97kajal.workers.dev';
+  serve({ fetch: (req) => (new URL(req.url).pathname.startsWith('/api/v1/gym/devices') ? app.fetch(new Request(req.url.replace(/^http:\/\/[^/]+/, `https://${live}`), req)) : app.fetch(req)), port: PORT });
   console.log(`guide demo on :${PORT}`);
 })().catch((e) => {
   console.error(e);
