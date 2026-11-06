@@ -115,7 +115,6 @@ void main() {
     });
     m.setMockMethodCallHandler(const MethodChannel('gymmantra/secure'), (call) async => call.method == 'device' ? 'Xiaomi Redmi Note 12' : null);
     await loadFonts();
-    await finish(t);
   });
 
   void phone(WidgetTester t) {
