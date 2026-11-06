@@ -2,6 +2,8 @@ name: guide-shots
 # Real app screens for the user guide: a demo gym on a local server, the app drawn in a Flutter test.
 on:
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   shots:
     runs-on: ubuntu-24.04
@@ -25,10 +27,13 @@ jobs:
         continue-on-error: true
         run: |
           flutter pub get
-          GUIDE_LOGINS=/tmp/guide-logins.json flutter test test_guide/guide_shots_test.dart --update-goldens --reporter expanded 2>&1 | tail -n 300
+          GUIDE_LOGINS=/tmp/guide-logins.json flutter test test_guide/guide_shots_test.dart --update-goldens --reporter expanded > /tmp/shots.log 2>&1 || true
+          mkdir -p test_guide/shots && cp /tmp/shots.log test_guide/shots/log.txt
       - run: ls -la apps/mobile/test_guide/shots || true
-      - uses: actions/upload-artifact@v4
-        with:
-          name: guide-shots
-          path: apps/mobile/test_guide/shots
-          retention-days: 7
+      - name: Keep the pictures on the guide-shots branch
+        run: |
+          cd apps/mobile/test_guide/shots
+          git init -q -b guide-shots
+          git config user.name "guide bot" && git config user.email "bot@users.noreply.github.com"
+          git add -A && git commit -qm "guide screens"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" guide-shots

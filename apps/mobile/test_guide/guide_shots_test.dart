@@ -74,6 +74,12 @@ Future<void> visit(WidgetTester t, String name, String path, {Object? extra, boo
   await shot(t, name);
 }
 
+/// Lets the app's own timers run out, so the test ends cleanly.
+Future<void> finish(WidgetTester t) async {
+  await t.pumpWidget(const SizedBox());
+  await t.pump(const Duration(minutes: 4));
+}
+
 Future<dynamic> get(WidgetTester t, String path) async => (await t.runAsync(() => Api.instance.get(path)));
 
 void main() {
@@ -109,6 +115,7 @@ void main() {
     });
     m.setMockMethodCallHandler(const MethodChannel('gymmantra/secure'), (call) async => call.method == 'device' ? 'Xiaomi Redmi Note 12' : null);
     await loadFonts();
+    await finish(t);
   });
 
   void phone(WidgetTester t) {
@@ -122,6 +129,7 @@ void main() {
     await shot(t, '01_role');
     await visit(t, '02_login', '/login');
     await visit(t, '03_signup', '/signup');
+    await finish(t);
   });
 
   testWidgets('10 owner', (t) async {
@@ -154,6 +162,7 @@ void main() {
     await visit(t, '33_owner_subscription', '/o/subscription');
     await visit(t, '34_owner_notifications', '/notifications');
     await visit(t, '35_owner_devices', '/profile/devices');
+    await finish(t);
   });
 
   testWidgets('40 staff', (t) async {
@@ -163,6 +172,7 @@ void main() {
     await visit(t, '41_staff_more', '/o/more');
     await visit(t, '42_staff_my_attendance', '/o/my-attendance');
     await visit(t, '43_staff_salary', '/my-salary');
+    await finish(t);
   });
 
   testWidgets('50 trainer', (t) async {
@@ -175,6 +185,7 @@ void main() {
     await visit(t, '52_trainer_client', '/pt-client', extra: {'pt': client, 'tenantId': c['tenantId'], 'canMark': true}, push: true);
     await visit(t, '53_trainer_attendance', '/t/my-attendance');
     await visit(t, '54_trainer_profile', '/t/profile');
+    await finish(t);
   });
 
   testWidgets('60 member', (t) async {
@@ -190,5 +201,6 @@ void main() {
     await visit(t, '67_member_join', '/join');
     await visit(t, '68_member_help', '/help');
     await visit(t, '69_member_notifications', '/notifications');
+    await finish(t);
   });
 }
