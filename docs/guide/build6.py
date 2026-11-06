@@ -97,7 +97,7 @@ P.append(page(f'''
 <div class="cell"><b>🔐 Lockers</b><br>Kis member ko kaunsa locker, kab tak, fees, deposit. Khatam hone se pehle reminder.</div>
 <div class="cell"><b>📞 Enquiries</b><br>Poochne aaye logon ka record, roz 9 baje "aaj kise call karna hai".</div>
 <div class="cell"><b>⭐ Ratings</b><br>Members ki rating. Achhe reviews ko "Show on dashboards" karke photo ke saath dikhayein.</div>
-<div class="cell"><b>🏢 Branches</b><br>Har branch ka alag code, QR, staff aur members. Upar button se branch badlein.</div>
+<div class="cell"><b>👆 Fingerprint machine</b><br>eSSL, ZKTeco, Hikvision ya pen drive. User ID = Member ID ka number (1023).</div>
 </div>
 {box('tip', 'Plan aur trial', 'Naye gym ko pehle 3 mahine sab free. Phir More → <b>Subscription</b> → plan chun ke UPI se pay. Purane members Excel se ek saath: More → <b>Import members</b>.')}
 ''', 'Gym owner · 2/2'))
@@ -107,7 +107,7 @@ P.append(page(f'''
 {band('#2563EB', '🧾', 'Gym staff (front desk)', 'Owner ne jo rights diye, wahi dikhta hai. Aap sirf apni branch ka kaam dekhte hain.')}
 <div class="grid2">
 {mini('🗂️', 'Desk ka rozana kaam', '<p>➕ Member add / renew → Members tab<br>💰 Fees lena → member page<br>✋ Bina phone wale ki entry → Manual check-in<br>📞 Enquiry likhna, 🔐 locker dena → More</p><p>Koi option nahi dikh raha = owner ne right nahi diya.</p>', '40_staff_home', 31)}
-{mini('📅', 'Present lagana aur salary', steps(['More → <b>My attendance</b>', 'Gym ke andar <b>Mark today: Present</b> dabayein (location on)', 'More → <b>My salary</b>: din, salary, advance, baaki']) + '<p>11 aur 5 baje reminder aata hai.</p>', '42_staff_my_attendance', 31)}
+{mini('📅', 'Present lagana aur salary', steps(['More → <b>My attendance</b>', 'Gym ke andar <b>Mark today: Present</b> dabayein (location on)', 'More → <b>My salary</b>: din, salary, advance, baaki']) + '<p>11 aur 5 baje reminder aata hai. Fingerprint wale gym mein button nahi, machine pe ungli lagayein.</p>', '42_staff_my_attendance', 31)}
 </div>
 {band('#16A34A', '💪', 'Trainer', 'Role "Trainer" → sign up → gym ka code + kya sikhate hain → owner approve.')}
 <div class="grid2">
@@ -121,7 +121,7 @@ P.append(page(f'''
 {band('#9333EA', '🙋', 'Member', 'Role "Member" → sign up → Home pe "Join a gym" → gym code → request → gym approve kare.')}
 <div class="grid2">
 {mini('🏠', 'Home', '<p>Aapka plan, kitne din baaki, paise baaki, is mahine kitni baar aaye, offers aur notices, locker, aur doosre members ke reviews.</p>', '60_member_home', 33)}
-{mini('📷', 'Check-in', steps(['Gym pahunch ke <b>Check-in</b> tab', 'Deewar ka <b>Check-in QR</b> scan karein (location on)', '✅ = attendance lag gayi']) + '<p>Camera nahi chal raha? Home → <b>Show check-in QR</b> → desk ko dikhayein.</p>', '61_member_myqr', 33)}
+{mini('📷', 'Check-in', steps(['Gym pahunch ke <b>Check-in</b> tab', 'Deewar ka <b>Check-in QR</b> scan karein (location on)', '✅ = attendance lag gayi']) + '<p>Camera nahi chal raha? Home → <b>Show check-in QR</b> → desk ko dikhayein. Fingerprint wale gym mein gate ki machine pe ungli lagayein.</p>', '61_member_myqr', 33)}
 {mini('💪', 'Trainers aur PT', '<p><b>Trainers</b> tab → trainer chunein → package request. Owner approve kare → aapka PT calendar shuru, har session aapko dikhega.</p>', '62_member_trainers', 33)}
 {mini('🥗', 'My plan', '<p>Trainer ka diya <b>Diet</b> (calories, protein, kab kya khana) aur <b>Workout</b> (din, exercise, sets). 3D exercise videos bhi.</p>', '63_member_plan', 33)}
 </div>
@@ -140,8 +140,8 @@ faq = [
 P.append(page(f'''
 {band('#475569', '🛡️', 'Sabke liye', 'Notifications, security aur help: har role ke kaam ki cheezein.')}
 <div class="grid2">
-{mini('🔔', 'Notifications', '<p>Receipt, membership, PT, notices, offers, reminders: sab ghanti 🔔 mein aur phone pe. Tap karein → wahi page khulta hai.</p>', '69_member_notifications', 30)}
-{mini('📱', 'Logged-in devices', '<p>Profile → <b>Logged-in devices</b>: aapka account kahan-kahan khula hai.</p><p>Kisi phone ko <b>Log out</b>, ya <b>Log out everywhere else</b>. Anjaan login dikhe → <b>A login was not me</b> → sab band + naya password.</p><p>Naye phone se login hote hi alert aata hai.</p>', '35_owner_devices', 30)}
+{mini('🔔', 'Notifications', '<p>Receipt, membership, PT, notices, offers, reminders: sab ghanti 🔔 mein aur phone pe. Tap karein → wahi page khulta hai. Ghanti khol ke wapas aate hi number hat jaata hai.</p>', '69_member_notifications', 30)}
+{mini('📱', 'Logged-in devices', '<p>Profile → <b>Logged-in devices</b>: aapka account kahan-kahan khula hai.</p><p>Kisi phone ko <b>Log out</b>, ya <b>Log out everywhere else</b>. Anjaan login dikhe → <b>It was not me</b> → sab band + naya password.</p><p>Naye phone se login pe alert. Password badalte hi doosre phone pe app <b>usi second</b> logout.</p>', '35_owner_devices', 30)}
 </div>
 <div class="cell" style="margin-top:3mm"><b>🆘 Help &amp; Support</b> — Profile → Help → <b>New ticket</b> (number milta hai, jaise GM-1001).
 {flow([('📨', 'Open', 'Aapne bheja'), ('🛠️', 'In progress', 'Team dekh rahi'), ('💬', 'Waiting', 'Jawab aaya'), ('✅', 'Resolved', '7 din tak reply'), ('🔒', 'Closed', 'Band')], '#475569')}</div>

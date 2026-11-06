@@ -385,9 +385,29 @@ pages.append(page(f'''
 {box('warn', 'Plan khatam hone se pehle', 'Plan khatam hone se 7 din pehle roz reminder aata hai. Kuch features (Offers, PT, Reports, extra branches) plan ke hisaab se khulte hain.')}
 """, [('33_owner_subscription', 'Subscription')])}
 {feature('2.18', 'More menu — saare tools ek jagah', 'Jo cheez Home pe nahi, wo yahan', f"""
-<p>More tab mein: Subscription, Enquiries, Lockers, Staff, Attendance, Staff salary, Ratings, Import members (Excel/CSV se purane members ek saath), Gym QR, Gate (WiFi gate lock — hardware chahiye), Notices, Trainers, PT clients, PT accounts, Offers, Reports, Branches, Membership plans, Gym settings, Transfer gym.</p>
+<p>More tab mein: Subscription, Enquiries, Lockers, Staff, Attendance, Staff salary, Ratings, Import members (Excel/CSV se purane members ek saath), Gym QR, Gate (WiFi gate lock — hardware chahiye), Fingerprint machines, Notices, Trainers, PT clients, PT accounts, Offers, Reports, Branches, Membership plans, Gym settings, Transfer gym.</p>
 {box('tip', 'Purane register se shuru', '<b>Import members</b> se Excel sheet daal ke saare purane members ek baar mein jod sakte hain.')}
 """, [('15_owner_more', 'More')])}
+''', 'Chapter 2 · Gym owner'))
+
+
+pages.append(page(f'''
+<h2>Fingerprint machine se attendance</h2>
+<div class="diagram"><div class="dtitle">Member machine pe ungli lagata hai → app mein attendance</div>
+{flow([('👆', 'Ungli lagayi', 'Gate pe machine'), ('📡', 'Machine bhejti hai', 'Internet se GymMantra ko'), ('🧠', 'App jaanchti hai', 'Plan, paise, freeze'), ('✅', 'Attendance', 'Member + staff dono'), ('🚪', 'Gate (option B)', 'Sirf sahi member ke liye')], '#0EA5E9')}
+<div style="font-size:9pt;color:#4B5563">Jiska plan khatam ya paise baaki hain wo ungli lagaye to desk ko turant notification: <b>"Fingerprint: entry stopped"</b>.</div></div>
+{feature('2.19', 'Fingerprint machines', 'More → Fingerprint machines (sirf owner)', f"""
+<table class="t"><tr><th>Machine</th><th>Kaise judti hai</th></tr>
+<tr><td><b>eSSL / ZKTeco</b> (Realtime, Identix)</td><td>Machine ke menu mein <b>Cloud Server / ADMS</b> → app jo server address aur port dikhaye wo daalein</td></tr>
+<tr><td><b>Hikvision</b></td><td><b>HTTP Listening</b> mein app ka secret link</td></tr>
+<tr><td><b>Koi bhi doosri</b></td><td>Jo har punch web link pe bhej sake</td></tr>
+<tr><td><b>Bina internet</b></td><td>Pen drive mein attendance file nikaalein → <span class=label>Upload attendance file</span></td></tr></table>
+{steps(['<span class=label>Add machine</span> → machine chunein → serial number (machine ke peeche).', 'Machine mein member ka <b>User ID</b> wahi rakhein jo Member ID ka number hai (LF-1023 → <b>1023</b>) — app khud jod deti hai.', 'Staff/trainer: <span class=label>Link members or staff</span> → insaan chunein → machine wala User ID.'])}
+""", [('36_owner_fingerprint', 'Fingerprint machines')], pw=46)}
+<div class="grid2" style="font-size:9.3pt">
+<div class="card" style="border-left:4px solid #0EA5E9"><b>🔒 "Attendance sirf fingerprint se" switch</b><br>On karte hi us branch mein: members ka QR check-in band ("Please check in via fingerprint machine at gate"), staff/trainer ka app wala Present band, Check-in QR chhup jaata hai. Desk ka Manual check-in chalta rahega.</div>
+<div class="card" style="border-left:4px solid #F59E0B"><b>🚪 Darwaza kaun kholega?</b><br><b>A.</b> Sirf attendance — machine ya staff darwaza kholta hai. <b>B.</b> GymMantra gate kholta hai (WiFi relay, More → Gate) — sirf valid members ke liye. Machine 1 ghante band rahe to owner ko notification.</div>
+</div>
 ''', 'Chapter 2 · Gym owner'))
 
 # ======================= CHAPTER 3 STAFF =======================
@@ -410,7 +430,8 @@ pages.append(page(f'''
 {feature('3.2', 'Apni attendance — Present lagana', 'Roz gym pahunch ke ek tap', f"""
 {steps(['More → <b>My attendance</b>.', 'Gym ke andar khade hokar <span class=label>Mark today: Present</span> dabayein (location on rakhein).', 'Calendar mein hara din = Present. Owner ko bhi turant dikhta hai.'])}
 {box('warn', 'Location', 'Ye sirf gym ki location (lagbhag 20 m) ke andar lagta hai. Ghar se nahi lagega. Fake GPS apps pakdi jaati hain.')}
-{box('tip', 'Bhool gaye?', '11 baje aur 5 baje reminder aata hai. Galti ho to owner din ko sahi kar sakta hai.')}
+{box('tip', 'Bhool gaye?', '11 baje aur 5 baje reminder aata hai (Present lagte hi band). Galti ho to owner din ko sahi kar sakta hai.')}
+{box('eg', 'Fingerprint wala gym?', 'Wahan Present button nahi hota — gym pahunch ke machine pe ungli lagayein, attendance apne aap lag jaati hai.')}
 """, [('42_staff_my_attendance', 'My attendance')])}
 {feature('3.3', 'My salary', 'Apni salary slip, kabhi bhi', f"""
 <p>More → <b>My salary</b>: is mahine kitne din present, salary, advance, kitna mila, kitna baaki. Purane mahine bhi dekh sakte hain.</p>
@@ -468,6 +489,7 @@ pages.append(page(f'''
 {feature('5.3', 'Check-in (attendance)', 'Gym pahunch ke QR scan', f"""
 {steps(['Gym pahunch ke neeche <b>Check-in</b> tab kholein.', 'Gym ki deewar pe laga <b>Check-in QR</b> scan karein (camera ki permission dein).', 'Location on rakhein — gym ke andar hona zaruri hai.', '✅ dikha = attendance lag gayi.'])}
 {box('warn', 'Entry nahi hui?', 'Wajah screen pe likhi aati hai: plan khatam, freeze chal raha, ya paise baaki. Desk pe baat karein.')}
+{box('eg', 'Fingerprint machine wala gym', 'Agar gym ne fingerprint machine lagayi hai to app mein likha aata hai: <b>Please check in via fingerprint machine at gate</b> — gate pe ungli lagayein.')}
 {box('tip', 'Camera kaam nahi kar raha?', 'Home → <span class=label>Show check-in QR</span> → apna QR front desk ko dikhayein. Ye code har 30 second badalta hai, isliye screenshot kaam nahi karta.')}
 """, [('61_member_myqr', 'Apna check-in QR')])}
 {feature('5.4', 'Trainers aur PT', 'Trainer chunein, package lein', f"""
@@ -492,12 +514,13 @@ pages.append(chapter('06', 'Sabke liye', 'Notifications, profile, security aur h
 
 pages.append(page(f'''
 {feature('6.1', 'Notifications', 'Ghanti 🔔 pe laal number = naye messages', f"""
-<p>Payment receipt, membership added, PT planned, notices, offers, reminders — sab yahan aur phone pe push. Notification tap karein to wahi page khulta hai jiske baare mein hai.</p>
+<p>Payment receipt, membership added, PT planned, notices, offers, reminders — sab yahan aur phone pe push. Notification tap karein to wahi page khulta hai jiske baare mein hai. Ghanti kholke wapas aate hi laal number hat jaata hai.</p>
 """, [('69_member_notifications', 'Notifications')])}
 {feature('6.2', 'Logged-in devices (security)', 'Aapka account kahan-kahan khula hai', f"""
 <p>Profile → <b>Logged-in devices</b>. Har phone/browser ka naam, shehar aur last time.</p>
-{steps(['Kisi phone pe <span class=label>Log out</span> → wahan app turant band.', '<span class=label>Log out everywhere else</span> → baaki sab band, ye phone chalu.', 'Anjaan login dikhe → <span class=label>A login was not me</span> → sab band + naya password.'])}
-{box('warn', 'Alert', 'Naye phone se login hote hi notification aata hai: "New login on your account". Aap nahi the? Turant "A login was not me" dabayein.')}
+{steps(['Kisi phone pe <span class=label>Log out</span> → wahan app turant band.', '<span class=label>Log out everywhere else</span> → baaki sab band, ye phone chalu.', 'Anjaan login dikhe → <span class=label>It was not me</span> → sab band + naya password.'])}
+{box('warn', 'Alert', 'Naye phone se login hote hi notification aata hai: "New login on your account". Aap nahi the? Turant "It was not me" dabayein.')}
+{box('tip', 'Live logout', 'Password badalte hi doosre phone pe app usi second band hoti hai: "Logging out…" spinner, phir login screen. App band ho to notification "You were logged out".')}
 """, [('35_owner_devices', 'Logged-in devices')])}
 ''', 'Chapter 6 · Sabke liye'))
 
@@ -525,7 +548,7 @@ faq = [
     ('Galat branch join ho gayi?', 'Member: transfer request bhejein (agar gym ne on kiya ho). Owner: member page → Edit/Move.'),
     ('Galat payment likh di?', 'Member page → Correct. Purana record safe rehta hai, naya sahi ban jaata hai.'),
     ('Staff ko koi option nahi dikh raha?', 'Owner ne wo right nahi diya — owner Staff → us person → rights badle.'),
-    ('Kisi ne mera account khola?', 'Profile → Logged-in devices → "A login was not me" → naya password.'),
+    ('Kisi ne mera account khola?', 'Profile → Logged-in devices → "It was not me" → naya password.'),
     ('Notification nahi aa raha?', 'Phone settings mein GymMantra ke notifications on karein, battery saver se app hatayein.'),
     ('App mein Hindi chahiye?', 'Role screen pe EN button, ya Profile → Language → हिंदी.'),
 ]
