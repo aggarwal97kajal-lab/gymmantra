@@ -1,5 +1,10 @@
 import { sendPush, takePush } from './lib/push';
 import { backupRoutes } from './routes/backup';
+import { deviceRoutes } from './routes/devices';
+import { enquiryRoutes } from './routes/enquiries';
+import { lockerRoutes } from './routes/lockers';
+import { ratingRoutes } from './routes/ratings';
+import { salaryRoutes } from './routes/salary';
 import { gateRoutes } from './routes/gate';
 import { logoRoutes } from './routes/logos';
 import { ownershipRoutes } from './routes/ownership';
@@ -63,6 +68,12 @@ export function createApp(getDeps: () => Deps) {
       /* tests */
     }
     return c.json({ statusCode: 500, message: `Something went wrong on the server. Please try again. (Error ID: ${errorId})`, errorId }, 500);
+  });
+
+  // Fingerprint machines (routes/devices.ts) call /iclock/* without a login.
+  app.use('/iclock/*', async (c, next) => {
+    c.set('deps', getDeps());
+    await next();
   });
 
   app.use('/api/*', async (c, next) => {
@@ -171,6 +182,11 @@ export function createApp(getDeps: () => Deps) {
   gateRoutes(app);
   logoRoutes(app);
   backupRoutes(app);
+  enquiryRoutes(app);
+  salaryRoutes(app);
+  lockerRoutes(app);
+  ratingRoutes(app);
+  deviceRoutes(app);
 
   app.all('/api/*', (c) => c.json({ statusCode: 404, message: 'Not found' }, 404));
   return app;

@@ -1,3 +1,4 @@
+import { cronScheduled } from './lib/scheduled';
 import { cronAttendanceReminders } from './lib/attendrem';
 import { googleAccessToken, parseServiceAccount } from './lib/gauth';
 import { cronFanouts } from './lib/push';
@@ -184,6 +185,7 @@ export default {
       ctx.waitUntil(cronFanouts(d.store, d.serviceAccount ?? null).catch(() => {}));
       ctx.waitUntil(cronReminders(d, d.serviceAccount ?? null).catch(() => {}));
       ctx.waitUntil(cronAttendanceReminders(d, d.serviceAccount ?? null).catch(() => {}));
+      ctx.waitUntil(cronScheduled(d, d.serviceAccount ?? null).catch(() => {}));
     } catch {
       /* settings missing: nothing to do */
     }
@@ -192,7 +194,7 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === '/api/setup-check') return setupCheck(env);
     let res: Response;
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/iclock/')) {
       // Built once per Worker instance (building all routes on every request wasted CPU time).
       appInst ??= createApp(() => depsFor(env, url));
       res = await appInst.fetch(req, env, ctx); // ctx: the slow-request log is written after the answer is sent

@@ -36,7 +36,12 @@ const INDEXED: [coll: string, field: string][] = [
   ['planPayments', 'tenantId'],
   ['planPayments', 'status'],
   ['joinRequests', 'status'],
-  ['pts', 'memberId'],
+  ['pt', 'memberId'],
+  ['enquiries', 'status'],
+  ['enquiries', 'month'],
+  ['trainerRatings', 'trainerId'],
+  ['devices', 'tenantId'],
+  ['scheduled', 'day'],
 ];
 
 const SCHEMA = [

@@ -49,6 +49,12 @@ describe('security: login needed everywhere', () => {
     expect(leaks).toEqual([]);
   });
 
+  it('fingerprint machine routes answer only machines an owner added', async () => {
+    for (const [m, p] of [['GET', '/iclock/cdata?SN=NOPE123'], ['POST', '/iclock/cdata?SN=NOPE123&table=ATTLOG'], ['GET', '/iclock/getrequest?SN=NOPE123'], ['POST', '/iclock/devicecmd?SN=NOPE123'], ['GET', '/iclock/cdata']]) {
+      expect([p, (await h.app.request(p, { method: m, body: m === 'POST' ? '1\t2026-01-01 10:00:00' : undefined })).status]).toEqual([p, 404]);
+    }
+  });
+
   it('a made-up or old token is refused', async () => {
     expect((await h.api.get('/auth/me', 'not-a-real-token')).status).toBe(401);
     expect((await h.api.get('/members', 'eyJhbGciOiJIUzI1NiJ9.eyJ1aWQiOiJ4In0.bad')).status).toBe(401);

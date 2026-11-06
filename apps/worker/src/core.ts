@@ -78,6 +78,8 @@ export interface TenantDoc {
   address: string | null;
   whatsappNumber: string | null;
   status: 'TRIAL' | 'ACTIVE' | 'SUSPENDED' | 'CLOSED';
+  ratingSum?: { total: number; count: number }; // gym rating by members (routes/ratings.ts)
+  testimonials?: { userId: string; name: string; stars: number; text: string }[]; // ratings the owner chose to show
   closedAt?: string | null; // super admin closed the gym (can reopen within 30 days)
   closedStaff?: { uid: string; role: Role; branchIds: string[]; rights?: string[] }[];
   verified: boolean;
@@ -122,6 +124,7 @@ export interface MemberDoc {
   firstName?: string | null;
   middleName?: string | null;
   lastName?: string | null;
+  locker?: { branchId: string; n: number; from: string; to: string }; // routes/lockers.ts
   dob?: string | null;
   state?: string | null;
   city?: string | null;
@@ -259,6 +262,20 @@ export const P = {
   planPayment: (id: string) => `planPayments/${id}`,
   signature: 'settings/signature',
   platformDaily: (day: string) => `platformDaily/${day}`,
+  enquiries: (t: string) => `tenants/${t}/enquiries`,
+  enquiry: (t: string, id: string) => `tenants/${t}/enquiries/${id}`,
+  salaryCfg: (t: string, uid: string) => `tenants/${t}/salary/${uid}`,
+  salaryCfgs: (t: string) => `tenants/${t}/salary`,
+  salaryMonth: (t: string, uid: string, month: string) => `tenants/${t}/salaryMonths/${uid}_${month}`,
+  lockers: (t: string, branchId: string) => `tenants/${t}/lockers/${branchId}`,
+  trainerRatings: (t: string) => `tenants/${t}/trainerRatings`,
+  trainerRating: (t: string, trainerId: string, userId: string, month: string) => `tenants/${t}/trainerRatings/${trainerId}_${userId}_${month}`,
+  gymRatings: (t: string) => `tenants/${t}/gymRatings`,
+  gymRating: (t: string, userId: string) => `tenants/${t}/gymRatings/${userId}`,
+  devices: 'devices',
+  device: (serial: string) => `devices/${serial}`,
+  scheduled: 'scheduled',
+  scheduledItem: (id: string) => `scheduled/${id}`,
 };
 
 // ---------- Request context ----------
@@ -391,15 +408,15 @@ const ROLE_LABEL: Record<AppRole, string> = { MEMBER: 'Member', OWNER: 'Gym owne
  * checkin: attendance, scan, gate · requests: join/transfer requests · offers: offers and notices ·
  * reports: money reports and dues · plans: plans and gym settings.
  */
-export const RIGHTS = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'] as const;
+export const RIGHTS = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans', 'enquiries', 'lockers'] as const;
 export type Right = (typeof RIGHTS)[number];
 export const RIGHT_PRESETS: Record<string, Right[]> = {
-  RECEPTION: ['members', 'memberEdit', 'payments', 'checkin', 'requests'],
+  RECEPTION: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'enquiries', 'lockers'],
   CHECKIN: ['members', 'checkin'],
-  MANAGER: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans'],
+  MANAGER: ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'transfers', 'offers', 'reports', 'plans', 'enquiries', 'lockers'],
 };
 /** Front desk added before rights existed: what they could always do. */
-export const DEFAULT_DESK_RIGHTS: Right[] = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers'];
+export const DEFAULT_DESK_RIGHTS: Right[] = ['members', 'memberEdit', 'payments', 'checkin', 'requests', 'offers', 'enquiries', 'lockers'];
 export function cleanRights(list: unknown): Right[] {
   return Array.isArray(list) ? RIGHTS.filter((r) => list.includes(r)) : [...DEFAULT_DESK_RIGHTS];
 }
@@ -541,6 +558,11 @@ export const GO_RULES: [RegExp, string][] = [
   [/^PT payment received/, 'pt-pay'],
   [/^(New PT request|New PT client|PT approved|PT planned|PT sessions ending|PT request declined)/, 'pt'],
   [/^Staff attendance/, 'staffdays'],
+  [/^Enquiry calls today/, 'enquiries'],
+  [/^Salary paid/, 'salary'],
+  [/^(Locker given|Your locker ends|Your locker has ended)/, 'membership'],
+  [/^Locker (ending|ended)/, 'lockers'],
+  [/^Staff invite/, 'home'],
   [/^(Mark your attendance|Still not marked)/, 'attendance'],
   [/^(Your plan is updated|New diet chart|New workout plan)/, 'program'],
   [/^(New support ticket|Ticket reply|Reply on ticket|Ticket GM-)/, 'tickets'],

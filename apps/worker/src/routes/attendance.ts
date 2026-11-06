@@ -26,7 +26,7 @@ export async function recordMemberCheckIn(
   t: Tx,
   tenantId: string,
   m: MemberDoc,
-  opts: { method: 'QR' | 'MANUAL' | 'SELF'; byId: string; branchId?: string | null; oncePerDay?: boolean },
+  opts: { method: 'QR' | 'MANUAL' | 'SELF' | 'DEVICE'; byId: string; branchId?: string | null; oncePerDay?: boolean },
 ) {
   const today = todayIST();
   const roster = await readRoster(t, tenantId);
@@ -175,7 +175,7 @@ export function attendanceRoutes(app: App) {
       const rows = all.flat().filter((r) => inBranch(g, r.data.branchId) && !r.data.trainerId).sort((a, b) => (a.data.at < b.data.at ? -1 : 1));
       lines = [
         ['Date', 'Time', 'Name', 'Member ID', 'Result', 'Reason', 'How', 'Branch'].join(','),
-        ...rows.map((r) => [r.data.at ? todayIST(new Date(r.data.at)) : '', time(r.data.at), r.data.memberName, r.data.memberCode, r.data.result, r.data.reason ?? '', r.data.method === 'SELF' ? 'App QR' : r.data.method === 'MANUAL' ? 'Manual' : 'Desk scan', branchName(r.data.branchId)].map(cell).join(',')),
+        ...rows.map((r) => [r.data.at ? todayIST(new Date(r.data.at)) : '', time(r.data.at), r.data.memberName, r.data.memberCode, r.data.result, r.data.reason ?? '', r.data.method === 'SELF' ? 'App QR' : r.data.method === 'MANUAL' ? 'Manual' : r.data.method === 'DEVICE' ? 'Fingerprint' : 'Desk scan', branchName(r.data.branchId)].map(cell).join(',')),
       ];
     } else {
       const months = [...new Set(days.map((d) => d.slice(0, 7)))];
