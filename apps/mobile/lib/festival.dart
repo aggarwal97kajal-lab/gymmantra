@@ -236,18 +236,208 @@ const festSpecs = <String, FestSpec>{
 
 // ---------------------------------------------------------------- drawing
 
-final Map<String, TextPainter> _emojiCache = {};
+/// Festival things are drawn (no emoji on the opening screen, owner said so). [e] names the thing.
 void _emoji(Canvas c, String e, Offset at, double size, {double opacity = 1, double angle = 0}) {
   if (opacity <= 0.02) return;
-  final key = '$e@${size.round()}';
-  final tp = _emojiCache[key] ??= (TextPainter(text: TextSpan(text: e, style: TextStyle(fontSize: size.roundToDouble(), height: 1)), textDirection: TextDirection.ltr)..layout());
   c.save();
   c.translate(at.dx, at.dy);
   if (angle != 0) c.rotate(angle);
-  if (opacity < 0.98) c.saveLayer(Rect.fromCenter(center: Offset.zero, width: tp.width * 2, height: tp.height * 2), Paint()..color = Color.fromRGBO(0, 0, 0, opacity.clamp(0, 1)));
-  tp.paint(c, Offset(-tp.width / 2, -tp.height / 2));
+  final k = size / 40; // drawings are made in a 40 x 40 box around the centre
+  c.scale(k, k);
+  if (opacity < 0.98) c.saveLayer(const Rect.fromLTWH(-40, -40, 80, 80), Paint()..color = Color.fromRGBO(0, 0, 0, opacity.clamp(0, 1)));
+  _drawThing(c, e);
   if (opacity < 0.98) c.restore();
   c.restore();
+}
+
+Paint _p(Color col) => Paint()..color = col;
+Paint _line(Color col, double w) => Paint()
+  ..color = col
+  ..style = PaintingStyle.stroke
+  ..strokeWidth = w
+  ..strokeCap = StrokeCap.round;
+
+void _flower(Canvas c, Color petal, Color mid, {int n = 5, double r = 9}) {
+  for (var i = 0; i < n; i++) {
+    c.save();
+    c.rotate(2 * pi * i / n);
+    c.drawOval(Rect.fromCenter(center: Offset(0, -r), width: r * 1.2, height: r * 1.9), _p(petal));
+    c.restore();
+  }
+  c.drawCircle(Offset.zero, r * 0.55, _p(mid));
+}
+
+void _flame(Canvas c, {double h = 18, Color out = const Color(0xFFF97316), Color inner = const Color(0xFFFDE047)}) {
+  final p = Path()
+    ..moveTo(0, -h)
+    ..cubicTo(h * 0.5, -h * 0.4, h * 0.45, 0, 0, h * 0.2)
+    ..cubicTo(-h * 0.45, 0, -h * 0.5, -h * 0.4, 0, -h);
+  c.drawPath(p, _p(out));
+  c.save();
+  c.scale(0.55, 0.6);
+  c.translate(0, h * 0.25);
+  c.drawPath(p, _p(inner));
+  c.restore();
+}
+
+void _drawThing(Canvas c, String e) {
+  switch (e) {
+    case '🪔':
+    case 'diya-off':
+      if (e == '🪔') {
+        c.drawCircle(const Offset(0, -10), 14, Paint()..color = const Color(0x99F59E0B)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+        c.save();
+        c.translate(0, -6);
+        _flame(c, h: 12, out: const Color(0xFFFDE047), inner: Colors.white);
+        c.restore();
+      }
+      final bowl = Path()
+        ..moveTo(-19, 0)
+        ..quadraticBezierTo(0, 9, 19, 0)
+        ..quadraticBezierTo(16, 14, 0, 15)
+        ..quadraticBezierTo(-16, 14, -19, 0);
+      c.drawPath(bowl, _p(const Color(0xFFB45309)));
+      c.drawPath(Path()..moveTo(-19, 0)..quadraticBezierTo(0, 9, 19, 0), _line(const Color(0xFFFDE68A), 1.6));
+    case '🏮':
+      c.drawCircle(Offset.zero, 18, Paint()..color = const Color(0x66F59E0B)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8));
+      c.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(-10, -13, 20, 26), const Radius.circular(8)), _p(const Color(0xFFDC2626)));
+      for (final y in [-6.0, 0.0, 6.0]) {
+        c.drawLine(Offset(-9, y), Offset(9, y), _line(const Color(0x66FDE68A), 1));
+      }
+      c.drawRect(const Rect.fromLTWH(-7, -16, 14, 4), _p(const Color(0xFFFBBF24)));
+      c.drawRect(const Rect.fromLTWH(-7, 12, 14, 4), _p(const Color(0xFFFBBF24)));
+      c.drawLine(const Offset(0, 16), const Offset(0, 24), _line(const Color(0xFFFBBF24), 1.5));
+    case '❄️':
+      for (var i = 0; i < 3; i++) {
+        c.save();
+        c.rotate(pi / 3 * i);
+        c.drawLine(const Offset(0, -18), const Offset(0, 18), _line(Colors.white, 2.4));
+        for (final y in [-11.0, 11.0]) {
+          c.drawLine(Offset(0, y), Offset(-5, y + (y < 0 ? -5 : 5)), _line(Colors.white, 1.8));
+          c.drawLine(Offset(0, y), Offset(5, y + (y < 0 ? -5 : 5)), _line(Colors.white, 1.8));
+        }
+        c.restore();
+      }
+    case '🛷':
+      final body = Path()
+        ..moveTo(-20, -2)
+        ..lineTo(14, -2)
+        ..quadraticBezierTo(22, -2, 20, -12)
+        ..lineTo(24, -12)
+        ..quadraticBezierTo(26, 6, 10, 6)
+        ..lineTo(-18, 6)
+        ..close();
+      c.drawPath(body, _p(const Color(0xFFB91C1C)));
+      c.drawPath(Path()..moveTo(-22, 12)..lineTo(16, 12)..quadraticBezierTo(24, 12, 24, 6), _line(const Color(0xFFFBBF24), 2.2));
+    case '🎅':
+      c.drawCircle(const Offset(0, 6), 10, _p(const Color(0xFFDC2626)));
+      c.drawCircle(const Offset(0, -6), 7, _p(const Color(0xFFF5C7A9)));
+      c.drawPath(Path()..moveTo(-7, -4)..quadraticBezierTo(0, 8, 7, -4)..close(), _p(Colors.white));
+      c.drawPath(Path()..moveTo(-8, -9)..lineTo(8, -9)..lineTo(10, -20)..close(), _p(const Color(0xFFDC2626)));
+      c.drawCircle(const Offset(10, -20), 2.5, _p(Colors.white));
+    case '🌙':
+      final moon = Path.combine(PathOperation.difference, Path()..addOval(Rect.fromCircle(center: Offset.zero, radius: 18)), Path()..addOval(Rect.fromCircle(center: const Offset(8, -6), radius: 15)));
+      c.drawPath(moon, _p(const Color(0xFFFDE68A)));
+    case '🌸':
+      _flower(c, const Color(0xFFF9A8D4), const Color(0xFFFDE047));
+    case '🌺':
+      _flower(c, const Color(0xFFEF4444), const Color(0xFFFDE047));
+    case '🪷':
+      _flower(c, const Color(0xFFF472B6), const Color(0xFFFBBF24), n: 8, r: 8);
+    case '🌼':
+      _flower(c, const Color(0xFFF97316), const Color(0xFFEA580C), n: 12, r: 7);
+      c.drawCircle(Offset.zero, 4, _p(const Color(0xFFFBBF24)));
+    case '🍃':
+      c.drawOval(const Rect.fromLTWH(-5, -12, 10, 24), _p(const Color(0xFF16A34A)));
+    case '🦚':
+      final f = Path()
+        ..moveTo(0, 20)
+        ..cubicTo(-12, 6, -11, -14, 0, -22)
+        ..cubicTo(11, -14, 12, 6, 0, 20);
+      c.drawPath(f, _p(const Color(0xFF15803D)));
+      c.drawLine(const Offset(0, 20), const Offset(0, -18), _line(const Color(0xFFA3E635), 1));
+      c.drawOval(const Rect.fromLTWH(-6, -14, 12, 15), _p(const Color(0xFF0EA5E9)));
+      c.drawOval(const Rect.fromLTWH(-4, -11, 8, 10), _p(const Color(0xFF1E3A8A)));
+      c.drawOval(const Rect.fromLTWH(-2, -8, 4, 5), _p(const Color(0xFFFDE047)));
+    case '✨':
+    case '⭐':
+      final st = Path();
+      for (var i = 0; i < 8; i++) {
+        final rr = i.isEven ? 16.0 : 4.0;
+        final a = pi / 4 * i - pi / 2;
+        i == 0 ? st.moveTo(cos(a) * rr, sin(a) * rr) : st.lineTo(cos(a) * rr, sin(a) * rr);
+      }
+      st.close();
+      c.drawPath(st, _p(const Color(0xFFFDE68A)));
+    case '🔥':
+      c.drawCircle(Offset.zero, 18, Paint()..color = const Color(0x66F97316)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10));
+      c.translate(0, 4);
+      _flame(c, h: 20);
+    case '🕊️':
+      c.drawOval(const Rect.fromLTWH(-12, -4, 24, 10), _p(Colors.white));
+      c.drawPath(Path()..moveTo(-4, -2)..quadraticBezierTo(-2, -18, 10, -16)..quadraticBezierTo(4, -8, 6, 0)..close(), _p(const Color(0xFFE2E8F0)));
+      c.drawCircle(const Offset(12, -2), 4, _p(Colors.white));
+      c.drawPath(Path()..moveTo(15, -2)..lineTo(19, -1)..lineTo(15, 0)..close(), _p(const Color(0xFFF59E0B)));
+    case '🏺':
+      c.drawPath(Path()..moveTo(-16, -8)..lineTo(16, -8)..quadraticBezierTo(22, 18, 0, 20)..quadraticBezierTo(-22, 18, -16, -8), _p(const Color(0xFFB45309)));
+      c.drawLine(const Offset(-16, -4), const Offset(16, -4), _line(const Color(0xFFDC2626), 3));
+      c.drawPath(Path()..moveTo(-12, -8)..quadraticBezierTo(0, -20, 12, -8)..close(), _p(Colors.white));
+    case '💥':
+      for (var i = 0; i < 12; i++) {
+        final a = 2 * pi * i / 12;
+        c.drawLine(Offset(cos(a) * 6, sin(a) * 6), Offset(cos(a) * 20, sin(a) * 20), _line(i.isEven ? const Color(0xFFFDE047) : Colors.white, 3));
+      }
+    case '🥢':
+      c.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(-2.5, -20, 5, 40), const Radius.circular(2.5)), _p(const Color(0xFFDC2626)));
+      for (final y in [-12.0, 0.0, 12.0]) {
+        c.drawRect(Rect.fromLTWH(-2.5, y - 1.5, 5, 3), _p(const Color(0xFFFBBF24)));
+      }
+    case '🥁':
+      c.drawRRect(RRect.fromRectAndRadius(const Rect.fromLTWH(-18, -10, 36, 20), const Radius.circular(10)), _p(const Color(0xFFB45309)));
+      for (var i = 0; i < 6; i++) {
+        c.drawLine(Offset(-12 + i * 5.0, -9), Offset(-9 + i * 5.0, 9), _line(const Color(0xFFFDE68A), 1.2));
+      }
+      c.drawOval(const Rect.fromLTWH(-21, -10, 6, 20), _p(const Color(0xFF7C2D12)));
+      c.drawOval(const Rect.fromLTWH(15, -10, 6, 20), _p(const Color(0xFF7C2D12)));
+    case '👹':
+      c.drawCircle(Offset.zero, 16, _p(const Color(0xFF15803D)));
+      c.drawPath(Path()..moveTo(-12, -12)..lineTo(-8, -24)..lineTo(-3, -16)..lineTo(0, -26)..lineTo(3, -16)..lineTo(8, -24)..lineTo(12, -12)..close(), _p(const Color(0xFFFBBF24)));
+      c.drawCircle(const Offset(-6, -3), 3, _p(Colors.white));
+      c.drawCircle(const Offset(6, -3), 3, _p(Colors.white));
+      c.drawCircle(const Offset(-6, -3), 1.4, _p(Colors.black));
+      c.drawCircle(const Offset(6, -3), 1.4, _p(Colors.black));
+      c.drawPath(Path()..moveTo(-9, 7)..quadraticBezierTo(0, 2, 9, 7), _line(Colors.black, 2.2));
+    case '🏹':
+      c.drawLine(const Offset(-20, 0), const Offset(16, 0), _line(const Color(0xFFFDE68A), 2.2));
+      c.drawPath(Path()..moveTo(22, 0)..lineTo(14, -4)..lineTo(14, 4)..close(), _p(const Color(0xFFE5E7EB)));
+      c.drawLine(const Offset(-20, 0), const Offset(-25, -5), _line(const Color(0xFFDC2626), 2));
+      c.drawLine(const Offset(-20, 0), const Offset(-25, 5), _line(const Color(0xFFDC2626), 2));
+    case '🪁':
+      c.drawPath(Path()..moveTo(0, -18)..lineTo(13, 0)..lineTo(0, 20)..lineTo(-13, 0)..close(), _p(const Color(0xFFEF4444)));
+      c.drawPath(Path()..moveTo(0, -18)..lineTo(13, 0)..lineTo(0, 0)..close(), _p(const Color(0xFFFBBF24)));
+      c.drawLine(const Offset(0, -18), const Offset(0, 20), _line(Colors.white, 0.8));
+      c.drawLine(const Offset(-13, 0), const Offset(13, 0), _line(Colors.white, 0.8));
+      c.drawPath(Path()..moveTo(0, 20)..quadraticBezierTo(-6, 28, 2, 32)..quadraticBezierTo(8, 36, 0, 42), _line(const Color(0xFFFBBF24), 1.5));
+    case '☀️':
+      for (var i = 0; i < 12; i++) {
+        final a = 2 * pi * i / 12;
+        c.drawLine(Offset(cos(a) * 14, sin(a) * 14), Offset(cos(a) * 20, sin(a) * 20), _line(const Color(0xFFFDE047), 2.4));
+      }
+      c.drawCircle(Offset.zero, 11, _p(const Color(0xFFFDE047)));
+    case '🌾':
+      c.drawLine(const Offset(0, 20), const Offset(0, -16), _line(const Color(0xFFA16207), 1.6));
+      for (var i = 0; i < 5; i++) {
+        final y = -16.0 + i * 5;
+        c.drawOval(Rect.fromCenter(center: Offset(-3, y), width: 4, height: 7), _p(const Color(0xFFCA8A04)));
+        c.drawOval(Rect.fromCenter(center: Offset(3, y + 2), width: 4, height: 7), _p(const Color(0xFFCA8A04)));
+      }
+    case '🛶':
+      c.drawPath(Path()..moveTo(-26, -2)..quadraticBezierTo(0, 8, 24, -2)..lineTo(28, -12)..quadraticBezierTo(26, 6, 0, 8)..quadraticBezierTo(-22, 8, -26, -2), _p(const Color(0xFF1F1305)));
+      c.drawLine(const Offset(-22, 1), const Offset(22, 1), _line(const Color(0xFFFBBF24), 1));
+    default:
+      // anything else: a small golden sparkle
+      c.drawCircle(Offset.zero, 6, _p(const Color(0xFFFDE68A)));
+  }
 }
 
 double _clamp01(double x) => x < 0 ? 0 : (x > 1 ? 1 : x);
@@ -390,7 +580,7 @@ class FestPainter extends CustomPainter {
         final f = 0.85 + 0.15 * sin(s * 18 + i);
         c.drawCircle(Offset(x, y - 14), 26 * f, Paint()..color = const Color(0xFFF59E0B).withAlpha(120)..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16));
       }
-      _emoji(c, '🪔', Offset(x, y), 34, opacity: lit ? 1 : 0.3);
+      _emoji(c, lit ? '🪔' : 'diya-off', Offset(x, y), 40, opacity: lit ? 1 : 0.45);
     }
   }
 
@@ -523,7 +713,7 @@ class FestPainter extends CustomPainter {
       final q = p + Offset(cos(a) * v * b, sin(a) * v * b + 260 * b * b);
       c.drawCircle(q, 4.5, Paint()..color = (k % 3 == 0 ? const Color(0xFFFDE68A) : Colors.white).withAlpha((255 * (1 - _clamp01(b / 1.8))).round()));
     }
-    if (b < 0.4) _emoji(c, '💥', p, 70 * (0.5 + b * 2));
+    if (b < 0.4) _emoji(c, '💥', p, 70 * (0.5 + b * 2), opacity: 1 - b / 0.4);
   }
 
   void _toran(Canvas c, Size z) {
