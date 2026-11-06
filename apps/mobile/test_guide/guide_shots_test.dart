@@ -127,6 +127,12 @@ void main() {
   });
 
   void phone(WidgetTester t) {
+    // A debug-only warning about ink on coloured boxes must not stop the pictures.
+    final old = FlutterError.onError;
+    FlutterError.onError = (d) {
+      if ('${d.exception}'.contains('ink splashes may be invisible')) return;
+      old?.call(d);
+    };
     t.view.physicalSize = const Size(1080, 2340);
     t.view.devicePixelRatio = 2.75;
   }
