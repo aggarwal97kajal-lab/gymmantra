@@ -1195,6 +1195,7 @@ const hindi = <String, String>{
   "Notes (only staff see this)": "नोट्स (सिर्फ़ स्टाफ़ देखेगा)",
   "No freeze days left in this plan": "इस प्लान में फ़्रीज़ के दिन नहीं बचे",
   "Freeze membership": "मेंबरशिप फ़्रीज़ करें",
+  "Cancel freeze": "फ़्रीज़ रद्द करें",
   "{n} freeze days left in this plan": "इस प्लान में {n} फ़्रीज़ दिन बचे हैं",
   "Reason (optional)": "कारण (ज़रूरी नहीं)",
   "No check-in while frozen. The end date moves {n} days later. Ending early gives the unused days back.": "फ़्रीज़ में चेक-इन नहीं होगा। आख़िरी तारीख़ {n} दिन आगे होगी। जल्दी ख़त्म करने पर बचे दिन वापस मिलेंगे।",
