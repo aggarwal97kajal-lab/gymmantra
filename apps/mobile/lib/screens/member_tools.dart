@@ -29,7 +29,10 @@ class MemberToolsRow extends ConsumerWidget {
     final st = data['state'] as Map;
     final history = ((data['history'] as List?) ?? const []).cast<Map>();
     final cur = history.where((h) => h['id'] == st['currentId']).firstOrNull;
-    final frozen = st['status'] == 'FROZEN';
+    // A freeze that is running now OR scheduled for a later date. Scheduled ones keep status ACTIVE,
+    // so checking only status == FROZEN hid the button to cancel them.
+    final open = openFreeze(cur);
+    final frozen = open != null;
     Widget btn(IconData icon, String label, VoidCallback? onTap, {Color? color}) => Expanded(
           child: OutlinedButton.icon(
             style: OutlinedButton.styleFrom(foregroundColor: color, padding: const EdgeInsets.symmetric(horizontal: 8)),
@@ -45,7 +48,7 @@ class MemberToolsRow extends ConsumerWidget {
         if (s.can('payments'))
           btn(
             Icons.ac_unit_rounded,
-            frozen ? context.t('End freeze') : context.t('Freeze'),
+            !frozen ? context.t('Freeze') : st['status'] == 'FROZEN' ? context.t('End freeze') : context.t('Cancel freeze'),
             cur == null ? null : () => frozen ? endFreeze(context, ref, id, cur) : freezeSheet(context, ref, id, cur, (st['freezeDaysLeft'] as int?) ?? 0),
           ),
       ]),
@@ -148,6 +151,17 @@ Future<void> editMemberSheet(BuildContext context, WidgetRef ref, String id, Map
   );
 }
 
+/// The freeze on [sub] that has not finished yet (running or scheduled), if any.
+Map? openFreeze(Map? sub) {
+  final today = ymd(DateTime.now());
+  for (final f in ((sub?['freezes'] as List?) ?? const []).cast<Map>()) {
+    if (f['endedOn'] != null) continue;
+    final until = ymd(DateTime.parse(f['startDate'] as String).add(Duration(days: (f['days'] as num).toInt())));
+    if (today.compareTo(until) < 0) return f;
+  }
+  return null;
+}
+
 Future<void> freezeSheet(BuildContext context, WidgetRef ref, String id, Map sub, int daysLeft) async {
   if (daysLeft <= 0) {
     toast(context, context.t('No freeze days left in this plan'));
@@ -156,6 +170,7 @@ Future<void> freezeSheet(BuildContext context, WidgetRef ref, String id, Map sub
   var start = DateTime.now();
   var days = daysLeft >= 7 ? 7 : daysLeft;
   final reason = TextEditingController();
+  var busy = false;
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -185,13 +200,18 @@ Future<void> freezeSheet(BuildContext context, WidgetRef ref, String id, Map sub
           Muted(ctx.t('No check-in while frozen. The end date moves {n} days later. Ending early gives the unused days back.', {'n': days}), size: 12),
           const SizedBox(height: 14),
           FilledButton(
-            onPressed: () async {
+            // busy stops a double tap from sending two freezes (the second one failed with "already has a freeze").
+            onPressed: busy
+                ? null
+                : () async {
+              setState(() => busy = true);
               try {
                 await Api.instance.post('/memberships/${sub['id']}/freeze', {'days': days, 'startDate': ymd(start), if (reason.text.trim().isNotEmpty) 'reason': reason.text.trim()});
                 _refresh(ref, id);
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
                 if (ctx.mounted) toastError(ctx, e);
+                if (ctx.mounted) setState(() => busy = false);
               }
             },
             child: Text(ctx.t('Freeze {n} days', {'n': days})),
@@ -203,7 +223,7 @@ Future<void> freezeSheet(BuildContext context, WidgetRef ref, String id, Map sub
 }
 
 Future<void> endFreeze(BuildContext context, WidgetRef ref, String id, Map sub) async {
-  final f = ((sub['freezes'] as List?) ?? const []).cast<Map>().where((x) => x['endedOn'] == null).lastOrNull;
+  final f = openFreeze(sub);
   if (f == null) return;
   try {
     await Api.instance.post('/freezes/${f['id']}/end', {});
