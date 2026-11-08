@@ -386,9 +386,10 @@ describe('member app', () => {
     expect((await h.api.post('/me/photo', { mime: 'image/png', base64: JPEG }, mem.token)).status).toBe(400);
   });
 
-  it('lists the 40 exercise guides', async () => {
+  it('lists the exercise guides by category', async () => {
     const r = await h.api.get('/exercises');
-    expect(r.body).toHaveLength(40);
+    expect(r.body).toHaveLength(39);
+    expect(r.body[0]).toMatchObject({ category: 'Chest', muscle: 'Chest' });
     expect(r.body[0].videoUrl).toMatch(/^\/media\/exercises\/videos\/01_/);
   });
 

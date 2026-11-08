@@ -15,9 +15,9 @@ Pilot gyms: **Lifetime Fitness** and **Athlete Gym**, Dwarka Sector 7, New Delhi
 | `apps/mobile` | Member app (Flutter). Each push builds an APK under **Releases** |
 | `docs/MVP_SPEC.md` | What the MVP does and its business rules |
 | `docs/DEPLOY_FROM_PHONE.md` | How to put GymMantra online using only a phone |
-| `design/` | Screen designs, clickable prototype, 3D exercise guide, logos |
+| `design/` | Screen designs, clickable prototypes, logos |
 | `brand/` | App icons, logo files, splash screen |
-| `media/exercises/` | 40 3D exercise guide videos and stills |
+| `media/exercises/` | 39 exercise guide videos (wrong vs correct form) in 7 categories, with stills |
 
 ## Get the member app
 

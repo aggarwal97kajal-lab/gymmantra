@@ -154,9 +154,9 @@ export function createApp(getDeps: () => Deps) {
 
   app.get('/api/v1/health', (c) => c.json({ ok: true, name: 'GymMantra API' }));
 
-  /** The 40 pre-rendered 3D exercise guides (files live in the static assets). */
+  /** Exercise guide videos (wrong vs correct form), grouped by category; files live in the static assets. */
   app.get('/api/v1/exercises', async (c) => {
-    const list: { n: number; id: string; name: string; muscle: string; video: string; still: string }[] = (await c.var.deps.assetJson('/media/exercises/exercises.json')) ?? [];
+    const list: { n: number; id: string; name: string; category: string; muscle: string; video: string; still: string }[] = (await c.var.deps.assetJson('/media/exercises/exercises.json')) ?? [];
     c.header('cache-control', 'public, max-age=3600');
     return c.json(list.map((e) => ({ ...e, videoUrl: `/media/exercises/${e.video}`, stillUrl: `/media/exercises/${e.still}` })));
   });

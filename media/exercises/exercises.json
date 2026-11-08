@@ -1,362 +1,353 @@
 [
  {
   "n": 1,
-  "id": "front",
-  "name": "Seated Dumbbell Front Raise",
-  "muscle": "Front delt",
-  "file": "01_seated_dumbbell_front_raise",
-  "video": "videos/01_seated_dumbbell_front_raise.mp4",
-  "still": "stills/01_seated_dumbbell_front_raise.jpg"
+  "id": "chest_cable_crossover",
+  "name": "Cable Crossover",
+  "category": "Chest",
+  "muscle": "Chest",
+  "video": "videos/01_chest_cable_crossover.mp4",
+  "still": "stills/01_chest_cable_crossover.jpg"
  },
  {
   "n": 2,
-  "id": "side",
-  "name": "Seated Dumbbell Lateral Raise",
-  "muscle": "Side delt",
-  "file": "02_seated_dumbbell_lateral_raise",
-  "video": "videos/02_seated_dumbbell_lateral_raise.mp4",
-  "still": "stills/02_seated_dumbbell_lateral_raise.jpg"
+  "id": "chest_flat_dumbbell_bench_press",
+  "name": "Flat Dumbbell Bench Press",
+  "category": "Chest",
+  "muscle": "Chest",
+  "video": "videos/02_chest_flat_dumbbell_bench_press.mp4",
+  "still": "stills/02_chest_flat_dumbbell_bench_press.jpg"
  },
  {
   "n": 3,
-  "id": "rear",
-  "name": "Seated Bent-Over Rear Delt Fly",
-  "muscle": "Rear delt",
-  "file": "03_seated_bent_over_rear_delt_fly",
-  "video": "videos/03_seated_bent_over_rear_delt_fly.mp4",
-  "still": "stills/03_seated_bent_over_rear_delt_fly.jpg"
+  "id": "chest_incline_dumbbell_press",
+  "name": "Incline Dumbbell Press",
+  "category": "Chest",
+  "muscle": "Chest",
+  "video": "videos/03_chest_incline_dumbbell_press.mp4",
+  "still": "stills/03_chest_incline_dumbbell_press.jpg"
  },
  {
   "n": 4,
-  "id": "curl",
-  "name": "Standing Dumbbell Bicep Curl",
-  "muscle": "Biceps",
-  "file": "04_standing_dumbbell_bicep_curl",
-  "video": "videos/04_standing_dumbbell_bicep_curl.mp4",
-  "still": "stills/04_standing_dumbbell_bicep_curl.jpg"
+  "id": "chest_pec_deck_fly",
+  "name": "Pec Deck Fly",
+  "category": "Chest",
+  "muscle": "Chest",
+  "video": "videos/04_chest_pec_deck_fly.mp4",
+  "still": "stills/04_chest_pec_deck_fly.jpg"
  },
  {
   "n": 5,
-  "id": "squat",
-  "name": "Dumbbell Goblet Squat",
-  "muscle": "Quads",
-  "file": "05_dumbbell_goblet_squat",
-  "video": "videos/05_dumbbell_goblet_squat.mp4",
-  "still": "stills/05_dumbbell_goblet_squat.jpg"
+  "id": "chest_push_up",
+  "name": "Push-Up",
+  "category": "Chest",
+  "muscle": "Chest",
+  "video": "videos/05_chest_push_up.mp4",
+  "still": "stills/05_chest_push_up.jpg"
  },
  {
   "n": 6,
-  "id": "push",
-  "name": "Push-Up",
+  "id": "chest_seated_machine_chest_press",
+  "name": "Seated Machine Chest Press",
+  "category": "Chest",
   "muscle": "Chest",
-  "file": "06_push_up",
-  "video": "videos/06_push_up.mp4",
-  "still": "stills/06_push_up.jpg"
+  "video": "videos/06_chest_seated_machine_chest_press.mp4",
+  "still": "stills/06_chest_seated_machine_chest_press.jpg"
  },
  {
   "n": 7,
-  "id": "press",
-  "name": "Seated Dumbbell Shoulder Press",
-  "muscle": "Shoulders",
-  "file": "07_seated_dumbbell_shoulder_press",
-  "video": "videos/07_seated_dumbbell_shoulder_press.mp4",
-  "still": "stills/07_seated_dumbbell_shoulder_press.jpg"
+  "id": "back_assisted_pull_up_machine",
+  "name": "Assisted Pull-Up (Machine)",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/07_back_assisted_pull_up_machine.mp4",
+  "still": "stills/07_back_assisted_pull_up_machine.jpg"
  },
  {
   "n": 8,
-  "id": "arnold",
-  "name": "Seated Arnold Press",
-  "muscle": "All delts",
-  "file": "08_seated_arnold_press",
-  "video": "videos/08_seated_arnold_press.mp4",
-  "still": "stills/08_seated_arnold_press.jpg"
+  "id": "back_barbell_bent_over_row",
+  "name": "Barbell Bent-Over Row",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/08_back_barbell_bent_over_row.mp4",
+  "still": "stills/08_back_barbell_bent_over_row.jpg"
  },
  {
   "n": 9,
-  "id": "hammer",
-  "name": "Standing Hammer Curl",
-  "muscle": "Biceps & forearms",
-  "file": "09_standing_hammer_curl",
-  "video": "videos/09_standing_hammer_curl.mp4",
-  "still": "stills/09_standing_hammer_curl.jpg"
+  "id": "back_bench_supported_one_arm_dumbbell_row",
+  "name": "Bench-Supported One-Arm Dumbbell Row",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/09_back_bench_supported_one_arm_dumbbell_row.mp4",
+  "still": "stills/09_back_bench_supported_one_arm_dumbbell_row.jpg"
  },
  {
   "n": 10,
-  "id": "ohext",
-  "name": "Seated Overhead Tricep Extension",
-  "muscle": "Triceps",
-  "file": "10_seated_overhead_tricep_extension",
-  "video": "videos/10_seated_overhead_tricep_extension.mp4",
-  "still": "stills/10_seated_overhead_tricep_extension.jpg"
+  "id": "back_chest_supported_incline_dumbbell_row",
+  "name": "Chest-Supported Incline Dumbbell Row",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/10_back_chest_supported_incline_dumbbell_row.mp4",
+  "still": "stills/10_back_chest_supported_incline_dumbbell_row.jpg"
  },
  {
   "n": 11,
-  "id": "lunge",
-  "name": "Dumbbell Forward Lunge",
-  "muscle": "Quads & glutes",
-  "file": "11_dumbbell_forward_lunge",
-  "video": "videos/11_dumbbell_forward_lunge.mp4",
-  "still": "stills/11_dumbbell_forward_lunge.jpg"
+  "id": "back_lat_pulldown",
+  "name": "Lat Pulldown",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/11_back_lat_pulldown.mp4",
+  "still": "stills/11_back_lat_pulldown.jpg"
  },
  {
   "n": 12,
-  "id": "calf",
-  "name": "Standing Dumbbell Calf Raise",
-  "muscle": "Calves",
-  "file": "12_standing_dumbbell_calf_raise",
-  "video": "videos/12_standing_dumbbell_calf_raise.mp4",
-  "still": "stills/12_standing_dumbbell_calf_raise.jpg"
+  "id": "back_seated_cable_row",
+  "name": "Seated Cable Row",
+  "category": "Back",
+  "muscle": "Back",
+  "video": "videos/12_back_seated_cable_row.mp4",
+  "still": "stills/12_back_seated_cable_row.jpg"
  },
  {
   "n": 13,
-  "id": "plank",
-  "name": "Forearm Plank",
-  "muscle": "Abs & core",
-  "file": "13_forearm_plank",
-  "video": "videos/13_forearm_plank.mp4",
-  "still": "stills/13_forearm_plank.jpg"
+  "id": "shoulders_cable_face_pull",
+  "name": "Cable Face Pull",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/13_shoulders_cable_face_pull.mp4",
+  "still": "stills/13_shoulders_cable_face_pull.jpg"
  },
  {
   "n": 14,
-  "id": "crunch",
-  "name": "Crunch",
-  "muscle": "Abs",
-  "file": "14_crunch",
-  "video": "videos/14_crunch.mp4",
-  "still": "stills/14_crunch.jpg"
+  "id": "shoulders_dumbbell_front_raise",
+  "name": "Dumbbell Front Raise",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/14_shoulders_dumbbell_front_raise.mp4",
+  "still": "stills/14_shoulders_dumbbell_front_raise.jpg"
  },
  {
   "n": 15,
-  "id": "twist",
-  "name": "Russian Twist",
-  "muscle": "Obliques",
-  "file": "15_russian_twist",
-  "video": "videos/15_russian_twist.mp4",
-  "still": "stills/15_russian_twist.jpg"
+  "id": "shoulders_dumbbell_lateral_raise",
+  "name": "Dumbbell Lateral Raise",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/15_shoulders_dumbbell_lateral_raise.mp4",
+  "still": "stills/15_shoulders_dumbbell_lateral_raise.jpg"
  },
  {
   "n": 16,
-  "id": "dip",
-  "name": "Bench Dip",
-  "muscle": "Triceps",
-  "file": "16_bench_dip",
-  "video": "videos/16_bench_dip.mp4",
-  "still": "stills/16_bench_dip.jpg"
+  "id": "shoulders_reverse_pec_deck_fly",
+  "name": "Reverse Pec Deck Fly",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/16_shoulders_reverse_pec_deck_fly.mp4",
+  "still": "stills/16_shoulders_reverse_pec_deck_fly.jpg"
  },
  {
   "n": 17,
-  "id": "row",
-  "name": "One-Arm Dumbbell Row",
-  "muscle": "Lats",
-  "file": "17_one_arm_dumbbell_row",
-  "video": "videos/17_one_arm_dumbbell_row.mp4",
-  "still": "stills/17_one_arm_dumbbell_row.jpg"
+  "id": "shoulders_seated_dumbbell_shoulder_press",
+  "name": "Seated Dumbbell Shoulder Press",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/17_shoulders_seated_dumbbell_shoulder_press.mp4",
+  "still": "stills/17_shoulders_seated_dumbbell_shoulder_press.jpg"
  },
  {
   "n": 18,
-  "id": "fly",
-  "name": "Flat Bench Dumbbell Fly",
-  "muscle": "Chest",
-  "file": "18_flat_bench_dumbbell_fly",
-  "video": "videos/18_flat_bench_dumbbell_fly.mp4",
-  "still": "stills/18_flat_bench_dumbbell_fly.jpg"
+  "id": "shoulders_single_arm_cable_lateral_raise",
+  "name": "Single-Arm Cable Lateral Raise",
+  "category": "Shoulders",
+  "muscle": "Shoulders",
+  "video": "videos/18_shoulders_single_arm_cable_lateral_raise.mp4",
+  "still": "stills/18_shoulders_single_arm_cable_lateral_raise.jpg"
  },
  {
   "n": 19,
-  "id": "bulgarian",
-  "name": "Bulgarian Split Squat",
-  "muscle": "Quads & glutes",
-  "file": "19_bulgarian_split_squat",
-  "video": "videos/19_bulgarian_split_squat.mp4",
-  "still": "stills/19_bulgarian_split_squat.jpg"
+  "id": "biceps_alternating_dumbbell_curl",
+  "name": "Alternating Dumbbell Curl",
+  "category": "Biceps",
+  "muscle": "Biceps",
+  "video": "videos/19_biceps_alternating_dumbbell_curl.mp4",
+  "still": "stills/19_biceps_alternating_dumbbell_curl.jpg"
  },
  {
   "n": 20,
-  "id": "bench",
-  "name": "Barbell Bench Press",
-  "muscle": "Chest",
-  "file": "20_barbell_bench_press",
-  "video": "videos/20_barbell_bench_press.mp4",
-  "still": "stills/20_barbell_bench_press.jpg"
+  "id": "biceps_barbell_preacher_curl",
+  "name": "Barbell Preacher Curl",
+  "category": "Biceps",
+  "muscle": "Biceps",
+  "video": "videos/20_biceps_barbell_preacher_curl.mp4",
+  "still": "stills/20_biceps_barbell_preacher_curl.jpg"
  },
  {
   "n": 21,
-  "id": "backsquat",
-  "name": "Barbell Back Squat",
-  "muscle": "Quads & glutes",
-  "file": "21_barbell_back_squat",
-  "video": "videos/21_barbell_back_squat.mp4",
-  "still": "stills/21_barbell_back_squat.jpg"
+  "id": "biceps_incline_dumbbell_curl",
+  "name": "Incline Dumbbell Curl",
+  "category": "Biceps",
+  "muscle": "Biceps",
+  "video": "videos/21_biceps_incline_dumbbell_curl.mp4",
+  "still": "stills/21_biceps_incline_dumbbell_curl.jpg"
  },
  {
   "n": 22,
-  "id": "deadlift",
-  "name": "Barbell Deadlift",
-  "muscle": "Back & glutes",
-  "file": "22_barbell_deadlift",
-  "video": "videos/22_barbell_deadlift.mp4",
-  "still": "stills/22_barbell_deadlift.jpg"
+  "id": "biceps_standing_barbell_curl",
+  "name": "Standing Barbell Curl",
+  "category": "Biceps",
+  "muscle": "Biceps",
+  "video": "videos/22_biceps_standing_barbell_curl.mp4",
+  "still": "stills/22_biceps_standing_barbell_curl.jpg"
  },
  {
   "n": 23,
-  "id": "bbrow",
-  "name": "Bent-Over Barbell Row",
-  "muscle": "Back",
-  "file": "23_bent_over_barbell_row",
-  "video": "videos/23_bent_over_barbell_row.mp4",
-  "still": "stills/23_bent_over_barbell_row.jpg"
+  "id": "biceps_straight_bar_cable_curl",
+  "name": "Straight-Bar Cable Curl",
+  "category": "Biceps",
+  "muscle": "Biceps",
+  "video": "videos/23_biceps_straight_bar_cable_curl.mp4",
+  "still": "stills/23_biceps_straight_bar_cable_curl.jpg"
  },
  {
   "n": 24,
-  "id": "ohp",
-  "name": "Barbell Overhead Press",
-  "muscle": "Shoulders",
-  "file": "24_barbell_overhead_press",
-  "video": "videos/24_barbell_overhead_press.mp4",
-  "still": "stills/24_barbell_overhead_press.jpg"
+  "id": "triceps_cable_triceps_pushdown",
+  "name": "Cable Triceps Pushdown",
+  "category": "Triceps",
+  "muscle": "Triceps",
+  "video": "videos/24_triceps_cable_triceps_pushdown.mp4",
+  "still": "stills/24_triceps_cable_triceps_pushdown.jpg"
  },
  {
   "n": 25,
-  "id": "bbcurl",
-  "name": "Standing Barbell Curl",
-  "muscle": "Biceps",
-  "file": "25_standing_barbell_curl",
-  "video": "videos/25_standing_barbell_curl.mp4",
-  "still": "stills/25_standing_barbell_curl.jpg"
+  "id": "triceps_lying_ez_bar_triceps_extension",
+  "name": "Lying EZ-Bar Triceps Extension",
+  "category": "Triceps",
+  "muscle": "Triceps",
+  "video": "videos/25_triceps_lying_ez_bar_triceps_extension.mp4",
+  "still": "stills/25_triceps_lying_ez_bar_triceps_extension.jpg"
  },
  {
   "n": 26,
-  "id": "rdl",
-  "name": "Romanian Deadlift",
-  "muscle": "Hamstrings",
-  "file": "26_romanian_deadlift",
-  "video": "videos/26_romanian_deadlift.mp4",
-  "still": "stills/26_romanian_deadlift.jpg"
+  "id": "triceps_rope_triceps_pushdown",
+  "name": "Rope Triceps Pushdown",
+  "category": "Triceps",
+  "muscle": "Triceps",
+  "video": "videos/26_triceps_rope_triceps_pushdown.mp4",
+  "still": "stills/26_triceps_rope_triceps_pushdown.jpg"
  },
  {
   "n": 27,
-  "id": "hipthrust",
-  "name": "Barbell Hip Thrust",
-  "muscle": "Glutes",
-  "file": "27_barbell_hip_thrust",
-  "video": "videos/27_barbell_hip_thrust.mp4",
-  "still": "stills/27_barbell_hip_thrust.jpg"
+  "id": "triceps_single_arm_overhead_dumbbell_extension",
+  "name": "Single-Arm Overhead Dumbbell Extension",
+  "category": "Triceps",
+  "muscle": "Triceps",
+  "video": "videos/27_triceps_single_arm_overhead_dumbbell_extension.mp4",
+  "still": "stills/27_triceps_single_arm_overhead_dumbbell_extension.jpg"
  },
  {
   "n": 28,
-  "id": "crossover",
-  "name": "Cable Crossover",
-  "muscle": "Chest",
-  "file": "28_cable_crossover",
-  "video": "videos/28_cable_crossover.mp4",
-  "still": "stills/28_cable_crossover.jpg"
+  "id": "legs_dumbbell_goblet_squat",
+  "name": "Dumbbell Goblet Squat",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/28_legs_dumbbell_goblet_squat.mp4",
+  "still": "stills/28_legs_dumbbell_goblet_squat.jpg"
  },
  {
   "n": 29,
-  "id": "pulldown",
-  "name": "Lat Pulldown",
-  "muscle": "Lats",
-  "file": "29_lat_pulldown",
-  "video": "videos/29_lat_pulldown.mp4",
-  "still": "stills/29_lat_pulldown.jpg"
+  "id": "legs_dumbbell_lunge",
+  "name": "Dumbbell Lunge",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/29_legs_dumbbell_lunge.mp4",
+  "still": "stills/29_legs_dumbbell_lunge.jpg"
  },
  {
   "n": 30,
-  "id": "cablerow",
-  "name": "Seated Cable Row",
-  "muscle": "Mid back",
-  "file": "30_seated_cable_row",
-  "video": "videos/30_seated_cable_row.mp4",
-  "still": "stills/30_seated_cable_row.jpg"
+  "id": "legs_dumbbell_romanian_deadlift",
+  "name": "Dumbbell Romanian Deadlift",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/30_legs_dumbbell_romanian_deadlift.mp4",
+  "still": "stills/30_legs_dumbbell_romanian_deadlift.jpg"
  },
  {
   "n": 31,
-  "id": "facepull",
-  "name": "Cable Face Pull",
-  "muscle": "Rear delts",
-  "file": "31_cable_face_pull",
-  "video": "videos/31_cable_face_pull.mp4",
-  "still": "stills/31_cable_face_pull.jpg"
+  "id": "legs_leg_extension",
+  "name": "Leg Extension",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/31_legs_leg_extension.mp4",
+  "still": "stills/31_legs_leg_extension.jpg"
  },
  {
   "n": 32,
-  "id": "pushdown",
-  "name": "Tricep Rope Pushdown",
-  "muscle": "Triceps",
-  "file": "32_tricep_rope_pushdown",
-  "video": "videos/32_tricep_rope_pushdown.mp4",
-  "still": "stills/32_tricep_rope_pushdown.jpg"
+  "id": "legs_leg_press",
+  "name": "Leg Press",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/32_legs_leg_press.mp4",
+  "still": "stills/32_legs_leg_press.jpg"
  },
  {
   "n": 33,
-  "id": "pullup",
-  "name": "Pull-Up",
-  "muscle": "Lats",
-  "file": "33_pull_up",
-  "video": "videos/33_pull_up.mp4",
-  "still": "stills/33_pull_up.jpg"
+  "id": "legs_standing_calf_raise",
+  "name": "Standing Calf Raise",
+  "category": "Legs",
+  "muscle": "Legs",
+  "video": "videos/33_legs_standing_calf_raise.mp4",
+  "still": "stills/33_legs_standing_calf_raise.jpg"
  },
  {
   "n": 34,
-  "id": "legraise",
-  "name": "Hanging Leg Raise",
-  "muscle": "Lower abs",
-  "file": "34_hanging_leg_raise",
-  "video": "videos/34_hanging_leg_raise.mp4",
-  "still": "stills/34_hanging_leg_raise.jpg"
+  "id": "abs_crunch",
+  "name": "Crunch",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/34_abs_crunch.mp4",
+  "still": "stills/34_abs_crunch.jpg"
  },
  {
   "n": 35,
-  "id": "chestdip",
-  "name": "Chest Dip",
-  "muscle": "Lower chest",
-  "file": "35_chest_dip",
-  "video": "videos/35_chest_dip.mp4",
-  "still": "stills/35_chest_dip.jpg"
+  "id": "abs_forearm_plank",
+  "name": "Forearm Plank",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/35_abs_forearm_plank.mp4",
+  "still": "stills/35_abs_forearm_plank.jpg"
  },
  {
   "n": 36,
-  "id": "legpress",
-  "name": "Leg Press",
-  "muscle": "Quads & glutes",
-  "file": "36_leg_press",
-  "video": "videos/36_leg_press.mp4",
-  "still": "stills/36_leg_press.jpg"
+  "id": "abs_lying_alternating_leg_extension",
+  "name": "Lying Alternating Leg Extension",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/36_abs_lying_alternating_leg_extension.mp4",
+  "still": "stills/36_abs_lying_alternating_leg_extension.jpg"
  },
  {
   "n": 37,
-  "id": "legext",
-  "name": "Leg Extension",
-  "muscle": "Quads",
-  "file": "37_leg_extension",
-  "video": "videos/37_leg_extension.mp4",
-  "still": "stills/37_leg_extension.jpg"
+  "id": "abs_reverse_crunch",
+  "name": "Reverse Crunch",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/37_abs_reverse_crunch.mp4",
+  "still": "stills/37_abs_reverse_crunch.jpg"
  },
  {
   "n": 38,
-  "id": "legcurl",
-  "name": "Lying Leg Curl",
-  "muscle": "Hamstrings",
-  "file": "38_lying_leg_curl",
-  "video": "videos/38_lying_leg_curl.mp4",
-  "still": "stills/38_lying_leg_curl.jpg"
+  "id": "abs_side_plank",
+  "name": "Side Plank",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/38_abs_side_plank.mp4",
+  "still": "stills/38_abs_side_plank.jpg"
  },
  {
   "n": 39,
-  "id": "incline",
-  "name": "Incline Dumbbell Press",
-  "muscle": "Upper chest",
-  "file": "39_incline_dumbbell_press",
-  "video": "videos/39_incline_dumbbell_press.mp4",
-  "still": "stills/39_incline_dumbbell_press.jpg"
- },
- {
-  "n": 40,
-  "id": "kbswing",
-  "name": "Kettlebell Swing",
-  "muscle": "Glutes & hamstrings",
-  "file": "40_kettlebell_swing",
-  "video": "videos/40_kettlebell_swing.mp4",
-  "still": "stills/40_kettlebell_swing.jpg"
+  "id": "abs_sit_up",
+  "name": "Sit-Up",
+  "category": "Abs",
+  "muscle": "Abs",
+  "video": "videos/39_abs_sit_up.mp4",
+  "still": "stills/39_abs_sit_up.jpg"
  }
 ]
