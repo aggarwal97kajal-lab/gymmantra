@@ -41,12 +41,12 @@ class _MyPlanState extends ConsumerState<MyPlanScreen> {
               onTap: () => context.go('/workouts'),
               padding: const EdgeInsets.all(14),
               child: Row(children: [
-                const IconTile(Icons.view_in_ar_rounded, size: 42),
+                const IconTile(Icons.fitness_center_rounded, size: 42),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(context.t('3D exercise guides'), style: const TextStyle(fontWeight: FontWeight.w800)),
-                    Muted(context.t('40 exercises with correct form'), size: 12),
+                    Text(context.t('Exercise guides'), style: const TextStyle(fontWeight: FontWeight.w800)),
+                    Muted(context.t('Wrong vs correct form, by muscle'), size: 12),
                   ]),
                 ),
                 Icon(Icons.chevron_right_rounded, color: context.c.mut),

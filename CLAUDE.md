@@ -10,7 +10,7 @@ Read this first, then `docs/MVP_SPEC.md` (features and business rules). The owne
 | Admin panel + super admin | `apps/admin` | Next.js 14 (static export), served by the Worker | Done |
 | App (members, trainers, gym owners) + GM Admin app | `apps/mobile` | Flutter, Riverpod, GoRouter, Dio | Done (v3), both APKs built by CI |
 
-One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serves the admin panel and the 3D exercise videos as static assets. Firebase Authentication stores and checks passwords (via the Identity Toolkit REST API); Firestore is the database. The Worker reaches Firestore as the Firebase user `server@gymmantra.internal`, and `firestore.rules` lets only that user in. Apps never talk to Firebase directly. Setup: `docs/DEPLOY_FROM_PHONE.md`.
+One Cloudflare Worker (`wrangler.jsonc` at the repo root) runs the API and serves the admin panel and the exercise guide videos (`media/exercises`, 39 videos in 7 categories, wrong vs correct form) as static assets. Firebase Authentication stores and checks passwords (via the Identity Toolkit REST API); Firestore is the database. The Worker reaches Firestore as the Firebase user `server@gymmantra.internal`, and `firestore.rules` lets only that user in. Apps never talk to Firebase directly. Setup: `docs/DEPLOY_FROM_PHONE.md`.
 
 ### Data layout (Firestore)
 

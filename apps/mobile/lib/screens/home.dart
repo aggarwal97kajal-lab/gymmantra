@@ -256,12 +256,12 @@ class HomeScreen extends ConsumerWidget {
                     onTap: () => context.go('/workouts'),
                     padding: const EdgeInsets.all(14),
                     child: Row(children: [
-                      const IconTile(Icons.view_in_ar_rounded, size: 46),
+                      const IconTile(Icons.fitness_center_rounded, size: 46),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text(context.t('3D exercise guides'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
-                          Muted(context.t('40 exercises with correct form'), size: 12.5),
+                          Text(context.t('Exercise guides'), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
+                          Muted(context.t('Wrong vs correct form, by muscle'), size: 12.5),
                         ]),
                       ),
                       Container(
@@ -470,7 +470,7 @@ class _QuickActions extends StatelessWidget {
     final items = <(IconData, String, VoidCallback?)>[
       (Icons.receipt_long_rounded, context.t('Gym plans'), gym == null ? null : () => context.push('/plans/${gym['id']}')),
       (Icons.call_rounded, context.t('Call gym'), phone == null ? null : () => openUrl('tel:$phone')),
-      (Icons.view_in_ar_rounded, context.t('3D guides'), () => context.go('/workouts')),
+      (Icons.fitness_center_rounded, context.t('Exercises'), () => context.go('/workouts')),
       (Icons.chat_rounded, 'WhatsApp', wa == null ? null : () => openUrl(waLink(wa, 'Hi, I am ${main!['memberCode']}.'))),
     ];
     return Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [

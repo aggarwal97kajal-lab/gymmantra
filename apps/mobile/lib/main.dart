@@ -204,6 +204,7 @@ class _AppState extends ConsumerState<GymMantraApp> {
         GoRoute(path: '/membership/:id', builder: (_, s) => MembershipScreen(memberId: s.pathParameters['id']!)),
         GoRoute(path: '/plans/:tenantId', builder: (_, s) => PlansScreen(tenantId: s.pathParameters['tenantId']!)),
         GoRoute(path: '/exercise', builder: (_, s) => ExerciseScreen(exercise: s.extra as Map)),
+        GoRoute(path: '/exercises/category', builder: (_, s) => ExerciseCategoryScreen(name: (s.extra as Map)['name'] as String, items: ((s.extra as Map)['items'] as List).cast<Map>())),
         GoRoute(path: '/help/new', builder: (_, __) => const NewTicketScreen()),
         GoRoute(path: '/help/ticket/:id', builder: (_, s) => TicketScreen(id: s.pathParameters['id']!)),
         GoRoute(path: '/notifications', builder: (_, __) => const NotificationsScreen()),
